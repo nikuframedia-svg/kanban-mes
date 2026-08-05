@@ -1,0 +1,55 @@
+{
+  "sample": 500,
+  "kanban_rows": 20618,
+  "kanban_coverage": 0.5684,
+  "m_by_field_nesting": {
+    "nesting": 1.0,
+    "maquina": 0.97,
+    "esp": 0.984,
+    "comp_mm": 0.916,
+    "larg_mm": 0.846
+  },
+  "chapa_clean": {
+    "scenario": "chapa limpo",
+    "rows": 500,
+    "top1_accuracy": 1.0,
+    "strong": 499,
+    "strong_precision": 1.0,
+    "weak_guess": 1,
+    "no_match": 0
+  },
+  "chapa_noisy": {
+    "scenario": "chapa ruído",
+    "rows": 500,
+    "top1_accuracy": 0.624,
+    "strong": 312,
+    "strong_precision": 0.8718,
+    "weak_guess": 188,
+    "no_match": 0
+  },
+  "brier_by_t": {
+    "1.0": 0.2901,
+    "1.5": 0.1741,
+    "2.0": 0.1413,
+    "2.5": 0.1546,
+    "3.0": 0.1897,
+    "4.0": 0.2602
+  },
+  "best_t": 2.0,
+  "cantoneiras_noisy": {
+    "scenario": "cantoneiras ruído",
+    "rows": 500,
+    "top1_accuracy": 0.894,
+    "strong": 441,
+    "strong_precision": 0.9887,
+    "weak_guess": 59,
+    "no_match": 0
+  },
+  "m_by_field_cantoneiras": {
+    "of": 0.31,
+    "ov": 0.375,
+    "cliente": 0.525,
+    "modelo": 0.002,
+    "comp_mm": 0.054
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "channel": {
+    "sub_default_bits": 8.0,
+    "glyph_pair_bits": 2.0,
+    "indel_bits": 4.0,
+    "case_free": true,
+    "g_l0_bits": 12.0,
+    "g_cap": 0.85,
+    "learned_subs": {}
+  },
+  "score": {
+    "m_default": 0.6,
+    "m_by_field": {
+      "nesting": 1.0,
+      "maquina": 0.97
+    },
+    "u_min_corpus": 1000,
+    "w_min_bits": 1.0,
+    "w_cap_bits": 14.0,
+    "sim_full": 1.0,
+    "sim_near": 0.9,
+    "near_fraction": 0.5,
+    "channel_floor_sim": 0.8,
+    "channel_g_floor": 0.3,
+    "disagree_code_bits": -1.5,
+    "disagree_text_bits": -1.0,
+    "veto_valid_code_bits": -3.0,
+    "dim_disagree_bits": -2.5,
+    "dim_disagree_cap_bits": -5.0,
+    "dim_joint_cap_bits": 12.0,
+    "dim_u_floor": 0.1,
+    "context_cap_bits": 2.0,
+    "active_of_bonus_bits": 2.0,
+    "active_of_days": 14,
+    "margin_decisive_bits": 4.0
+  },
+  "posterior": {
+    "temperature_bits": 2.0,
+    "b_h0_raw_bits": 10.0,
+    "pi_h0_base": 0.05,
+    "pi_h0_per_day": 0.01,
+    "pi_h0_max": 0.5
+  },
+  "policy": {
+    "write_threshold_identity": 0.95,
+    "write_threshold_critical_dim": 0.98,
+    "write_threshold_default": 0.9,
+    "criticality": {
+      "esp": 5,
+      "thickness_mm": 5,
+      "comp_mm": 5,
+      "length_mm": 5,
+      "of": 3,
+      "ov": 3,
+      "cliente": 3,
+      "modelo": 3,
+      "lote": 3,
+      "nesting": 3
+    },
+    "criticality_default": 1
+  },
+  "fitted_from": "backtest 2026-08-06"
+}

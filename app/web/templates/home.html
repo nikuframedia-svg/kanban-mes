@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2 style="margin-top:0">Folhas kanban</h2>
+  {% if not sheets %}
+    <p class="muted">Ainda não há folhas. <a href="/capture">Criar a primeira</a>.</p>
+  {% else %}
+  <table>
+    <tr><th>Folha</th><th>Template</th><th>Estado</th><th>Criada</th><th>Validada</th></tr>
+    {% for s in sheets %}
+    <tr>
+      <td><a href="/sheet/{{ s.uid }}">{{ s.uid }}</a></td>
+      <td>{{ s.template_name }}</td>
+      <td>
+        {% if s.status == 'validated' %}<span class="badge ok">validada</span>
+        {% elif s.status == 'error' %}<span class="badge bad">erro</span>
+        {% else %}<span class="badge warn">{{ s.status }}</span>{% endif %}
+      </td>
+      <td class="muted">{{ s.created_at }}</td>
+      <td class="muted">{{ s.validated_at or '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

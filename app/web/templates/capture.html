@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Nova folha — Kanban MES{% endblock %}
+{% block content %}
+<div class="card" style="max-width:520px">
+  <h2 style="margin-top:0">Nova folha kanban</h2>
+  <form method="post" action="/upload" enctype="multipart/form-data">
+    <p>
+      <label>Template<br>
+        <select name="template_name">
+          {% for t in templates_list %}
+          <option value="{{ t.name }}">{{ t.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </p>
+    <p>
+      <label>Foto da folha (opcional — sem OCR configurado a folha abre vazia para preenchimento manual)<br>
+        <input type="file" name="photo" accept="image/*" capture="environment">
+      </label>
+    </p>
+    <button type="submit">Criar folha</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Folha {{ sheet.uid }} — Kanban MES{% endblock %}
+{% block content %}
+
+{% set validated = sheet.status == 'validated' %}
+{% set data = sheet.sheet_data or {} %}
+{% set header = data.get('header') or {} %}
+{% set rows = data.get('rows') or [] %}
+{% set footer = data.get('footer') or {} %}
+
+{% if stored %}
+<div class="card" style="border-color:#1e7e34;background:var(--ok-bg)">
+  <strong>Folha validada.</strong> {{ stored }} linha(s) de produção gravadas no Postgres (mes_kanban).
+</div>
+{% endif %}
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem">
+    <h2 style="margin:0">{{ t.label }} <span class="muted" style="font-size:.8rem">{{ sheet.uid }}</span></h2>
+    <div>
+      {% if validated %}
+        <span class="badge ok">validada · {{ sheet.validated_by }} · {{ sheet.validated_at }}</span>
+      {% else %}
+        <span class="badge warn">{{ sheet.status }}</span>
+      {% endif %}
+      {% if sheet.image_path %}<span class="badge muted">com foto</span>{% endif %}
+    </div>
+  </div>
+
+  {% if summary %}
+  <div class="kpis" style="margin-top:.8rem">
+    <div class="kpi"><div class="v">{{ summary.matched }}/{{ summary.rows }}</div><div class="l">linhas com match</div></div>
+    <div class="kpi"><div class="v">{{ summary.strong }}</div><div class="l">fortes</div></div>
+    <div class="kpi"><div class="v">{{ summary.weak_guess }}</div><div class="l">fracas</div></div>
+    <div class="kpi"><div class="v">{{ summary.no_match }}</div><div class="l">sem match</div></div>
+    <div class="kpi"><div class="v">{{ summary.cells_confirmed }}</div><div class="l">células confirmadas</div></div>
+    <div class="kpi"><div class="v">{{ summary.cells_snapped }}</div><div class="l">corrigidas (rever)</div></div>
+    <div class="kpi"><div class="v">{{ summary.cells_very_different }}</div><div class="l">muito diferentes</div></div>
+  </div>
+  {% endif %}
+
+  {% if review_order and not validated %}
+  <p class="muted" style="margin-bottom:0">
+    Rever primeiro as linhas:
+    {% for i in review_order[:6] %}<a href="#row-{{ i }}"><strong>{{ i + 1 }}</strong></a>{{ ", " if not loop.last }}{% endfor %}
+  </p>
+  {% endif %}
+</div>
+
+{% macro edit_cell(field_path, value, cell=None, numeric=False) %}
+  {% if validated %}
+    <div>{{ value if value is not none else '' }}</div>
+    {% if cell and cell.proposal and cell.status in ('snapped', 'very_different') %}
+      <div class="proposal">plano: {{ cell.proposal }}</div>
+    {% endif %}
+  {% else %}
+    <form method="post" action="/sheet/{{ sheet.uid }}/edit" class="cellform">
+      <input type="hidden" name="field_path" value="{{ field_path }}">
+      <input type="hidden" name="revision" value="{{ sheet.revision }}">
+      <input type="hidden" name="actor" value="operador">
+      <input type="text" class="cell-input" name="value"
+             value="{{ value if value is not none else '' }}"
+             {% if numeric %}inputmode="decimal"{% endif %}
+             onchange="this.form.submit()">
+    </form>
+    {% if cell and cell.proposal and cell.status in ('snapped', 'very_different') and (cell.written or '') != cell.proposal %}
+      <div class="proposal">
+        plano: <a href="#" onclick="return acceptProposal(this, {{ cell.proposal | tojson }})">{{ cell.proposal }}</a>
+      </div>
+    {% endif %}
+  {% endif %}
+{% endmacro %}
+
+<div class="card">
+  <h3 style="margin-top:0">Cabeçalho</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem">
+    {% for f in t.header_fields %}
+    <label>
+      <span class="muted" style="font-size:.78rem">{{ f.replace('_', ' ') | capitalize }}
+        {%- if f in ('operador', 'data') %} *{% endif %}</span>
+      {{ edit_cell('header.' ~ f, header.get(f)) }}
+    </label>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card scroll">
+  <h3 style="margin-top:0">Linhas</h3>
+  <table>
+    <tr>
+      <th style="width:2rem">#</th>
+      {% for f in t.row_fields %}
+      <th>{{ (t.field_labels or {}).get(f, f) }}</th>
+      {% endfor %}
+      <th>Match</th>
+    </tr>
+    {% for row in rows %}
+    {% set i = loop.index0 %}
+    {% set cr = cross_rows.get(i) %}
+    <tr id="row-{{ i }}">
+      <td class="muted">{{ i + 1 }}</td>
+      {% for f in t.row_fields %}
+      {% set cell = (cr.cells_by_field.get(f) if cr else None) %}
+      <td class="{% if cell %}cell-{{ cell.status }}{% endif %}">
+        {{ edit_cell('rows[' ~ i ~ '].' ~ f, row.get(f), cell, numeric=(f in ('esp', 'comp_mm', 'larg_mm', 'qtd', 'repeticoes'))) }}
+      </td>
+      {% endfor %}
+      <td>
+        {% if cr %}
+          {% if cr.mode == 'strong' %}<span class="badge ok">forte</span>
+          {% elif cr.mode == 'weak_guess' %}<span class="badge warn">fraca</span>
+          {% elif cr.mode == 'no_match' %}<span class="badge bad">sem match</span>
+          {% else %}<span class="badge muted">{{ cr.mode }}</span>{% endif %}
+          <div class="proposal">P = {{ '%.0f' | format(cr.p_correct * 100) }}%{% if cr.matched_plan_key %} · {{ cr.matched_plan_key }}{% endif %}</div>
+        {% else %}
+          <span class="badge muted">—</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if not rows %}<p class="muted">Sem linhas — usa «+ Linha» para começar.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Rodapé</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem">
+    {% for f in t.footer_fields %}
+    <label>
+      <span class="muted" style="font-size:.78rem">{{ f.replace('_', ' ') | capitalize }}</span>
+      {{ edit_cell('footer.' ~ f, footer.get(f), numeric=True) }}
+    </label>
+    {% endfor %}
+  </div>
+</div>
+
+{% if not validated %}
+<div class="card" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+  <form method="post" action="/sheet/{{ sheet.uid }}/add-row">
+    <button type="submit" class="secondary">+ Linha</button>
+  </form>
+  <form method="post" action="/sheet/{{ sheet.uid }}/recheck">
+    <button type="submit" class="secondary">Re-verificar contra o plano</button>
+  </form>
+  <form method="post" action="/sheet/{{ sheet.uid }}/validate" style="display:flex;gap:.6rem;align-items:center"
+        onsubmit="return confirm('Validar a folha? Depois de validada fica imutável e é gravada no Postgres.')">
+    <input type="text" name="actor" placeholder="Quem valida" required style="width:11rem">
+    <button type="submit">Validar folha</button>
+  </form>
+  <span class="muted" style="font-size:.8rem">Verde = confirma o plano · Amarelo = corrigido/preenchido pelo motor · Vermelho = muito diferente, confirma à mão.</span>
+</div>
+{% endif %}
+
+<script>
+function acceptProposal(link, value) {
+  const td = link.closest('td, label');
+  const input = td.querySelector('input[name=value]');
+  if (input) { input.value = value; input.form.submit(); }
+  return false;
+}
+</script>
+{% endblock %}

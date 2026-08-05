@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Kanban MES{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2 style="margin-top:0">Trabalho em curso (staging local)</h2>
+  <div class="kpis">
+    <div class="kpi"><div class="v">{{ n_sheets }}</div><div class="l">folhas no total</div></div>
+    {% for status, n in by_status.items() %}
+    <div class="kpi"><div class="v">{{ n }}</div><div class="l">{{ status }}</div></div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Dados validados (Postgres · mes_kanban)</h2>
+  {% if not pg.available %}
+    <p class="muted">Sem ligação ao schema <code>mes_kanban</code> — ainda não aplicado ou credenciais em falta.<br>
+    <span style="font-size:.8rem">{{ pg.error }}</span></p>
+  {% else %}
+  <div class="kpis">
+    <div class="kpi"><div class="v">{{ pg.sheets }}</div><div class="l">folhas validadas</div></div>
+    <div class="kpi"><div class="v">{{ pg.records }}</div><div class="l">linhas de produção</div></div>
+  </div>
+  {% if pg.by_family %}
+  <table style="margin-top:.8rem;max-width:480px">
+    <tr><th>Família</th><th>Linhas</th><th>Quantidade total</th></tr>
+    {% for family, n, qty in pg.by_family %}
+    <tr><td>{{ family }}</td><td>{{ n }}</td><td>{{ qty | round(0) | int }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  {% if pg.recent %}
+  <h3>Últimos registos por dia</h3>
+  <div class="scroll">
+  <table>
+    <tr><th>Data</th><th>Família</th><th>Operador</th><th>Máquina</th><th>Linhas</th></tr>
+    {% for d, family, operator, machine, n in pg.recent %}
+    <tr><td>{{ d }}</td><td>{{ family }}</td><td>{{ operator }}</td><td>{{ machine or '—' }}</td><td>{{ n }}</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+
+{% endblock %}
