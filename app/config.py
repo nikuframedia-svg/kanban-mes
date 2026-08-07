@@ -26,12 +26,14 @@ class Settings:
     # Staging local — trabalho em curso nunca toca no Postgres
     data_dir: Path = field(default_factory=lambda: Path(_env("MES_DATA_DIR", str(BASE_DIR / "data"))))
 
-    # OCR (por decidir pelo Luís; sem chave a app funciona em modo manual)
-    anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
-    ocr_model: str = field(default_factory=lambda: _env("MES_OCR_MODEL", "claude-sonnet-5"))
+    # OCR — Gemini (free tier UE: dados não usados para treino). Sem chave, modo manual.
+    # Primário com quota free decente; o provider tem fallbacks se esgotar.
+    gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY"))
+    ocr_model: str = field(default_factory=lambda: _env("MES_OCR_MODEL", "gemini-3-flash-preview"))
 
     host: str = field(default_factory=lambda: _env("MES_HOST", "127.0.0.1"))
-    port: int = field(default_factory=lambda: int(_env("MES_PORT", "8000")))
+    # 8000 é da bridge do PP1 neste servidor — o MES vive na 8100
+    port: int = field(default_factory=lambda: int(_env("MES_PORT", "8100")))
     admin_token: str = field(default_factory=lambda: _env("MES_ADMIN_TOKEN"))
 
     @property

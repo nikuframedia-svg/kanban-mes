@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Estado — Kanban MES{% endblock %}
+{% block breadcrumb %}Dashboards · Estado{% endblock %}
+{% block page_title %}Estado da produção{% endblock %}
+{% block page_sub %}
+<p>Onde está cada encomenda, do plano ao que já foi cortado: o plano de produção (o Excel de hoje,
+   carregado automaticamente) lado a lado com o que os operadores registaram em folhas validadas.
+   Pesquisa por cliente, OV ou OF e clica numa OF para veres o detalhe.</p>
+{% endblock %}
+{% block header_actions %}
+<a class="btn primary" href="/estado/pdf?q={{ q }}&amp;familia={{ familia }}">↓ Relatório PDF</a>
+{% endblock %}
+{% block content %}
+
+<div class="kpis">
+  <div class="kpi"><div class="l">folhas em staging</div><div class="v">{{ n_sheets }}</div></div>
+  {% set status_pt = {'pending': 'por extrair', 'extracted': 'extraídas',
+                      'in_review': 'em revisão', 'validated': 'validadas', 'error': 'com erro'} %}
+  {% for status, n in by_status.items() %}
+  <div class="kpi"><div class="l">{{ status_pt.get(status, status) }}</div><div class="v">{{ n }}</div></div>
+  {% endfor %}
+  <div class="kpi"><div class="l">folhas validadas (PG)</div><div class="v">{{ estado.kpis.folhas }}</div></div>
+  <div class="kpi"><div class="l">linhas de produção (PG)</div><div class="v">{{ estado.kpis.registos }}</div></div>
+</div>
+
+{% if not estado.available %}
+<div class="banner-warn">
+  <strong>Postgres indisponível</strong> — só é possível mostrar o estado local.
+  <span class="muted mono">{{ estado.error }}</span>
+</div>
+{% else %}
+
+{% if estado.detail %}
+<div class="card scroll">
+  <div class="card-head">
+    <h3 style="margin:0">Detalhe da OF <span class="mono">{{ of }}</span></h3>
+    <a class="btn small ghost" href="/estado{% if q or familia %}?q={{ q }}&amp;familia={{ familia }}{% endif %}">Fechar detalhe</a>
+  </div>
+  <h3 class="muted" style="font-size:11px;text-transform:uppercase">Componentes no plano</h3>
+  {% if estado.detail.plan %}
+  <table>
+    <tr><th>Modelo</th><th>Perfil</th><th class="num">Comp./Esp.</th><th class="num">Planeada</th><th class="num">Restante</th><th>Máquina</th></tr>
+    {% for r in estado.detail.plan %}
+    <tr>
+      <td>{{ r.modelo or '—' }}</td><td>{{ r.perfil or '—' }}</td>
+      <td class="num">{{ r.comp_mm or '—' }}</td>
+      <td class="num">{{ r.qtd_planeada or 0 }}</td>
+      <td class="num">{{ r.qtd_restante or 0 }}</td>
+      <td>{{ r.maquina or '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">Esta OF não está no plano atual.</div>{% endif %}
+  <h3 class="muted" style="font-size:11px;text-transform:uppercase;margin-top:16px">Produção validada (MES)</h3>
+  {% if estado.detail.produced %}
+  <table>
+    <tr><th>Data</th><th>Operador</th><th>Máquina</th><th>Modelo</th><th class="num">Qtd</th><th class="num">Confiança</th><th>Folha</th></tr>
+    {% for r in estado.detail.produced %}
+    <tr>
+      <td>{{ r.sheet_date }}</td><td>{{ r.operator_name }}</td><td>{{ r.machine or '—' }}</td>
+      <td>{{ r.model_ref or '—' }}</td>
+      <td class="num">{{ r.quantity or '—' }}</td>
+      <td class="num">{% if r.match_confidence is not none %}{{ '%.0f' | format(r.match_confidence * 100) }}%{% else %}—{% endif %}</td>
+      <td><a href="/sheet/{{ r.sheet_uid }}">{{ r.sheet_uid[:8] }}</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">Ainda sem produção validada nesta OF.</div>{% endif %}
+</div>
+{% endif %}
+
+<div class="card scroll">
+  <div class="card-head">
+    <h3 style="margin:0">Ordens de fabrico</h3>
+    <form method="get" action="/estado" class="actions">
+      <input type="search" name="q" value="{{ q }}" placeholder="Cliente, OV ou OF…" style="min-width:200px">
+      <select name="familia">
+        <option value="">Todas as famílias</option>
+        <option value="cantoneiras" {% if familia == 'cantoneiras' %}selected{% endif %}>Cantoneiras</option>
+        <option value="chapa" {% if familia == 'chapa' %}selected{% endif %}>Chapa</option>
+      </select>
+      <button type="submit" class="small">Filtrar</button>
+      <a class="btn small ghost" href="/estado/pdf?q={{ q }}&amp;familia={{ familia }}">Relatório PDF</a>
+    </form>
+  </div>
+
+  <p class="hint">«Progresso» é o avanço segundo o plano (planeado − restante); «Validada» é o que o MES
+     já registou em folhas confirmadas por humanos. Uma OF marcada «sem plano» foi validada no MES
+     mas não aparece no plano de hoje — vale a pena investigar.</p>
+  {% if not estado.rows %}
+    <div class="empty">Nada encontrado{% if q %} para «{{ q }}»{% endif %}.</div>
+  {% else %}
+  <p class="muted" style="margin-top:0">{{ estado.rows | length }} de {{ estado.total }} OFs.</p>
+  <table>
+    <tr>
+      <th>Cliente</th><th>OV</th><th>OF</th><th>Família</th>
+      <th class="num">Planeada</th><th>Progresso (plano)</th>
+      <th class="num">Validada (MES)</th><th>Última folha</th><th>Máquina · Semana</th>
+    </tr>
+    {% for r in estado.rows[:400] %}
+    <tr>
+      <td>{{ r.cliente or '—' }}</td>
+      <td>{{ r.ov or '—' }}</td>
+      <td><a href="/estado?of={{ r.of }}&amp;q={{ q }}&amp;familia={{ familia }}">{{ r.of }}</a>
+        {% if r.sem_plano %}<span class="badge bad" title="Validada no MES mas não está no plano atual">sem plano</span>{% endif %}
+      </td>
+      <td>{{ r.familia or '—' }}</td>
+      <td class="num">{{ '%.0f' | format(r.qtd_planeada) if r.qtd_planeada is not none else '—' }}</td>
+      <td>
+        {% if r.progresso is not none %}
+        <div class="progress {% if r.progresso >= 1 %}done{% endif %}" title="{{ '%.0f' | format(r.progresso * 100) }}%">
+          <span style="width:{{ '%.0f' | format([r.progresso * 100, 100] | min) }}%"></span>
+        </div>
+        <span class="muted" style="font-size:10.5px">{{ '%.0f' | format(r.progresso * 100) }}%</span>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td class="num">{{ '%.0f' | format(r.qtd_validada) if r.qtd_validada else '—' }}</td>
+      <td>{{ r.ultima_folha or '—' }}</td>
+      <td class="muted">{{ r.maquinas or '—' }}{% if r.semana %} · S{{ r.semana }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if estado.rows | length > 400 %}
+  <p class="muted">A mostrar as primeiras 400 — usa a pesquisa para restringir.</p>
+  {% endif %}
+  {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}

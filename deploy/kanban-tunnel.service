@@ -1,0 +1,13 @@
+# Túnel Cloudflare do Kanban MES (URL *.trycloudflare.com automático).
+[Unit]
+Description=Kanban MES Cloudflare quick tunnel
+After=kanban-mes.service
+Wants=kanban-mes.service
+
+[Service]
+ExecStart=/bin/bash %h/projects/kanban-mes/scripts/tunnel.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

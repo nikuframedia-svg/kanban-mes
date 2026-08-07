@@ -74,6 +74,26 @@ def create_sheet(conn: sqlite3.Connection, template_name: str,
     return uid
 
 
+def mark_pending(conn: sqlite3.Connection, uid: str) -> bool:
+    """Volta a pôr a folha na fila do OCR (re-leitura). Nunca folhas validadas."""
+    cur = conn.execute(
+        "UPDATE sheets SET status = 'pending', revision = revision + 1 "
+        "WHERE uid = ? AND status != 'validated'",
+        (uid,),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def set_template(conn: sqlite3.Connection, uid: str, template_name: str) -> None:
+    """Reclassificação (frente/verso) pelo worker de OCR — só antes de validada."""
+    conn.execute(
+        "UPDATE sheets SET template_name = ? WHERE uid = ? AND status != 'validated'",
+        (template_name, uid),
+    )
+    conn.commit()
+
+
 def set_extraction(conn: sqlite3.Connection, uid: str, extraction: dict) -> None:
     conn.execute(
         "UPDATE sheets SET raw_extraction = ?, sheet_data = ?, status = 'extracted', "
@@ -94,16 +114,70 @@ def get_sheet(conn: sqlite3.Connection, uid: str) -> dict | None:
     return sheet
 
 
-def list_sheets(conn: sqlite3.Connection, status: str | None = None) -> list[dict]:
-    if status:
-        rows = conn.execute(
-            "SELECT uid, template_name, status, created_at, validated_at, revision "
-            "FROM sheets WHERE status = ? ORDER BY created_at DESC", (status,)).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT uid, template_name, status, created_at, validated_at, revision "
-            "FROM sheets ORDER BY created_at DESC").fetchall()
-    return [dict(r) for r in rows]
+def list_sheets(conn: sqlite3.Connection, status: str | None = None,
+                operador: str | None = None, setor: str | None = None,
+                data_folha: str | None = None, data_captura: str | None = None,
+                of: str | None = None) -> list[dict]:
+    """Lista de folhas com campos do cabeçalho extraídos do JSON + filtros do Histórico.
+
+    `status` aceita também o pseudo-estado 'pending' = tudo o que não está
+    validado nem em erro (o que o Histórico chama «Pendentes»)."""
+    sql = (
+        "SELECT uid, template_name, status, image_path, created_at, validated_at, revision, "
+        "  json_extract(sheet_data, '$.header.operador')      AS operador, "
+        "  json_extract(sheet_data, '$.header.data')          AS data_folha, "
+        "  json_extract(sheet_data, '$.header.setor_maquina') AS setor "
+        "FROM sheets WHERE 1=1"
+    )
+    args: list = []
+    if status == "pending":
+        sql += " AND status NOT IN ('validated', 'error')"
+    elif status:
+        sql += " AND status = ?"
+        args.append(status)
+    if operador:
+        sql += " AND json_extract(sheet_data, '$.header.operador') = ?"
+        args.append(operador)
+    if setor:
+        sql += " AND json_extract(sheet_data, '$.header.setor_maquina') = ?"
+        args.append(setor)
+    if data_folha:
+        sql += " AND substr(json_extract(sheet_data, '$.header.data'), 1, 10) = ?"
+        args.append(data_folha)
+    if data_captura:
+        sql += " AND substr(created_at, 1, 10) = ?"
+        args.append(data_captura)
+    if of:
+        # pesquisa simples no JSON das linhas — chega para encontrar uma OF
+        sql += " AND sheet_data LIKE ?"
+        args.append(f"%{of.strip()}%")
+    sql += " ORDER BY created_at DESC"
+    return [dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
+def filter_options(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    """Valores distintos de operador e setor para os selects do Histórico."""
+    ops = [r[0] for r in conn.execute(
+        "SELECT DISTINCT json_extract(sheet_data, '$.header.operador') FROM sheets "
+        "WHERE json_extract(sheet_data, '$.header.operador') IS NOT NULL ORDER BY 1").fetchall()]
+    sets = [r[0] for r in conn.execute(
+        "SELECT DISTINCT json_extract(sheet_data, '$.header.setor_maquina') FROM sheets "
+        "WHERE json_extract(sheet_data, '$.header.setor_maquina') IS NOT NULL ORDER BY 1").fetchall()]
+    return {"operadores": ops, "setores": sets}
+
+
+def delete_sheet(conn: sqlite3.Connection, uid: str) -> str | None:
+    """Apaga um RASCUNHO (folha não validada) e o seu trilho de edições.
+    Devolve o image_path (para o chamador apagar o ficheiro) ou lança se validada."""
+    row = conn.execute("SELECT status, image_path FROM sheets WHERE uid = ?", (uid,)).fetchone()
+    if row is None:
+        raise KeyError(uid)
+    if row["status"] == "validated":
+        raise PermissionError("folha validada é imutável")
+    conn.execute("DELETE FROM edits WHERE sheet_uid = ?", (uid,))
+    conn.execute("DELETE FROM sheets WHERE uid = ?", (uid,))
+    conn.commit()
+    return row["image_path"]
 
 
 def save_sheet_data(conn: sqlite3.Connection, uid: str, sheet_data: dict,

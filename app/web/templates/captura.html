@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Captura — Kanban MES{% endblock %}
+{% block breadcrumb %}Chão de fábrica · Captura{% endblock %}
+{% block page_title %}Capturar folhas{% endblock %}
+{% block header_actions %}
+<a class="btn" href="/captura/camara">Abrir câmara</a>
+{% endblock %}
+{% block content %}
+
+<form id="upload-form" method="post" action="/upload" enctype="multipart/form-data">
+
+  <div class="capture-toolbar">
+    <span class="microlabel">Tipo de folha</span>
+    <div class="radio-chips">
+      {% set chip_labels = {'cantoneiras_kanban': 'Cantoneiras',
+                            'cantoneiras_paragens': 'Paragens',
+                            'chapa_kanban': 'Chapa'} %}
+      {% for t in templates_list %}
+      <label>
+        <input type="radio" name="template_name" value="{{ t.name }}"
+               {% if t.name == 'cantoneiras_kanban' %}checked{% endif %}>
+        <span>{{ chip_labels.get(t.name, t.label) }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="dropzone" id="dropzone">
+    <div id="dz-idle">
+      <div class="dz-icon">🗎</div>
+      <p class="dz-title">Arrasta imagens ou PDF para aqui</p>
+      <div class="ou">ou</div>
+      <label class="btn primary" style="cursor:pointer">
+        Escolher ficheiros
+        <input id="file-input" type="file" name="photos" multiple accept="image/*,.pdf,application/pdf" hidden>
+      </label>
+      <p class="hint">PDF de kanbans digitalizados: cada página vira uma folha —
+         a frente (produção) e o verso (paragens) são detetados automaticamente.
+         Cada imagem vira uma folha com leitura OCR automática.</p>
+    </div>
+    <div id="dz-busy" hidden>
+      <div class="spinner" style="margin:0 auto 12px"></div>
+      <p class="dz-title" id="dz-busy-msg">A ler as folhas com OCR…</p>
+      <p class="hint">Não feches a página — isto demora alguns segundos por folha.</p>
+    </div>
+  </div>
+
+  <div class="capture-foot">
+    <a href="#" id="manual-link">Sem foto? Criar folha vazia para preenchimento manual</a>
+  </div>
+
+</form>
+
+{% endblock %}
+{% block scripts %}
+<script>
+  const dz = document.getElementById("dropzone");
+  const input = document.getElementById("file-input");
+  const form = document.getElementById("upload-form");
+  const idle = document.getElementById("dz-idle");
+  const busy = document.getElementById("dz-busy");
+  const busyMsg = document.getElementById("dz-busy-msg");
+
+  function submitFiles(n) {
+    idle.hidden = true;
+    busy.hidden = false;
+    dz.classList.add("busy");
+    busyMsg.textContent = n === 1 ? "A ler a folha com OCR…" : "A ler " + n + " ficheiro(s) com OCR…";
+    form.submit();
+  }
+
+  input.addEventListener("change", () => {
+    if (input.files.length) submitFiles(input.files.length);
+  });
+
+  ["dragover", "dragenter"].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); dz.classList.add("dragover");
+  }));
+  ["dragleave", "drop"].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); dz.classList.remove("dragover");
+  }));
+  dz.addEventListener("drop", e => {
+    if (e.dataTransfer.files.length) {
+      input.files = e.dataTransfer.files;
+      submitFiles(e.dataTransfer.files.length);
+    }
+  });
+
+  document.getElementById("manual-link").addEventListener("click", e => {
+    e.preventDefault();
+    input.value = "";
+    form.submit();
+  });
+</script>
+{% endblock %}

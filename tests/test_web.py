@@ -38,6 +38,7 @@ def client(tmp_path, monkeypatch):
                    if any(v is not None and str(v).strip() != "" for v in r.values()))
 
     monkeypatch.setattr(pg_store, "store_validated_sheet", fake_store)
+    monkeypatch.setattr(main, "PROCESS_IN_BACKGROUND", False)  # determinístico
     c = TestClient(main.app, follow_redirects=False)
     c.stored_calls = stored_calls
     return c
@@ -65,11 +66,26 @@ def edit(client, uid, field_path, value):
     return r
 
 
-def test_home_and_capture_render(client):
-    assert client.get("/").status_code == 200
-    r = client.get("/capture")
+def test_historico_renders(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "Folhas Kanban" in r.text
+    assert "Exportar Excel" in r.text
+
+
+def test_captura_page_has_upload_form(client):
+    r = client.get("/captura")
     assert r.status_code == 200
     assert "cantoneiras_kanban" in r.text
+    assert 'action="/upload"' in r.text
+    assert client.get("/captura/camara").status_code == 200
+
+
+def test_old_routes_redirect(client):
+    r = client.get("/capture")
+    assert r.status_code == 301 and r.headers["location"] == "/captura"
+    r = client.get("/dashboard")
+    assert r.status_code == 301 and r.headers["location"] == "/estado"
 
 
 def test_upload_creates_sheet_and_review_screen_renders(client):
@@ -145,7 +161,80 @@ def test_validate_requires_header_then_stores_and_freezes(client):
     assert "validada" in r.text
 
 
-def test_dashboard_renders_without_postgres(client):
-    r = client.get("/dashboard")
+def test_upload_multiple_images_creates_multiple_sheets(client):
+    files = [
+        ("photos", ("a.png", _tiny_png(), "image/png")),
+        ("photos", ("b.png", _tiny_png(), "image/png")),
+    ]
+    r = client.post("/upload", data={"template_name": "cantoneiras_kanban"}, files=files)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/?created=2"
+
+
+def test_upload_pdf_creates_sheet_per_page(client):
+    from fpdf import FPDF
+    pdf = FPDF()
+    for _ in range(2):
+        pdf.add_page()
+        pdf.set_font("helvetica", size=12)
+        pdf.cell(0, 10, "kanban teste")
+    content = bytes(pdf.output())
+    r = client.post("/upload", data={"template_name": "cantoneiras_kanban"},
+                    files=[("photos", ("lote.pdf", content, "application/pdf"))])
+    assert r.status_code == 303
+    assert r.headers["location"] == "/?created=2"
+
+
+def _tiny_png() -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+    buf = BytesIO()
+    Image.new("RGB", (40, 40), "white").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_delete_draft_but_never_validated(client):
+    uid = create_sheet(client)
+    assert client.post(f"/sheet/{uid}/delete").status_code == 303
+    assert client.get(f"/sheet/{uid}").status_code == 404
+
+    uid = create_sheet(client)
+    edit(client, uid, "header.operador", "João")
+    edit(client, uid, "header.data", "2026-08-07")
+    assert client.post(f"/sheet/{uid}/validate", data={"actor": "luis"}).status_code == 303
+    assert client.post(f"/sheet/{uid}/delete").status_code == 409
+
+
+def test_sheet_csv_downloads(client):
+    uid = create_sheet(client)
+    edit(client, uid, "rows[0].of", "OF250001")
+    r = client.get(f"/sheet/{uid}/csv")
     assert r.status_code == 200
-    assert "Trabalho em curso" in r.text
+    assert "text/csv" in r.headers["content-type"]
+    assert "OF250001" in r.text
+
+
+def test_historico_filters(client):
+    uid = create_sheet(client)
+    edit(client, uid, "header.operador", "Maria")
+    assert "Maria" in client.get("/?operador=Maria").text
+    r = client.get("/?operador=NãoExiste")
+    assert "Nada encontrado" in r.text
+    # chips por estado
+    assert client.get("/?status=pending").status_code == 200
+    assert client.get("/?status=validated").status_code == 200
+
+
+def test_sheet_pdf_downloads(client):
+    uid = create_sheet(client)
+    edit(client, uid, "rows[0].of", "OF250001")
+    r = client.get(f"/sheet/{uid}/pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:5] == b"%PDF-"
+
+
+def test_sheet_photo_404_without_image(client):
+    uid = create_sheet(client)
+    assert client.get(f"/sheet/{uid}/photo").status_code == 404

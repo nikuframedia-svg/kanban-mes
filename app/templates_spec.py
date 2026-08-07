@@ -12,7 +12,7 @@ class KanbanTemplate:
     name: str
     family: str                       # chapa | cantoneiras
     label: str
-    index_loader: str                 # nome da função em app.matching.loaders
+    index_loader: str | None          # função em app.matching.loaders; None = sem cruzamento
     row_fields: tuple[str, ...]       # colunas da tabela, na ordem da folha
     header_fields: tuple[str, ...] = ("operador", "n_operador", "setor_maquina", "data", "turno")
     footer_fields: tuple[str, ...] = ("horas_trabalhadas",)
@@ -35,17 +35,35 @@ CHAPA_KANBAN = KanbanTemplate(
 CANTONEIRAS_KANBAN = KanbanTemplate(
     name="cantoneiras_kanban",
     family="cantoneiras",
-    label="Cantoneiras — Kanban de corte",
+    label="Cantoneiras — Kanban de produção (TPL102)",
     index_loader="load_cantoneiras_index",
-    row_fields=("cliente", "ov", "of", "modelo", "qtd", "comp_mm", "obs"),
+    # colunas na ordem exata da folha física TPL102 (Rapid 20T):
+    # CLIENTE | OV | OF | PERFIL | MODELO | QTD | PERF. COMP.
+    row_fields=("cliente", "ov", "of", "perfil", "modelo", "qtd", "comp_mm"),
+    footer_fields=("metros_produzidos", "horas_trabalhadas"),
     field_labels={
-        "cliente": "Cliente", "ov": "OV", "of": "OF", "modelo": "Referência",
-        "qtd": "Qtd", "comp_mm": "Comp. (mm)", "obs": "Observações",
+        "cliente": "Cliente", "ov": "OV", "of": "OF", "perfil": "Perfil",
+        "modelo": "Modelo", "qtd": "Qtd", "comp_mm": "Perf. Comp. (mm)",
+        "metros_produzidos": "Metros produzidos",
+        "horas_trabalhadas": "Horas trabalhadas",
+    },
+)
+
+CANTONEIRAS_PARAGENS = KanbanTemplate(
+    name="cantoneiras_paragens",
+    family="cantoneiras",
+    label="Cantoneiras — Paragens (TPL102 verso)",
+    index_loader=None,                # paragens não se cruzam com o plano
+    row_fields=("motivo", "inicio", "fim", "duracao", "resolvido"),
+    footer_fields=(),
+    field_labels={
+        "motivo": "Motivo da paragem", "inicio": "Início", "fim": "Fim",
+        "duracao": "Duração", "resolvido": "Resolvido",
     },
 )
 
 TEMPLATES: dict[str, KanbanTemplate] = {
-    t.name: t for t in (CHAPA_KANBAN, CANTONEIRAS_KANBAN)
+    t.name: t for t in (CHAPA_KANBAN, CANTONEIRAS_KANBAN, CANTONEIRAS_PARAGENS)
 }
 
 

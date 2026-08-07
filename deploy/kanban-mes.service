@@ -1,0 +1,15 @@
+# Kanban MES — app web (uvicorn em 127.0.0.1:8000).
+# Instalar como unidade de UTILIZADOR (sem sudo): ver deploy/README.md
+[Unit]
+Description=Kanban MES (uvicorn)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/projects/kanban-mes
+EnvironmentFile=%h/projects/kanban-mes/.env
+ExecStart=%h/projects/kanban-mes/.venv/bin/uvicorn app.web.main:app --host 127.0.0.1 --port 8100 --proxy-headers
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

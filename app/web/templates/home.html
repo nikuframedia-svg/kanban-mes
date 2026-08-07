@@ -1,26 +1,126 @@
 {% extends "base.html" %}
+{% block title %}Histórico — Kanban MES{% endblock %}
+{% block breadcrumb %}Chão de fábrica · Histórico{% endblock %}
+{% block page_title %}Folhas Kanban{% endblock %}
+{% block header_actions %}
+<a class="btn" href="/export.xlsx">↓ Exportar Excel</a>
+<a class="btn primary" href="/captura">+ Nova captura</a>
+{% endblock %}
 {% block content %}
-<div class="card">
-  <h2 style="margin-top:0">Folhas kanban</h2>
+
+{% if created %}
+<div class="banner-ok"><strong>{{ created }} folha(s) criadas.</strong> Abre cada uma para rever e validar.</div>
+{% endif %}
+{% if deleted %}
+<div class="banner-ok">Folha apagada.</div>
+{% endif %}
+
+<div class="chips">
+  {% for value, label in [('', 'Todas'), ('pending', 'Pendentes'), ('validated', 'Validadas'), ('error', 'Erro')] %}
+  <a class="chip {% if f.status == value %}active{% endif %}"
+     href="/?status={{ value }}{{ filter_qs }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+<form method="get" action="/" class="filters">
+  <input type="hidden" name="status" value="{{ f.status }}">
+  <div class="field">
+    <span class="microlabel">Operador</span>
+    <select name="operador">
+      <option value="">— Todos —</option>
+      {% for o in options.operadores %}
+      <option value="{{ o }}" {% if f.operador == o %}selected{% endif %}>{{ o }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <span class="microlabel">Data</span>
+    <input type="date" name="data" value="{{ f.data }}">
+  </div>
+  <div class="field">
+    <span class="microlabel">Data captura</span>
+    <input type="date" name="data_captura" value="{{ f.data_captura }}">
+  </div>
+  <div class="field">
+    <span class="microlabel">Setor</span>
+    <select name="setor">
+      <option value="">— Todos —</option>
+      {% for s in options.setores %}
+      <option value="{{ s }}" {% if f.setor == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <span class="microlabel">OF</span>
+    <input type="text" name="of" value="{{ f.of }}" placeholder="ex.: OF251525" style="width:140px">
+  </div>
+  <button type="submit">Filtrar</button>
+</form>
+
+<div class="legend-card">
+  <span class="microlabel">Legenda</span>
+  <span><span class="sym ok">✓</span>MATCH — bate com o plano</span>
+  <span><span class="sym warn">!</span>Corrigido pelo motor — verificar</span>
+  <span><span class="sym bad">✕</span>NO_MATCH — diferente do plano</span>
+  <span><span class="sym na">—</span>NA — vazio/sem valor para validar</span>
+  <span class="legend-note">* Valores corrigidos automaticamente pelo cross-check ficam a amarelo na folha.</span>
+</div>
+
+<div class="card scroll" style="padding:8px 16px">
   {% if not sheets %}
-    <p class="muted">Ainda não há folhas. <a href="/capture">Criar a primeira</a>.</p>
+  <div class="empty">
+    <h3>Nada encontrado.</h3>
+    <p>{% if f.status or f.operador or f.of %}Limpa os filtros ou {% endif %}<a href="/captura">faz uma nova captura</a>.</p>
+  </div>
   {% else %}
   <table>
-    <tr><th>Folha</th><th>Template</th><th>Estado</th><th>Criada</th><th>Validada</th></tr>
+    <tr>
+      <th>#</th><th>Capturada</th><th>Operador</th><th>Data folha</th>
+      <th>Template</th><th>Estado</th><th class="row-actions"></th>
+    </tr>
     {% for s in sheets %}
     <tr>
-      <td><a href="/sheet/{{ s.uid }}">{{ s.uid }}</a></td>
-      <td>{{ s.template_name }}</td>
+      <td class="mono"><a href="/sheet/{{ s.uid }}">{{ s.uid[:8] }}</a></td>
+      <td class="mono muted">{{ s.created_at[:16].replace('T', ' ') }}</td>
+      <td><strong>{{ s.operador or '—' }}</strong></td>
+      <td class="mono muted">{{ (s.data_folha or '—')[:10] }}</td>
+      <td><span class="badge muted">{{ 'PARAGENS' if 'paragens' in s.template_name
+            else ('CANTONEIRAS' if 'cantoneiras' in s.template_name else 'CHAPA') }}</span></td>
       <td>
-        {% if s.status == 'validated' %}<span class="badge ok">validada</span>
-        {% elif s.status == 'error' %}<span class="badge bad">erro</span>
-        {% else %}<span class="badge warn">{{ s.status }}</span>{% endif %}
+        {% if s.status == 'validated' %}<span class="badge ok">Validada</span>
+        {% elif s.status == 'error' %}<span class="badge bad">Erro</span>
+        {% else %}<span class="badge warn">Pendente</span>{% endif %}
       </td>
-      <td class="muted">{{ s.created_at }}</td>
-      <td class="muted">{{ s.validated_at or '—' }}</td>
+      <td class="row-actions">
+        <a href="/sheet/{{ s.uid }}">abrir</a>
+        <a href="/sheet/{{ s.uid }}/csv">csv</a>
+        {% if s.status != 'validated' %}
+        <form method="post" action="/sheet/{{ s.uid }}/delete" style="display:inline;margin-left:12px"
+              onsubmit="return confirm('Apagar esta folha rascunho? Não há volta.')">
+          <button type="submit" class="danger small">apagar</button>
+        </form>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </table>
   {% endif %}
 </div>
+
+{% if tunnel_url %}
+<div class="footer-note">Endereço público: <code>{{ tunnel_url }}</code></div>
+{% endif %}
+
+<div class="live-pill"><span class="dot">●</span> Live · auto-refresh 30s</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+  /* recarrega a cada 30s, exceto se o utilizador estiver a mexer num filtro */
+  setTimeout(() => {
+    if (!document.activeElement || !["INPUT", "SELECT"].includes(document.activeElement.tagName)) {
+      location.reload();
+    }
+  }, 30000);
+</script>
 {% endblock %}

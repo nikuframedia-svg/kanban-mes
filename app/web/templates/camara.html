@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Câmara — Kanban MES{% endblock %}
+{% block breadcrumb %}Chão de fábrica · Captura{% endblock %}
+{% block page_title %}Capturar folhas{% endblock %}
+{% block header_actions %}
+<span class="badge warn" id="cam-status" hidden>SEM CÂMARA</span>
+<a class="btn" href="/captura">Voltar</a>
+{% endblock %}
+{% block content %}
+
+<form id="cam-form" method="post" action="/upload" enctype="multipart/form-data">
+  <div class="card" style="padding:14px 24px">
+    <div class="form-row">
+      <div class="field">
+        <span class="microlabel">Tipo de folha</span>
+        <select name="template_name" required>
+          {% for t in templates_list %}
+          <option value="{{ t.name }}">{{ t.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <span class="hint" style="margin:0 0 10px">Cada foto vira uma folha. Fotografa uma de cada vez e carrega em «Concluir» no fim.</span>
+    </div>
+  </div>
+</form>
+
+<div class="cam-stage" id="cam-stage">
+  <video id="cam-video" autoplay playsinline muted hidden></video>
+  <div class="cam-error" id="cam-error" hidden>
+    <h2>Câmara indisponível</h2>
+    <p id="cam-error-msg">Sem permissão para usar a câmara.</p>
+    <div class="actions" style="justify-content:center">
+      <label class="btn" style="cursor:pointer">
+        Escolher do telefone
+        <input id="cam-file-fallback" type="file" accept="image/*" capture="environment" multiple hidden>
+      </label>
+      <button type="button" class="btn primary" id="cam-retry">Tentar de novo</button>
+    </div>
+  </div>
+</div>
+
+<div class="cam-bar">
+  <div class="cam-count">
+    <div class="microlabel">Fotos</div>
+    <div class="n" id="cam-count">0</div>
+  </div>
+  <button type="button" class="shutter" id="cam-shutter" title="Fotografar" disabled></button>
+  <button type="button" class="btn primary" id="cam-done" disabled>Concluir</button>
+</div>
+
+<div class="cam-thumbs" id="cam-thumbs"></div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+  const video = document.getElementById("cam-video");
+  const errBox = document.getElementById("cam-error");
+  const errMsg = document.getElementById("cam-error-msg");
+  const statusTag = document.getElementById("cam-status");
+  const shutter = document.getElementById("cam-shutter");
+  const doneBtn = document.getElementById("cam-done");
+  const thumbs = document.getElementById("cam-thumbs");
+  const countEl = document.getElementById("cam-count");
+  const form = document.getElementById("cam-form");
+  const fallback = document.getElementById("cam-file-fallback");
+
+  const photos = [];
+
+  function refresh() {
+    countEl.textContent = photos.length;
+    doneBtn.disabled = photos.length === 0;
+  }
+
+  async function startCamera() {
+    errBox.hidden = true; statusTag.hidden = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 2560 } }, audio: false
+      });
+      video.srcObject = stream;
+      video.hidden = false;
+      shutter.disabled = false;
+    } catch (e) {
+      video.hidden = true;
+      shutter.disabled = true;
+      errBox.hidden = false;
+      statusTag.hidden = false;
+      errMsg.textContent = e && e.message ? e.message : "Sem permissão para usar a câmara.";
+    }
+  }
+
+  shutter.addEventListener("click", () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    canvas.toBlob(blob => {
+      photos.push(new File([blob], "foto_" + (photos.length + 1) + ".jpg", { type: "image/jpeg" }));
+      const img = document.createElement("img");
+      img.src = URL.createObjectURL(blob);
+      thumbs.appendChild(img);
+      refresh();
+    }, "image/jpeg", 0.92);
+  });
+
+  fallback.addEventListener("change", () => {
+    for (const f of fallback.files) {
+      photos.push(f);
+      const img = document.createElement("img");
+      img.src = URL.createObjectURL(f);
+      thumbs.appendChild(img);
+    }
+    refresh();
+  });
+
+  doneBtn.addEventListener("click", () => {
+    const fd = new FormData(form);
+    for (const f of photos) fd.append("photos", f);
+    doneBtn.disabled = true;
+    doneBtn.textContent = "A carregar…";
+    fetch("/upload", { method: "POST", body: fd }).then(r => {
+      window.location = r.redirected ? r.url : "/";
+    }).catch(() => {
+      doneBtn.disabled = false;
+      doneBtn.textContent = "Concluir";
+      alert("Falha no envio — tenta outra vez.");
+    });
+  });
+
+  document.getElementById("cam-retry").addEventListener("click", startCamera);
+  startCamera();
+</script>
+{% endblock %}

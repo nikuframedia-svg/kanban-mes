@@ -39,6 +39,33 @@ def _dsn() -> str:
     return os.environ.get("MES_PG_DSN") or settings.pg_dsn
 
 
+def _store_stoppages(cur, sheet: dict, header: dict, filled: list,
+                     sheet_date: str | None, operator: str) -> int:
+    """Linhas do verso da folha (paragens) → mes_kanban.stoppage_records."""
+    machine = str(header.get("setor_maquina") or "").strip() or None
+    n = 0
+    for i, row in filled:
+        cur.execute(
+            """
+            INSERT INTO mes_kanban.stoppage_records
+                (sheet_uid, row_index, sheet_date, machine, operator_name,
+                 motivo, inicio, fim, duracao_horas, resolvido, validated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            """,
+            (
+                sheet["uid"], i, sheet_date, machine,
+                operator or "(desconhecido)",
+                str(row.get("motivo") or "").strip() or None,
+                str(row.get("inicio") or "").strip() or None,
+                str(row.get("fim") or "").strip() or None,
+                sim.parse_number(row.get("duracao")),
+                str(row.get("resolvido") or "").strip() or None,
+            ),
+        )
+        n += 1
+    return n
+
+
 def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                           edit_count: int, actor: str) -> int:
     """Insere a folha + linhas. Devolve o nº de linhas de produção gravadas.
@@ -87,6 +114,10 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                     edit_count, actor, APP_VERSION,
                 ),
             )
+            if template.name == "cantoneiras_paragens":
+                n = _store_stoppages(cur, sheet, header, filled, sheet_date, operator)
+                conn.commit()
+                return n
             n = 0
             for i, row in filled:
                 cr = cross_rows.get(i) or {}

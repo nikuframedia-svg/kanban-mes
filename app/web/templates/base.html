@@ -1,56 +1,75 @@
 <!doctype html>
-<html lang="pt">
+<html lang="pt" data-theme="light">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Kanban MES{% endblock %}</title>
-<style>
-:root {
-  --bg: #f6f7f9; --card: #ffffff; --ink: #1c2430; --muted: #667085;
-  --line: #e4e7ec; --accent: #175cd3;
-  --ok-bg: #e6f4ea; --ok-ink: #1e7e34;
-  --warn-bg: #fff7e0; --warn-ink: #92600a;
-  --bad-bg: #fdecec; --bad-ink: #b42318;
-}
-* { box-sizing: border-box; }
-body { margin: 0; font: 15px/1.45 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--ink); }
-header { background: var(--card); border-bottom: 1px solid var(--line); padding: .7rem 1rem; display: flex; gap: 1rem; align-items: baseline; }
-header a { color: var(--accent); text-decoration: none; font-weight: 600; }
-header .sub { color: var(--muted); font-size: .85rem; }
-main { max-width: 1100px; margin: 1rem auto; padding: 0 1rem; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
-table { border-collapse: collapse; width: 100%; font-size: .88rem; }
-th, td { border: 1px solid var(--line); padding: .3rem .45rem; text-align: left; }
-th { background: #fafbfc; font-weight: 600; }
-.cell-confirmed { background: var(--ok-bg); }
-.cell-snapped { background: var(--warn-bg); }
-.cell-very_different { background: var(--bad-bg); }
-.cell-unmatched { background: #f2f4f7; }
-.badge { display: inline-block; padding: .1rem .5rem; border-radius: 99px; font-size: .75rem; font-weight: 600; }
-.badge.ok { background: var(--ok-bg); color: var(--ok-ink); }
-.badge.warn { background: var(--warn-bg); color: var(--warn-ink); }
-.badge.bad { background: var(--bad-bg); color: var(--bad-ink); }
-.badge.muted { background: #f2f4f7; color: var(--muted); }
-input[type=text], select { padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 6px; font-size: .88rem; width: 100%; }
-button, .btn { background: var(--accent); color: #fff; border: 0; border-radius: 7px; padding: .45rem .9rem; font-size: .88rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; }
-button.secondary { background: #fff; color: var(--ink); border: 1px solid var(--line); }
-.muted { color: var(--muted); }
-.cell-input { border: 0; background: transparent; width: 100%; padding: 0; font: inherit; }
-.proposal { font-size: .75rem; color: var(--muted); }
-.kpis { display: flex; gap: 1rem; flex-wrap: wrap; }
-.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .7rem 1rem; min-width: 130px; }
-.kpi .v { font-size: 1.4rem; font-weight: 700; }
-.kpi .l { color: var(--muted); font-size: .8rem; }
-.scroll { overflow-x: auto; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Kanban MES — Metalogalva{% endblock %}</title>
+  <script>
+    /* anti-flash: aplicar o tema guardado antes do primeiro paint */
+    (function () {
+      try {
+        var t = localStorage.getItem("mes_theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400..700&family=Inter+Tight:wght@400..750&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v={{ css_version }}">
+  <link rel="icon" href="data:image/svg+xml,{{ '<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%231c1916%22/><text x=%2232%22 y=%2244%22 font-family=%22Georgia,serif%22 font-weight=%22700%22 font-size=%2228%22 fill=%22%23f2efe9%22 text-anchor=%22middle%22>M</text></svg>' }}">
 </head>
 <body>
-<header>
-  <a href="/">Kanban MES</a>
-  <a href="/capture">+ Nova folha</a>
-  <a href="/dashboard">Dashboard</a>
-  <span class="sub">Metalogalva · chapa &amp; cantoneiras</span>
-</header>
-<main>{% block content %}{% endblock %}</main>
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="side-brand">
+      <div class="name">Metalogalva</div>
+      <div class="sub">OCR · Captura · Inteligência</div>
+    </div>
+
+    <nav class="side-section">
+      <span class="microlabel">Chão de fábrica</span>
+      <a class="side-link {% if active_page == 'captura' %}active{% endif %}" href="/captura">
+        <span class="num">01</span> Captura</a>
+      <a class="side-link {% if active_page == 'historico' %}active{% endif %}" href="/">
+        <span class="num">02</span> Histórico</a>
+    </nav>
+
+    <nav class="side-section">
+      <span class="microlabel">Dashboards</span>
+      <a class="side-link {% if active_page == 'estado' %}active{% endif %}" href="/estado">
+        <span class="num">01</span> Estado</a>
+    </nav>
+
+    <div class="side-foot">
+      <button class="theme-toggle" type="button" id="theme-toggle" title="Tema claro/escuro">◐</button>
+    </div>
+  </aside>
+
+  <div class="content">
+    <div class="content-head">
+      <div class="title-block">
+        <div class="eyebrow">{% block breadcrumb %}Kanban MES{% endblock %}</div>
+        <h1>{% block page_title %}{% endblock %}</h1>
+        {% block page_sub %}{% endblock %}
+      </div>
+      <div class="actions">{% block header_actions %}{% endblock %}</div>
+    </div>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+</div>
+<script>
+  document.getElementById("theme-toggle").addEventListener("click", function () {
+    var root = document.documentElement;
+    var next = root.dataset.theme === "dark" ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("mes_theme", next); } catch (e) {}
+  });
+</script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

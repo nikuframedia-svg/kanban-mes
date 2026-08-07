@@ -50,6 +50,7 @@ CANTONEIRAS_SPEC = IndexSpec(
         FieldSpec("ov", "code", "ov"),
         FieldSpec("cliente", "text", "cliente"),
         FieldSpec("modelo", "code", "modelo"),
+        FieldSpec("perfil", "code", "perfil"),
     ),
     numeric_fields=(
         FieldSpec("comp_mm", "numeric", "comp_mm", tolerance=50.0),
@@ -103,6 +104,11 @@ def load_cantoneiras_index() -> PlanIndex:
         JOIN core_mtg.production_orders o
           ON o.snapshot_id = l.snapshot_id
          AND o.production_order_no = l.production_order_no
+        WHERE l.snapshot_id = (
+            SELECT snapshot_id FROM audit_mtg.snapshots
+            WHERE snapshot_id LIKE 'mtg\\_%'
+            ORDER BY loaded_at DESC LIMIT 1
+        )
         """
     )
     return PlanIndex(entries, CANTONEIRAS_SPEC, plan_age_days=_plan_age_days("mtg\\_%"))
@@ -123,6 +129,10 @@ def load_chapa_index() -> PlanIndex:
                cut_remaining_quantity      AS qtd_restante,
                production_deadline         AS prazo
         FROM core_mtg.chapa_components
+        WHERE batch_id = (
+            SELECT batch_id FROM audit_mtg.chapa_batches
+            ORDER BY loaded_at DESC LIMIT 1
+        )
         """
     )
     return PlanIndex(entries, CHAPA_SPEC, plan_age_days=_plan_age_days("chapa\\_%"))
@@ -140,6 +150,10 @@ def load_nesting_index() -> PlanIndex:
                repetitions_planned         AS repeticoes_planeadas,
                manufacturing_date          AS data_fabrico
         FROM raw_mtg.chapa_nesting_rows
+        WHERE snapshot_id = (
+            SELECT plan_snapshot_id FROM audit_mtg.chapa_batches
+            ORDER BY loaded_at DESC LIMIT 1
+        )
         """
     )
     return PlanIndex(entries, NESTING_SPEC, plan_age_days=_plan_age_days("chapa\\_%"))
