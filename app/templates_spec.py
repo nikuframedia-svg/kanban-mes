@@ -39,15 +39,40 @@ CANTONEIRAS_KANBAN = KanbanTemplate(
     index_loader="load_cantoneiras_index",
     # colunas na ordem exata da folha física TPL102 (Rapid 20T):
     # CLIENTE | OV | OF | PERFIL | MODELO | QTD | PERF. COMP.
-    row_fields=("cliente", "ov", "of", "perfil", "modelo", "qtd", "comp_mm"),
+    row_fields=("cliente", "ov", "of", "perfil", "modelo", "qtd", "perf_comp"),
     footer_fields=("metros_produzidos", "horas_trabalhadas"),
     field_labels={
         "cliente": "Cliente", "ov": "OV", "of": "OF", "perfil": "Perfil",
-        "modelo": "Modelo", "qtd": "Qtd", "comp_mm": "Perf. Comp. (mm)",
+        "modelo": "Modelo", "qtd": "Qtd", "perf_comp": "Perf. Comp.",
         "metros_produzidos": "Metros produzidos",
         "horas_trabalhadas": "Horas trabalhadas",
     },
 )
+
+# «Perfil completo»: a última coluna da TPL102. Quando o operador põe um visto,
+# aquela linha vale por todas as referências daquele perfil na OF — é por isso
+# que nessas linhas não há modelo nem quantidade (medido: perfil em 100% delas,
+# modelo em 16%). Esteve modelada como comprimento em milímetros, o que nunca
+# correspondeu ao papel: em nenhuma folha real há milímetros nesta coluna.
+_MARKS = frozenset({"x", "✓", "v", "sim", "ok"})
+
+
+def is_marked(value: object) -> bool:
+    """A célula tem um visto? (não confundir com ter um número escrito)"""
+    return str(value or "").strip().lower() in _MARKS
+
+
+# Folhas lidas antes da mudança de nome guardaram esta coluna como `comp_mm`.
+# Ler pelos dois nomes evita reescrever `raw_extraction`, que é a transcrição
+# original e não se falsifica para arrumar o schema.
+_LEGACY_FIELD = {"perf_comp": "comp_mm"}
+
+
+def field_value(row: dict, field: str):
+    value = row.get(field)
+    if value in (None, "") and field in _LEGACY_FIELD:
+        return row.get(_LEGACY_FIELD[field])
+    return value
 
 CANTONEIRAS_PARAGENS = KanbanTemplate(
     name="cantoneiras_paragens",

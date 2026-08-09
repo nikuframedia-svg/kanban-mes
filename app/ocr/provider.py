@@ -108,6 +108,10 @@ class GeminiOcrProvider:
             "`n_operador` é o campo «N.º».\n"
             "6. Valores repetidos por linhas seguidas (ex.: cliente escrito uma vez para "
             "várias linhas) transcrevem-se só na linha onde estão escritos.\n"
+            "7. Atenção às DUAS ÚLTIMAS colunas, que se confundem facilmente: o que "
+            "estiver na coluna «QTD» vai para `qtd` e o que estiver na última coluna "
+            "vai para `perf_comp`. Se uma delas estiver vazia na folha, deixa-a a null "
+            "— não desloques valores de uma coluna para a outra.\n"
             f"Colunas da tabela, pela ordem da folha: {row_desc}.\n"
             "Devolve apenas o JSON pedido."
         )

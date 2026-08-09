@@ -13,7 +13,7 @@ import psycopg
 
 from .config import settings
 from .matching import similarity as sim
-from .templates_spec import KanbanTemplate
+from .templates_spec import KanbanTemplate, is_marked
 
 APP_VERSION = "kanban-mes 0.1.0"
 
@@ -24,19 +24,40 @@ _FIELD_TO_COLUMN = {
     "cliente": "customer_name",
     "modelo": "model_ref",
     "nesting": "model_ref",
+    "perfil": "profile_type",
     "qtd": "quantity",
     "repeticoes": "quantity",
-    "comp_mm": "length_mm",
+    "perf_comp": "full_profile",
+    "comp_mm": "length_mm",     # chapa: aqui é mesmo um comprimento
     "larg_mm": "width_mm",
     "esp": "thickness_mm",
     "lote": "lot_ref",
     "sucata": "scrap",
 }
-_NUMERIC_COLUMNS = {"quantity", "length_mm", "width_mm", "thickness_mm"}
+_NUMERIC_COLUMNS = {"quantity", "length_mm", "width_mm", "thickness_mm", "plan_quantity"}
+_BOOLEAN_COLUMNS = {"full_profile"}
+
+# Colunas acrescentadas por migrações posteriores ao primeiro schema. A app
+# sonda-as no arranque em vez de as assumir: assim a ordem entre o deploy do
+# código e a aplicação do SQL deixa de importar — sem isto, código novo com
+# base antiga fazia falhar TODAS as validações.
+_OPTIONAL_COLUMNS = ("profile_type", "full_profile", "plan_quantity")
+_available_columns: set[str] | None = None
 
 
 def _dsn() -> str:
     return os.environ.get("MES_PG_DSN") or settings.pg_dsn
+
+
+def _columns_present(cur) -> set[str]:
+    global _available_columns
+    if _available_columns is None:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'mes_kanban' AND table_name = 'production_records'"
+        )
+        _available_columns = {r[0] for r in cur.fetchall()}
+    return _available_columns
 
 
 def _store_stoppages(cur, sheet: dict, header: dict, filled: list,
@@ -118,9 +139,25 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 n = _store_stoppages(cur, sheet, header, filled, sheet_date, operator)
                 conn.commit()
                 return n
+            present = _columns_present(cur)
+            optional = [c for c in _OPTIONAL_COLUMNS if c in present]
+            sql = (
+                "INSERT INTO mes_kanban.production_records "
+                "(sheet_uid, row_index, sheet_date, family, operator_name, "
+                " machine, production_order, sales_order, customer_name, "
+                " model_ref, matched_plan_key, match_confidence, "
+                " quantity, length_mm, width_mm, thickness_mm, lot_ref, "
+                " scrap, hours_worked, extra, validated_at"
+                + "".join(f", {c}" for c in optional)
+                + ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                  "%s, %s, %s, %s, %s, %s, %s, %s, now()"
+                + ", %s" * len(optional)
+                + ")"
+            )
             n = 0
             for i, row in filled:
                 cr = cross_rows.get(i) or {}
+                cells = {c["field"]: c for c in cr.get("cells", [])}
                 cols: dict[str, object] = {}
                 extra: dict[str, object] = {}
                 for f, value in row.items():
@@ -129,22 +166,34 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                     col = _FIELD_TO_COLUMN.get(f)
                     if col is None:
                         extra[f] = value
+                    elif col in _BOOLEAN_COLUMNS:
+                        cols[col] = is_marked(value)
                     elif col in _NUMERIC_COLUMNS:
                         cols[col] = sim.parse_number(value)
                     else:
                         cols.setdefault(col, str(value).strip())
+                # Identidade herdada da linha de cima: no staging fica em branco
+                # (é o que está no papel), mas aqui tem de ser explícita, senão
+                # a linha chega ao Postgres sem OF. A proveniência fica em
+                # `extra` para se saber depois o que foi escrito e o que foi lido.
+                inherited: dict[str, int] = {}
+                for f, col in (("of", "production_order"), ("ov", "sales_order"),
+                               ("cliente", "customer_name")):
+                    cell = cells.get(f)
+                    if not cols.get(col) and cell and cell.get("inherited"):
+                        cols[col] = str(cell["inherited"]).strip()
+                        inherited[f] = cell.get("inherited_from")
+                if inherited:
+                    extra["identidade_herdada"] = inherited
+                # Quantidade planeada da linha do plano que casou, para se poder
+                # ver mais tarde porque é que uma quantidade foi assinalada.
+                qtd_cell = cells.get("qtd") or {}
+                if qtd_cell.get("plan_limit") is not None:
+                    cols["plan_quantity"] = qtd_cell["plan_limit"]
+
                 machine = row.get("maquina") or header.get("setor_maquina")
                 cur.execute(
-                    """
-                    INSERT INTO mes_kanban.production_records
-                        (sheet_uid, row_index, sheet_date, family, operator_name,
-                         machine, production_order, sales_order, customer_name,
-                         model_ref, matched_plan_key, match_confidence,
-                         quantity, length_mm, width_mm, thickness_mm, lot_ref,
-                         scrap, hours_worked, extra, validated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s, %s, %s, %s, %s, now())
-                    """,
+                    sql,
                     (
                         sheet["uid"], i, sheet_date, template.family,
                         operator or "(desconhecido)",
@@ -157,6 +206,7 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                         cols.get("lot_ref"), cols.get("scrap"),
                         hours_worked,
                         json.dumps(extra, ensure_ascii=False, default=str) if extra else None,
+                        *[cols.get(c) for c in optional],
                     ),
                 )
                 n += 1

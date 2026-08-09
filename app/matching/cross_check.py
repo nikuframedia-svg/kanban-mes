@@ -21,6 +21,7 @@ from . import carryover
 from .carryover import RowIdentity
 from .params import CrossParams
 from .refs import PlanIndex
+from ..templates_spec import is_marked
 from .scorer import RowMatch, Scorer
 from . import similarity as sim
 
@@ -39,6 +40,10 @@ class CellCheck:
     # escrito pelo operador.
     inherited: str | None = None
     inherited_from: int | None = None
+    # Quantidade planeada para esta linha do plano. A Qtd escrita compara-se
+    # com ela como limite superior, não como valor esperado: produzir menos do
+    # que o previsto é normal, produzir mais é que merece um olhar.
+    plan_limit: float | None = None
 
 
 @dataclass
@@ -51,6 +56,38 @@ class RowCheck:
     review_priority: float
     cells: list[CellCheck] = field(default_factory=list)
     rivals: list[str] = field(default_factory=list)
+
+
+def plan_quantity_for(index: PlanIndex, of: str, modelo: str) -> float | None:
+    """Quantidade planeada para uma referência dentro de uma obra.
+
+    Usa-se `quantity_planned` e não `remaining_quantity`: a segunda é derivada,
+    está travada a zero quando já se produziu tudo, e só se actualiza quando
+    alguém volta a gravar o Excel — dava limites de zero em obras que estão a
+    ser produzidas neste turno.
+    """
+    if not of or not modelo:
+        return None
+    of_hits = set(index.exact_matches("of", of))
+    if not of_hits:
+        return None
+    modelo_hits = set(index.exact_matches("modelo", modelo))
+    both = of_hits & modelo_hits
+    if not both:
+        return None
+    total = 0.0
+    seen = False
+    for idx in both:
+        value = sim.parse_number(index.entries[idx].get("qtd_planeada"))
+        if value is not None:
+            total += value
+            seen = True
+    return total if seen else None
+
+
+def _looks_numeric(text: str) -> bool:
+    """`2x` ou `1+1` não são quantidades — parse_number daria 2 e 11."""
+    return bool(text) and all(ch.isdigit() or ch in " .,-" for ch in text)
 
 
 def _threshold_for(field_name: str, params: CrossParams) -> float:
@@ -170,6 +207,28 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             inherited_from=inherited_from.get(f.name),
         ))
 
+    # Qtd: limite superior, não valor esperado. Não entra nos campos cruzados
+    # porque a pergunta não é «é parecido com o plano?» mas «cabe no plano?».
+    qtd_written = str(row.get("qtd") or "").strip()
+    if qtd_written and not is_marked(scored_row.get("perf_comp")):
+        qtd_num = sim.parse_number(qtd_written) if _looks_numeric(qtd_written) else None
+        limite = plan_quantity_for(
+            index,
+            str(scored_row.get("of") or ""),
+            str(scored_row.get("modelo") or ""),
+        ) if qtd_num is not None else None
+        if limite is not None:
+            over = qtd_num > limite
+            cells.append(CellCheck(
+                field="qtd", written=qtd_written,
+                proposal=None,                      # o plano não dita a produção
+                status="over_limit" if over else "confirmed",
+                similarity=0.0 if over else 1.0,
+                auto_write=False,                   # nunca reescrever produção
+                p_correct=p,
+                plan_limit=limite,
+            ))
+
     priority = max(
         (params.policy.criticality.get(c.field, params.policy.criticality_default) * (1.0 - p)
          for c in cells if c.status not in ("confirmed", "na")),
@@ -213,6 +272,7 @@ def check_sheet(rows: list[dict], scorer: Scorer,
         "cells_snapped": sum(1 for c in checks for x in c.cells if x.status == "snapped"),
         "cells_very_different": sum(1 for c in checks for x in c.cells if x.status == "very_different"),
         "cells_inherited": sum(1 for c in checks for x in c.cells if x.inherited_from is not None),
+        "cells_over_limit": sum(1 for c in checks for x in c.cells if x.status == "over_limit"),
     }
     review_order = sorted(
         (c.row_index for c in checks if c.review_priority > 0),

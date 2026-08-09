@@ -171,7 +171,11 @@ setTimeout(function () {
                  {% if numeric %}inputmode="decimal"{% endif %}
                  onchange="this.form.submit()">
         </form>{{ snap_mark(field_path) }}
-        {% if cell and cell.proposal and cell.status in ('snapped', 'very_different') and (cell.written or '') != cell.proposal %}
+        {% if cell and cell.status == 'over_limit' %}
+          {# Sem link de aceitar: o plano diz o que estava previsto, não o que
+             foi produzido — copiar o número do plano falsificaria o registo. #}
+          <div class="proposal">plano: {{ '%g' | format(cell.plan_limit) }}</div>
+        {% elif cell and cell.proposal and cell.status in ('snapped', 'very_different') and (cell.written or '') != cell.proposal %}
           <div class="proposal">
             plano: <a href="#" onclick="return acceptProposal(this, {{ cell.proposal | tojson }})">{{ cell.proposal }}</a>
           </div>
@@ -235,6 +239,7 @@ setTimeout(function () {
                 <td class="{% if cell %}{{ {'confirmed': 'cc-match',
                                             'snapped': 'cc-warn',
                                             'very_different': 'cc-no-match',
+                                            'over_limit': 'cc-over',
                                             'unmatched': 'cc-na-suspended',
                                             'na': 'cc-na'}.get(cell.status, 'cc-na') }}{% endif %}">
                   {{ edit_cell('rows[' ~ i ~ '].' ~ f, row.get(f), cell, numeric=(f in ('esp', 'comp_mm', 'larg_mm', 'qtd', 'repeticoes'))) }}

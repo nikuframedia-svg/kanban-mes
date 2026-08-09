@@ -62,9 +62,10 @@ CANTONEIRAS_SPEC = IndexSpec(
         FieldSpec("modelo", "code", "modelo"),
         FieldSpec("perfil", "profile", "perfil"),
     ),
-    numeric_fields=(
-        FieldSpec("comp_mm", "numeric", "comp_mm", tolerance=50.0),
-    ),
+    # Sem dimensões: a última coluna da folha é PERF. COMP. (um visto), não um
+    # comprimento. Enquanto esteve modelada como comprimento, o motor propunha
+    # escrever milímetros do plano por cima do visto do operador.
+    numeric_fields=(),
     key_field="plan_key",
 )
 
