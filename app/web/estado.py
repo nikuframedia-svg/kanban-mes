@@ -7,6 +7,7 @@ Todas as funções degradam graciosamente: Postgres em baixo → {"available": F
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 
 from ..config import settings
 
@@ -191,6 +192,50 @@ def filter_rows(rows: list[dict], q: str = "", familia: str = "") -> list[dict]:
     return out
 
 
+# Acima disto o plano está a ficar velho. 36 h = duas passagens do cron
+# falhadas; 72 h = ninguém grava o ficheiro no Drive há três dias.
+FRESCURA_AVISO_HORAS = 36
+FRESCURA_ALERTA_HORAS = 72
+
+_FONTES = (
+    ("plano de produção", "^mtg_", None),
+    ("lista de colaboradores", None, "ds-colaboradores"),
+)
+
+
+def fetch_fontes() -> list[dict]:
+    """Idade de cada referência que a app consome.
+
+    O ponto 7 do cliente — «o planeamento é actualizado diariamente» — não é
+    código nosso: o cron já corre duas vezes por dia e recarrega minutos depois
+    de o ficheiro mudar. O que nos cabe é dizer quando isso não aconteceu.
+    """
+    out = []
+    for nome, like, dataset in _FONTES:
+        if like:
+            sql = ("SELECT snapshot_id, loaded_at FROM audit_mtg.snapshots "
+                   "WHERE snapshot_id ~ %s ORDER BY loaded_at DESC LIMIT 1")
+            params = (like,)
+        else:
+            sql = ("SELECT snapshot_id, loaded_at FROM audit_mtg.snapshots "
+                   "WHERE dataset_id = %s ORDER BY loaded_at DESC LIMIT 1")
+            params = (dataset,)
+        try:
+            rows = _fetch(sql, params)
+        except Exception:
+            rows = []
+        if not rows:
+            out.append({"nome": nome, "horas": None, "estado": "ausente"})
+            continue
+        loaded = rows[0]["loaded_at"]
+        horas = max(0.0, (datetime.now(timezone.utc) - loaded).total_seconds() / 3600.0)
+        estado = ("crit" if horas > FRESCURA_ALERTA_HORAS
+                  else "warn" if horas > FRESCURA_AVISO_HORAS else "ok")
+        out.append({"nome": nome, "horas": horas, "estado": estado,
+                    "snapshot": rows[0]["snapshot_id"]})
+    return out
+
+
 def load_estado(q: str = "", familia: str = "", of: str = "") -> dict:
     """Ponto de entrada da página. Nunca lança — devolve available/error."""
     try:
@@ -203,8 +248,9 @@ def load_estado(q: str = "", familia: str = "", of: str = "") -> dict:
             "total": len(merged),
             "kpis": kpis,
             "detail": detail,
+            "fontes": fetch_fontes(),
         }
     except Exception as exc:  # Postgres em baixo, schema ausente — mostrar, não rebentar
         msg = str(exc).strip().splitlines()[0] if str(exc).strip() else exc.__class__.__name__
         return {"available": False, "error": msg, "rows": [], "total": 0,
-                "kpis": {"folhas": 0, "registos": 0}, "detail": None}
+                "kpis": {"folhas": 0, "registos": 0}, "detail": None, "fontes": []}

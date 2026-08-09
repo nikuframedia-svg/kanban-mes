@@ -51,6 +51,23 @@
 </div>
 {% else %}
 
+{# O plano é tão fresco quanto a última vez que alguém gravou o Excel no
+   Drive. O ciclo automático corre 2x por dia; isto diz quando não correu. #}
+{% if estado.fontes %}
+<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px;">
+  {% for f in estado.fontes %}
+  <span class="pill {{ {'ok':'ok','warn':'warn','crit':'crit'}.get(f.estado,'neutral') }}"
+        title="{{ f.snapshot or 'sem carga registada' }}">
+    {{ f.nome }} ·
+    {% if f.horas is none %}nunca carregada
+    {% elif f.horas < 1 %}agora mesmo
+    {% elif f.horas < 48 %}há {{ '%.0f' | format(f.horas) }} h
+    {% else %}há {{ '%.0f' | format(f.horas / 24) }} dias{% endif %}
+  </span>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if estado.detail %}
 <div class="card" style="margin-bottom:14px;">
   <div class="card-h">

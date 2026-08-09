@@ -87,8 +87,10 @@ def tunnel_url() -> str | None:
     except OSError:
         return None
 
-_INDEX_TTL_SECONDS = 600
-_index_cache: dict[str, tuple[float, object]] = {}
+# De quanto em quanto tempo se pergunta ao Postgres se há plano novo. Baixo
+# porque a pergunta é uma linha; o índice só se reconstrói se a resposta mudar.
+_FRESHNESS_PROBE_SECONDS = 30
+_index_cache: dict[str, tuple[float, object, str | None]] = {}
 _index_lock = threading.Lock()
 
 
@@ -97,16 +99,38 @@ def _conn():
 
 
 def get_index(loader_name: str):
-    """Índice do plano com cache TTL — o plano muda no máximo a cada reload do Excel."""
+    """Índice do plano em cache, revalidado contra o snapshot mais recente.
+
+    O TTL sozinho era a forma errada de o fazer: reconstruía 64 mil linhas de
+    dez em dez minutos mesmo sem nada ter mudado, e ainda assim demorava até
+    dez minutos a ver um plano novo. A sonda é uma linha de SQL — reconstrói
+    quando (e só quando) o snapshot muda.
+    """
     now = time.monotonic()
     with _index_lock:
         hit = _index_cache.get(loader_name)
-        if hit and now - hit[0] < _INDEX_TTL_SECONDS:
-            return hit[1]
+    if hit:
+        checked_at, index, snapshot = hit
+        if now - checked_at < _FRESHNESS_PROBE_SECONDS:
+            return index
+        current = _current_snapshot_id()
+        if current is None or current == snapshot:
+            # sonda falhou (Postgres em baixo) ou nada mudou: continuar com o
+            # que temos, e voltar a sondar daqui a pouco
+            with _index_lock:
+                _index_cache[loader_name] = (time.monotonic(), index, snapshot)
+            return index
     index = getattr(loaders, loader_name)()
     with _index_lock:
-        _index_cache[loader_name] = (time.monotonic(), index)
+        _index_cache[loader_name] = (time.monotonic(), index, _current_snapshot_id())
     return index
+
+
+def _current_snapshot_id() -> str | None:
+    try:
+        return (loaders.plan_snapshot_info() or {}).get("snapshot_id")
+    except Exception:
+        return None
 
 
 def get_employees():
