@@ -220,18 +220,6 @@ input[type="date"] {
 .sheet-header-inline table { border-collapse: collapse; }
 .sheet-header-inline table td { background: var(--paper-2); border-radius: 4px; }
 
-/* Round 34c — image rotation moved server-side (see /image/{sheet_id}
-   in main.py). PIL handles EXIF + portrait→landscape, results cached
-   next to the original. CSS rotate-cw hack removed (was causing
-   layout overflow when transformed image's bounding box stayed
-   vertical). */
-.img-rotate-wrap {
-  /* Wrapper that keeps the rotated image bounded — apply to <div> around <img>. */
-  display: inline-block;
-  position: relative;
-  overflow: hidden;
-}
-
 /* =====================================================================
    Page header
    ===================================================================== */

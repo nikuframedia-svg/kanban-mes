@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import db, pg_store
+from .. import db, imaging, pg_store
 from ..config import settings
 from ..matching import loaders
 from ..matching.cross_check import check_sheet
@@ -261,7 +261,11 @@ def _process_sheet(uid: str) -> None:
         template_name = sheet["template_name"]
         template = get_template(template_name)
         provider = get_provider()
-        image_path = Path(sheet["image_path"])
+        # O OCR lê a folha na orientação de leitura, não como ela saiu do
+        # scanner: com a folha deitada o modelo troca colunas.
+        image_path = imaging.render_oriented(
+            Path(sheet["image_path"]), int(sheet.get("image_rotation") or 0)
+        )
         # folha TPL102 tem frente (produção) e verso (paragens): detetar por página
         if template_name == "cantoneiras_kanban" and hasattr(provider, "classify_page"):
             try:
@@ -521,7 +525,7 @@ def sheet_view(request: Request, uid: str, back: str | None = None,
 
 
 @app.get("/sheet/{uid}/photo")
-def sheet_photo(uid: str):
+def sheet_photo(uid: str, original: int = 0):
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -533,7 +537,28 @@ def sheet_photo(uid: str):
     # a foto tem de viver dentro da pasta de imagens da app (anti path-traversal)
     if not path.is_relative_to(settings.images_dir.resolve()) or not path.is_file():
         raise HTTPException(404)
+    if not original:
+        path = imaging.render_oriented(path, int(sheet.get("image_rotation") or 0))
     return FileResponse(path)
+
+
+@app.post("/sheet/{uid}/rotate")
+def sheet_rotate(uid: str):
+    """Roda mais 90° no sentido horário, por cima da correcção automática.
+
+    A automática acerta em todas as digitalizações que vimos, mas é um palpite
+    sobre o conteúdo a partir da forma da imagem — se sair ao contrário, o
+    revisor resolve com cliques.
+    """
+    conn = _conn()
+    try:
+        sheet = db.get_sheet(conn, uid)
+        if not sheet:
+            raise HTTPException(404)
+        rotation = db.set_image_rotation(conn, uid, int(sheet.get("image_rotation") or 0) + 90)
+    finally:
+        conn.close()
+    return {"ok": True, "rotation": rotation}
 
 
 @app.get("/sheet/{uid}/pdf")

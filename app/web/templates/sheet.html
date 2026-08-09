@@ -107,12 +107,16 @@ setTimeout(function () {
     <div class="card" style="margin-bottom:14px;">
       <div class="card-h">
         <span class="card-h-title">A folha original</span>
-        <span class="card-h-sub">tamanho real</span>
+        {% if sheet.image_path %}
+        <button type="button" class="btn ghost" style="padding:2px 8px; font-size:12px;"
+                title="Rodar 90° — se a folha aparecer ao contrário"
+                onclick="rodarFolha('{{ sheet.uid }}', this)">↻ rodar</button>
+        {% endif %}
       </div>
       <div class="card-b">
         {% if sheet.image_path %}
         <a href="/sheet/{{ sheet.uid }}/photo" target="_blank" title="Abrir em tamanho real">
-          <img class="review-photo" src="/sheet/{{ sheet.uid }}/photo"
+          <img class="review-photo" id="folha-img" src="/sheet/{{ sheet.uid }}/photo"
                alt="Foto da folha kanban" loading="lazy">
         </a>
         {% else %}
@@ -310,6 +314,19 @@ function acceptProposal(link, value) {
   const input = td.querySelector('input[name=value]');
   if (input) { input.value = value; input.form.submit(); }
   return false;
+}
+
+function rodarFolha(uid, btn) {
+  btn.disabled = true;
+  fetch('/sheet/' + uid + '/rotate', { method: 'POST' })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(() => {
+      // O URL não muda, por isso é preciso forçar o browser a ir buscar de novo.
+      const img = document.getElementById('folha-img');
+      img.src = img.src.split('?')[0] + '?t=' + Date.now();
+    })
+    .catch(e => alert('Não foi possível rodar: ' + e))
+    .finally(() => { btn.disabled = false; });
 }
 </script>
 {% endblock %}

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS sheets (
     sheet_data      TEXT,          -- JSON atual (pós-cross + edições)
     cross_check     TEXT,          -- JSON do último cruzamento
     error_message   TEXT,
+    image_rotation  INTEGER NOT NULL DEFAULT 0,  -- quartos de volta CW pedidos por humano
     revision        INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL,
     extracted_at    TEXT,
@@ -46,6 +48,40 @@ CREATE TABLE IF NOT EXISTS edits (
 CREATE INDEX IF NOT EXISTS edits_sheet_idx ON edits(sheet_uid);
 """
 
+# Colunas acrescentadas depois de já haver bases em uso. Bases novas nascem com
+# elas (estão no SCHEMA); as antigas precisam de ALTER, e o SQLite não tem
+# "ADD COLUMN IF NOT EXISTS". A escada por user_version corre uma vez por
+# ficheiro de base; o try/except cobre a corrida entre processos.
+_SCHEMA_VERSION = 1
+_MIGRATIONS = (
+    (1, "ALTER TABLE sheets ADD COLUMN image_rotation INTEGER NOT NULL DEFAULT 0"),
+)
+_migrated: set[str] = set()
+_migrate_lock = threading.Lock()
+
+
+def _migrate(conn: sqlite3.Connection, key: str) -> None:
+    if key in _migrated:
+        return
+    with _migrate_lock:
+        if key in _migrated:
+            return
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        for target, sql in _MIGRATIONS:
+            if version < target:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError as exc:
+                    # Base criada de raiz pelo SCHEMA já tem a coluna.
+                    if "duplicate column" not in str(exc).lower():
+                        raise
+                version = target
+        if version < _SCHEMA_VERSION:
+            version = _SCHEMA_VERSION
+        conn.execute(f"PRAGMA user_version = {version}")
+        conn.commit()
+        _migrated.add(key)
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -59,6 +95,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
     conn.executescript(SCHEMA)
+    _migrate(conn, str(db_path))
     return conn
 
 
@@ -190,6 +227,18 @@ def save_sheet_data(conn: sqlite3.Connection, uid: str, sheet_data: dict,
     )
     conn.commit()
     return cur.rowcount == 1
+
+
+def set_image_rotation(conn: sqlite3.Connection, uid: str, rotation: int) -> int:
+    """Rotação manual pedida pelo humano, em quartos de volta no sentido horário.
+
+    Normalizada a {0, 90, 180, 270}. É um pedido *adicional* à correcção
+    automática: 0 não quer dizer «não rodes», quer dizer «a automática chega».
+    """
+    norm = (int(rotation) % 360 // 90) * 90
+    conn.execute("UPDATE sheets SET image_rotation = ? WHERE uid = ?", (norm, uid))
+    conn.commit()
+    return norm
 
 
 def save_cross_check(conn: sqlite3.Connection, uid: str, cross: dict) -> None:

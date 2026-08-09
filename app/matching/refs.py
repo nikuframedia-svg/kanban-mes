@@ -21,9 +21,15 @@ class FieldSpec:
     """Liga um campo da folha kanban a um campo da entrada do plano."""
 
     name: str                 # nome na folha (ex.: "of", "cliente", "esp")
-    kind: str                 # "code" | "text" | "numeric"
+    kind: str                 # "code" | "text" | "numeric" | "profile"
     entry_key: str            # chave no dict da entrada do plano
     tolerance: float = 0.0    # só para numeric
+    # O plano prefixa (OF…, OV…) e o operador não. Ver sim.code_variants.
+    code_prefix: str = ""
+    # Teto de entradas por valor ao gerar candidatos. Um valor que aparece em
+    # metade do plano não identifica nada sozinho — mas uma OF grande continua
+    # a ser uma OF, por isso o teto tem de poder ser levantado por campo.
+    max_candidate_entries: int | None = 500
 
 
 @dataclass
@@ -46,7 +52,11 @@ class PlanIndex:
         self._lookup: dict[str, dict[str, list[int]]] = {}  # field -> valor -> [idx]
         self._keys: dict[str, list[str]] = {}          # field -> valores distintos (fuzzy)
 
+        self._field_by_name = {f.name: f for f in spec.identity_fields}
+
         for f in spec.identity_fields:
+            # O lado do plano já vem canónico (L45X45X4); é o lado escrito que
+            # precisa de ser trazido para esta forma — ver normalize_written.
             norm_fn = sim.normalize_code if f.kind == "code" else sim.compact
             values = [norm_fn(e.get(f.entry_key)) for e in entries]
             self._norm[f.name] = values
@@ -72,23 +82,59 @@ class PlanIndex:
         # caches de desempenho (o plano é imutável durante a vida do índice)
         self._tol_cache: dict[tuple[str, float, float], frozenset[int]] = {}
         self._bags: dict[str, dict[str, Counter]] = {}
+        self._value_sets: dict[str, frozenset[str]] = {}
 
     # ---- u por valor (a ideia central) ----
 
     def value_frequency(self, field_name: str, value: str) -> int:
         return self._freq.get(field_name, Counter()).get(value, 0)
 
+    # ---- normalização do lado escrito ----
+
+    def normalize_written(self, field_name: str, value: str | None) -> str:
+        """Traz o que o operador escreveu para a forma em que o plano guarda.
+
+        É aqui que se resolve a diferença de convenção: `60x5` → `L60X60X5`
+        para perfis. Códigos ficam compactos (o prefixo trata-se nas variantes,
+        porque nem toda a coluna o tem).
+        """
+        f = self._field_by_name.get(field_name)
+        if f is None:
+            return sim.compact(value)
+        if f.kind == "profile":
+            return sim.normalize_profile(value, self._value_set(field_name))
+        if f.kind == "code":
+            return sim.normalize_code(value)
+        return sim.compact(value)
+
+    def _value_set(self, field_name: str) -> frozenset[str]:
+        cached = self._value_sets.get(field_name)
+        if cached is None:
+            cached = frozenset(self._freq.get(field_name, Counter()))
+            self._value_sets[field_name] = cached
+        return cached
+
+    def variants_for(self, field_name: str, written: str | None) -> set[str]:
+        """Formas sob as quais o escrito pode aparecer no plano."""
+        f = self._field_by_name.get(field_name)
+        norm = self.normalize_written(field_name, written)
+        if not norm:
+            return set()
+        if f is not None and f.kind == "code":
+            return sim.code_variants(norm, f.code_prefix)
+        return {norm}
+
     # ---- lookups ----
 
     def exact_matches(self, field_name: str, written: str,
                       max_entries: int | None = None) -> list[int]:
-        """Entradas cujo valor bate certo com o escrito ou com uma variante O↔0.
+        """Entradas cujo valor bate certo com o escrito ou com uma variante.
         `max_entries`: ignora valores demasiado comuns para gerar candidatos —
         um cliente com 10 mil linhas não identifica nada sozinho (continua a
         contar como evidência ao pontuar candidatos vindos de outros campos)."""
         lookup = self._lookup.get(field_name, {})
         out: list[int] = []
-        for variant in sim.zero_o_variants(written):
+        for variant in self.variants_for(field_name, written):
             hits = lookup.get(variant, ())
             if max_entries is not None and len(hits) > max_entries:
                 continue
@@ -100,7 +146,7 @@ class PlanIndex:
         """Top-K valores distintos mais parecidos com o escrito → entradas.
         Pré-filtro barato (comprimento + saco de caracteres, minorante da distância
         de edição) antes do Levenshtein completo, para escalar a planos grandes."""
-        written_n = sim.compact(written)
+        written_n = self.normalize_written(field_name, written)
         if not written_n:
             return []
         w_len = len(written_n)

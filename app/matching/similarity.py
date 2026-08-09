@@ -56,6 +56,58 @@ def zero_o_variants(code: str) -> set[str]:
     return variants
 
 
+def code_variants(value: str | None, prefix: str = "") -> set[str]:
+    """Formas sob as quais um código escrito à mão pode aparecer no plano.
+
+    O plano guarda `OF263323`/`OV2504650` (todas as 64 mil linhas com prefixo)
+    e o operador escreve `263323` — a folha já diz «OF» no cabeçalho da coluna,
+    ninguém repete o prefixo. A variante prefixada é **adicional**: nem tudo o
+    que está na coluna OV começa por OV, portanto a forma sem prefixo continua
+    a valer.
+    """
+    base = normalize_code(value)
+    if not base:
+        return set()
+    out = zero_o_variants(base)
+    if prefix:
+        pfx = compact(prefix)
+        if pfx and not base.startswith(pfx):
+            out = out | {pfx + v for v in out}
+    return out
+
+
+# Perfis de cantoneira: o plano escreve `L60X60X5`, o operador escreve `60x5`,
+# `60 x 5` ou `L50x6`. Duas medidas querem dizer abas iguais (`60x5` = 60×60×5).
+_PROFILE_PARTS = re.compile(r"^([A-Z]*)([0-9X]+)$")
+
+
+def normalize_profile(value: str | None, known: object = None) -> str:
+    """Forma canónica de um perfil, no formato do plano (`L a X b X c`).
+
+    `known`, se vier, é um conjunto de perfis válidos: a expansão de duas para
+    três medidas só se faz se o resultado existir mesmo no plano. Sem essa
+    guarda estaríamos a adivinhar — a maioria das cantoneiras tem abas iguais,
+    mas não todas.
+    """
+    base = compact(value)
+    if not base:
+        return ""
+    m = _PROFILE_PARTS.match(base)
+    if not m:
+        return base
+    letters, digits = m.group(1), m.group(2)
+    parts = [p for p in digits.split("X") if p]
+    if len(parts) == 3:
+        cand = f"{letters or 'L'}{parts[0]}X{parts[1]}X{parts[2]}"
+    elif len(parts) == 2:
+        cand = f"{letters or 'L'}{parts[0]}X{parts[0]}X{parts[1]}"
+    else:
+        return base
+    if known is not None and cand not in known:
+        return base
+    return cand
+
+
 def client_tokens(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
