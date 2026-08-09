@@ -1,16 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Captura — Kanban MES{% endblock %}
-{% block breadcrumb %}Chão de fábrica · Captura{% endblock %}
-{% block page_title %}Capturar folhas{% endblock %}
-{% block header_actions %}
+{% block topbar_actions %}
 <a class="btn" href="/captura/camara">Abrir câmara</a>
 {% endblock %}
 {% block content %}
 
+<div class="page-h">
+  <div>
+    <div class="page-eyebrow">Chão de Fábrica · Captura</div>
+    <h1 class="page-title">Capturar folhas</h1>
+  </div>
+</div>
+
+<div class="page-content">
 <form id="upload-form" method="post" action="/upload" enctype="multipart/form-data">
 
-  <div class="capture-toolbar">
-    <span class="microlabel">Tipo de folha</span>
+  <div style="display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap;">
+    <span class="lbl">Tipo de folha</span>
     <div class="radio-chips">
       {% set chip_labels = {'cantoneiras_kanban': 'Cantoneiras',
                             'cantoneiras_paragens': 'Paragens',
@@ -29,27 +35,31 @@
     <div id="dz-idle">
       <div class="dz-icon">🗎</div>
       <p class="dz-title">Arrasta imagens ou PDF para aqui</p>
-      <div class="ou">ou</div>
+      <div class="muted tiny">ou</div>
       <label class="btn primary" style="cursor:pointer">
         Escolher ficheiros
         <input id="file-input" type="file" name="photos" multiple accept="image/*,.pdf,application/pdf" hidden>
       </label>
-      <p class="hint">PDF de kanbans digitalizados: cada página vira uma folha —
-         a frente (produção) e o verso (paragens) são detetados automaticamente.
-         Cada imagem vira uma folha com leitura OCR automática.</p>
+      <p class="muted tiny" style="max-width:44ch;">
+        Num PDF de kanbans digitalizados cada página vira uma folha — a frente
+        (produção) e o verso (paragens) são detectados automaticamente.
+      </p>
     </div>
     <div id="dz-busy" hidden>
-      <div class="spinner" style="margin:0 auto 12px"></div>
+      <div class="spinner" style="margin:0 auto 12px;"></div>
       <p class="dz-title" id="dz-busy-msg">A ler as folhas com OCR…</p>
-      <p class="hint">Não feches a página — isto demora alguns segundos por folha.</p>
+      <p class="muted tiny">Não feches a página — demora alguns segundos por folha.</p>
     </div>
   </div>
 
-  <div class="capture-foot">
-    <a href="#" id="manual-link">Sem foto? Criar folha vazia para preenchimento manual</a>
+  <div style="margin-top:14px;">
+    <a href="#" id="manual-link" class="muted tiny" style="text-decoration:underline;">
+      Sem foto? Criar folha vazia para preenchimento manual
+    </a>
   </div>
 
 </form>
+</div>
 
 {% endblock %}
 {% block scripts %}

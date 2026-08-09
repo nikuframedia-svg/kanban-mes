@@ -45,8 +45,33 @@ app = FastAPI(title="Kanban MES")
 app.mount("/static", NoCacheStaticFiles(directory=str(_STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["css_version"] = hashlib.sha1(
-    (_STATIC_DIR / "app.css").read_bytes()
+    (_STATIC_DIR / "design.css").read_bytes()
 ).hexdigest()[:10]
+
+
+@app.middleware("http")
+async def _attach_watermark(request: Request, call_next):
+    """Marca de água = folha mais recente no momento do pedido.
+
+    A página do histórico guarda o valor do primeiro paint e compara-o com o
+    header de cada poll HTMX; a diferença são as folhas que entraram entretanto,
+    e é isso que alimenta o banner «N folhas novas».
+    """
+    watermark = 0
+    if request.method == "GET":
+        try:
+            conn = _conn()
+            try:
+                row = conn.execute("SELECT MAX(rowid) AS m FROM sheets").fetchone()
+                watermark = int(row["m"] or 0)
+            finally:
+                conn.close()
+        except Exception:
+            watermark = 0
+    request.state.watermark = watermark
+    response = await call_next(request)
+    response.headers["X-Sheet-Watermark"] = str(watermark)
+    return response
 
 
 def tunnel_url() -> str | None:
@@ -139,21 +164,21 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
               "data": data, "data_captura": data_captura, "of": of},
         "filter_qs": "".join(parts),
         "created": created, "deleted": deleted,
-        "tunnel_url": tunnel_url(), "active_page": "historico",
+        "tunnel_url": tunnel_url(),
     })
 
 
 @app.get("/captura", response_class=HTMLResponse)
 def captura(request: Request):
     return templates.TemplateResponse(request, "captura.html", {
-        "templates_list": list(TEMPLATES.values()), "active_page": "captura",
+        "templates_list": list(TEMPLATES.values()),
     })
 
 
 @app.get("/captura/camara", response_class=HTMLResponse)
 def camara(request: Request):
     return templates.TemplateResponse(request, "camara.html", {
-        "templates_list": list(TEMPLATES.values()), "active_page": "captura",
+        "templates_list": list(TEMPLATES.values()),
     })
 
 
@@ -171,7 +196,6 @@ def estado_page(request: Request, q: str = "", familia: str = "", of: str = ""):
         "estado": estado_data.load_estado(q, familia, of),
         "q": q, "familia": familia, "of": of,
         "by_status": by_status, "n_sheets": len(sheets),
-        "active_page": "estado",
     })
 
 
@@ -419,8 +443,15 @@ def export_xlsx():
                     headers={"Content-Disposition": 'attachment; filename="producao_mes.xlsx"'})
 
 
+def _safe_back(back: str | None) -> str | None:
+    """Só aceita caminhos internos — impede que um ?back= leve para fora do site."""
+    if not back or not back.startswith("/") or back.startswith("//"):
+        return None
+    return back
+
+
 @app.get("/sheet/{uid}", response_class=HTMLResponse)
-def sheet_view(request: Request, uid: str):
+def sheet_view(request: Request, uid: str, back: str | None = None):
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -454,7 +485,7 @@ def sheet_view(request: Request, uid: str):
         "review_order": (sheet["cross_check"] or {}).get("review_order", []),
         "stored": request.query_params.get("stored"),
         "has_ocr": has_ocr, "raw_diverged": raw_diverged,
-        "active_page": None,
+        "back_url": _safe_back(back),
     })
 
 

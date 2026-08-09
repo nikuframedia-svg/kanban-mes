@@ -1,0 +1,31 @@
+{# Legenda das cores do cross-check. Incluir com {% include "_legend.html" %}
+   em qualquer página com tabela de células coloridas. Os quadrados reutilizam
+   as próprias classes .cc-* (fundo + ícone ::before), por isso a legenda não
+   pode divergir do que a tabela mostra. #}
+<div class="cc-legend"
+     style="display:flex; gap:14px 18px; flex-wrap:wrap;
+            align-items:center; font-size:11px; padding:8px 12px;
+            background:var(--paper); border:1px solid var(--rule);
+            border-radius:4px; margin-bottom:12px;">
+  <span class="lbl" style="margin:0;">LEGENDA</span>
+  <span style="display:inline-flex; align-items:center; gap:8px;">
+    <span class="legend-swatch cc-match"></span>
+    <span>Bate certo com o plano</span>
+  </span>
+  <span style="display:inline-flex; align-items:center; gap:8px;">
+    <span class="legend-swatch cc-warn"></span>
+    <span>Corrigido pelo motor — confirma</span>
+  </span>
+  <span style="display:inline-flex; align-items:center; gap:8px;">
+    <span class="legend-swatch cc-no-match"></span>
+    <span>Muito diferente do plano — decides tu</span>
+  </span>
+  <span style="display:inline-flex; align-items:center; gap:8px;">
+    <span class="legend-swatch cc-na-suspended"></span>
+    <span>Escrito mas sem correspondência no plano</span>
+  </span>
+  <span style="display:inline-flex; align-items:center; gap:8px;">
+    <span class="legend-swatch cc-na"></span>
+    <span>Vazio — nada para validar</span>
+  </span>
+</div>

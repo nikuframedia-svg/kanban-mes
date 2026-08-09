@@ -1,36 +1,48 @@
 {% extends "base.html" %}
 {% block title %}Câmara — Kanban MES{% endblock %}
-{% block breadcrumb %}Chão de fábrica · Captura{% endblock %}
-{% block page_title %}Capturar folhas{% endblock %}
-{% block header_actions %}
-<span class="badge warn" id="cam-status" hidden>SEM CÂMARA</span>
+{% block topbar_actions %}
+<span class="pill warn" id="cam-status" hidden>sem câmara</span>
 <a class="btn" href="/captura">Voltar</a>
 {% endblock %}
 {% block content %}
 
+<div class="page-h">
+  <div>
+    <div class="page-eyebrow">Chão de Fábrica · Captura</div>
+    <h1 class="page-title">Capturar folhas</h1>
+  </div>
+</div>
+
+<div class="page-content">
 <form id="cam-form" method="post" action="/upload" enctype="multipart/form-data">
-  <div class="card" style="padding:14px 24px">
-    <div class="form-row">
+  <div class="card" style="margin-bottom:14px;">
+    <div class="card-b" style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
       <div class="field">
-        <span class="microlabel">Tipo de folha</span>
-        <select name="template_name" required>
+        <span class="lbl">Tipo de folha</span>
+        <select name="template_name" class="kv-select" required>
           {% for t in templates_list %}
           <option value="{{ t.name }}">{{ t.label }}</option>
           {% endfor %}
         </select>
       </div>
-      <span class="hint" style="margin:0 0 10px">Cada foto vira uma folha. Fotografa uma de cada vez e carrega em «Concluir» no fim.</span>
+      <span class="muted tiny" style="flex:1; min-width:200px;">
+        Cada foto vira uma folha. Fotografa uma de cada vez e carrega em «Concluir» no fim.
+      </span>
     </div>
   </div>
 </form>
 
-<div class="cam-stage" id="cam-stage">
+<div class="cam-wrap" id="cam-stage">
   <video id="cam-video" autoplay playsinline muted hidden></video>
-  <div class="cam-error" id="cam-error" hidden>
-    <h2>Câmara indisponível</h2>
-    <p id="cam-error-msg">Sem permissão para usar a câmara.</p>
-    <div class="actions" style="justify-content:center">
-      <label class="btn" style="cursor:pointer">
+  <div class="cam-guides">
+    <span class="cam-corner tl"></span><span class="cam-corner tr"></span>
+    <span class="cam-corner bl"></span><span class="cam-corner br"></span>
+  </div>
+  <div id="cam-error" hidden style="color:var(--paper); text-align:center; padding:24px;">
+    <h2 style="margin:0 0 6px; font-size:18px;">Câmara indisponível</h2>
+    <p id="cam-error-msg" style="margin:0 0 14px; opacity:.7; font-size:13px;">Sem permissão para usar a câmara.</p>
+    <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+      <label class="btn" style="cursor:pointer;">
         Escolher do telefone
         <input id="cam-file-fallback" type="file" accept="image/*" capture="environment" multiple hidden>
       </label>
@@ -39,16 +51,16 @@
   </div>
 </div>
 
-<div class="cam-bar">
-  <div class="cam-count">
-    <div class="microlabel">Fotos</div>
-    <div class="n" id="cam-count">0</div>
+<div class="cam-bar" style="border-radius:0 0 12px 12px;">
+  <div class="cam-meta">
+    Fotos <b id="cam-count">0</b>
   </div>
   <button type="button" class="shutter" id="cam-shutter" title="Fotografar" disabled></button>
   <button type="button" class="btn primary" id="cam-done" disabled>Concluir</button>
 </div>
 
 <div class="cam-thumbs" id="cam-thumbs"></div>
+</div>
 
 {% endblock %}
 {% block scripts %}

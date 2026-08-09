@@ -103,7 +103,8 @@ def test_edit_row_triggers_cross_check_with_colours(client):
     r = client.get(f"/sheet/{uid}")
     assert r.status_code == 200
     # a linha cruzou contra o plano sintético e ganhou o P1
-    assert "cell-confirmed" in r.text or "cell-snapped" in r.text
+    # (classes de cor do design system: confirmed → cc-match, snapped → cc-warn)
+    assert "cc-match" in r.text or "cc-warn" in r.text
     conn = db.connect()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -220,7 +221,7 @@ def test_historico_filters(client):
     edit(client, uid, "header.operador", "Maria")
     assert "Maria" in client.get("/?operador=Maria").text
     r = client.get("/?operador=NãoExiste")
-    assert "Nada encontrado" in r.text
+    assert "Sem folhas" in r.text
     # chips por estado
     assert client.get("/?status=pending").status_code == 200
     assert client.get("/?status=validated").status_code == 200
