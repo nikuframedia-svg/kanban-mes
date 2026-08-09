@@ -450,8 +450,41 @@ def _safe_back(back: str | None) -> str | None:
     return back
 
 
+def _diverged_map(sheet: dict) -> dict[str, str]:
+    """Células onde o valor atual já não é o que a máquina leu.
+
+    Devolve {field_path: valor_lido_pelo_ocr} — o valor original serve de
+    tooltip, para o revisor saber de onde é que a célula veio sem ter de
+    trocar de vista. Cobre cabeçalho, linhas e rodapé.
+    """
+    raw = sheet.get("raw_extraction") or {}
+    cur = sheet.get("sheet_data") or {}
+    if not raw:
+        return {}
+    out: dict[str, str] = {}
+
+    def diff(path: str, a, b) -> None:
+        sa, sb = str(a or "").strip(), str(b or "").strip()
+        if sa != sb:
+            out[path] = sa
+
+    for section in ("header", "footer"):
+        raw_sec, cur_sec = raw.get(section) or {}, cur.get(section) or {}
+        for f in set(raw_sec) | set(cur_sec):
+            diff(f"{section}.{f}", raw_sec.get(f), cur_sec.get(f))
+
+    raw_rows, cur_rows = raw.get("rows") or [], cur.get("rows") or []
+    for i in range(max(len(raw_rows), len(cur_rows))):
+        r = raw_rows[i] if i < len(raw_rows) and isinstance(raw_rows[i], dict) else {}
+        c = cur_rows[i] if i < len(cur_rows) and isinstance(cur_rows[i], dict) else {}
+        for f in set(r) | set(c):
+            diff(f"rows[{i}].{f}", r.get(f), c.get(f))
+    return out
+
+
 @app.get("/sheet/{uid}", response_class=HTMLResponse)
-def sheet_view(request: Request, uid: str, back: str | None = None):
+def sheet_view(request: Request, uid: str, back: str | None = None,
+               view: str | None = None):
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -460,31 +493,29 @@ def sheet_view(request: Request, uid: str, back: str | None = None):
     if not sheet:
         raise HTTPException(404)
     template = get_template(sheet["template_name"])
-    cross_rows = {}
-    if sheet["cross_check"]:
-        cross_rows = {
-            r["row_index"]: {**r, "cells_by_field": {c["field"]: c for c in r["cells"]}}
-            for r in sheet["cross_check"]["rows"]
-        }
     raw = sheet.get("raw_extraction") or {}
     raw_rows = [r for r in (raw.get("rows") or []) if isinstance(r, dict)]
     has_ocr = bool(sheet.get("image_path")) and any(
         v is not None and str(v).strip() for r in raw_rows for v in r.values()
     )
-    # células onde o estado atual já difere do que a máquina leu (edições motor+humanas)
-    cur_rows = (sheet["sheet_data"] or {}).get("rows") or []
-    raw_diverged = sum(
-        1
-        for i, r in enumerate(raw_rows) if i < len(cur_rows)
-        for f in template.row_fields
-        if str(r.get(f) or "").strip() != str(cur_rows[i].get(f) or "").strip()
-    ) if has_ocr else 0
+    # Vista crua: mostra a transcrição original e DESLIGA as cores. As cores do
+    # cross-check validam o valor final contra o plano — pintá-las por cima de
+    # valores crus seria dizer que o motor aprovou o que ele nunca viu.
+    view_mode = "raw" if (view == "raw" and raw) else "final"
+    cross_rows = {}
+    if view_mode == "final" and sheet["cross_check"]:
+        cross_rows = {
+            r["row_index"]: {**r, "cells_by_field": {c["field"]: c for c in r["cells"]}}
+            for r in sheet["cross_check"]["rows"]
+        }
+    diverged = _diverged_map(sheet) if view_mode == "final" else {}
     return templates.TemplateResponse(request, "sheet.html", {
         "sheet": sheet, "t": template, "cross_rows": cross_rows,
         "summary": (sheet["cross_check"] or {}).get("summary"),
         "review_order": (sheet["cross_check"] or {}).get("review_order", []),
         "stored": request.query_params.get("stored"),
-        "has_ocr": has_ocr, "raw_diverged": raw_diverged,
+        "has_ocr": has_ocr, "view_mode": view_mode,
+        "diverged": diverged, "n_diverged": len(diverged),
         "back_url": _safe_back(back),
     })
 

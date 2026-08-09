@@ -7,23 +7,39 @@
 {% endblock %}
 {% block content %}
 
+{% set is_raw = view_mode == 'raw' %}
 {% set validated = sheet.status == 'validated' %}
-{% set data = sheet.sheet_data or {} %}
+{# Em modo cru a fonte é a transcrição original, imutável. Só-leitura: editar
+   aqui gravaria o valor cru por cima do valor já corrigido. #}
+{% set readonly = validated or is_raw %}
+{% set data = (sheet.raw_extraction if is_raw else sheet.sheet_data) or {} %}
 {% set header = data.get('header') or {} %}
 {% set rows = data.get('rows') or [] %}
 {% set footer = data.get('footer') or {} %}
-{% set raw_rows = (sheet.raw_extraction or {}).get('rows') or [] %}
 
 <div class="page-h">
   <div>
     <div class="page-eyebrow">Revisão · {{ t.label }}</div>
     <h1 class="page-title">Folha {{ sheet.uid[:8] }}</h1>
+    {% if has_ocr %}
+    <div class="tabs" style="margin-top:10px; border-bottom:none;">
+      <a class="tab {% if not is_raw %}active{% endif %}"
+         href="/sheet/{{ sheet.uid }}{% if back_url %}?back={{ back_url|urlencode }}{% endif %}">Cross-check</a>
+      <a class="tab {% if is_raw %}active{% endif %}"
+         href="/sheet/{{ sheet.uid }}?view=raw{% if back_url %}&back={{ back_url|urlencode }}{% endif %}">OCR cru</a>
+    </div>
+    {% endif %}
   </div>
   <div style="display:flex; gap:8px; align-items:center;">
-    {% if validated %}
+    {% if is_raw %}
+      <span class="pill info">OCR original · só leitura</span>
+    {% elif validated %}
       <span class="pill ok">✓ validada · {{ sheet.validated_by }}</span>
     {% else %}
       <span class="pill warn">em revisão</span>
+    {% endif %}
+    {% if n_diverged and not is_raw %}
+      <span class="pill neutral" title="Células alteradas depois da leitura da máquina">{{ n_diverged }} com * </span>
     {% endif %}
   </div>
 </div>
@@ -50,7 +66,7 @@ setTimeout(function () {
 </script>
 {% endif %}
 
-{% if data.get('_ocr_error') and not validated %}
+{% if data.get('_ocr_error') and not readonly %}
 <div class="alert crit" style="margin-bottom:14px; flex-wrap:wrap; align-items:center;">
   <div style="flex:1; min-width:240px;">
     <strong>O OCR falhou</strong> — podes tentar outra vez ou preencher à mão a partir da foto.
@@ -62,7 +78,7 @@ setTimeout(function () {
 </div>
 {% endif %}
 
-{% if summary and not validated %}
+{% if summary and not readonly %}
 <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); margin-bottom:18px;">
   <div class="kpi">
     <div class="kpi-l">ligadas ao plano</div>
@@ -105,35 +121,11 @@ setTimeout(function () {
       </div>
     </div>
 
-    {% if has_ocr %}
-    <div class="card">
-      <div class="card-h">
-        <span class="card-h-title">O que o OCR leu</span>
-        {% if raw_diverged %}<span class="pill warn">{{ raw_diverged }} divergem</span>{% endif %}
-      </div>
-      <div class="card-b">
-        <p class="muted tiny" style="margin:0 0 8px;">
-          Transcrição fiel da máquina, sem correcções. As diferenças para a tabela ao lado são
-          edições do motor de cruzamento ou tuas.
-        </p>
-        <details open>
-          <summary class="muted tiny" style="cursor:pointer;">Ver transcrição ({{ raw_rows | length }} linhas)</summary>
-          <div class="scroll-x" style="margin-top:8px;">
-            <table class="raw-table">
-              <thead>
-                <tr><th>#</th>{% for f in t.row_fields %}<th>{{ (t.field_labels or {}).get(f, f) }}</th>{% endfor %}</tr>
-              </thead>
-              <tbody>
-                {% for r in raw_rows %}
-                {% if r is mapping and (r.values() | select('ne', none) | list) %}
-                <tr><td>{{ loop.index }}</td>{% for f in t.row_fields %}<td>{{ r.get(f) or '·' }}</td>{% endfor %}</tr>
-                {% endif %}
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </details>
-      </div>
+    {% if is_raw %}
+    <div class="alert info">
+      <span>Estás a ver a transcrição original da máquina, sem correcções e sem
+        cores — as cores dizem se o valor bate com o plano, e o plano só foi
+        cruzado contra os valores corrigidos.</span>
     </div>
     {% endif %}
 
@@ -142,9 +134,20 @@ setTimeout(function () {
   <!-- ============ coluna direita: o teu trabalho ============ -->
   <div>
 
+    {# `*` = o valor já não é o que a máquina leu (motor ou humano mudou-o).
+       Nunca muda a cor da célula — a cor diz se bate com o plano, o `*` diz de
+       onde veio. #}
+    {% macro snap_mark(field_path) %}
+      {%- set orig = diverged.get(field_path) if diverged else none -%}
+      {%- if orig is not none -%}
+        <span class="cc-snapped-mark"
+              title="OCR leu: {{ orig if orig else '(vazio)' }}">*</span>
+      {%- endif -%}
+    {% endmacro %}
+
     {% macro edit_cell(field_path, value, cell=None, numeric=False) %}
-      {% if validated %}
-        <div>{{ value if value is not none else '' }}</div>
+      {% if readonly %}
+        <div>{{ value if value is not none else '' }}{{ snap_mark(field_path) }}</div>
         {% if cell and cell.proposal and cell.status in ('snapped', 'very_different') %}
           <div class="proposal">plano: {{ cell.proposal }}</div>
         {% endif %}
@@ -157,7 +160,7 @@ setTimeout(function () {
                  value="{{ value if value is not none else '' }}"
                  {% if numeric %}inputmode="decimal"{% endif %}
                  onchange="this.form.submit()">
-        </form>
+        </form>{{ snap_mark(field_path) }}
         {% if cell and cell.proposal and cell.status in ('snapped', 'very_different') and (cell.written or '') != cell.proposal %}
           <div class="proposal">
             plano: <a href="#" onclick="return acceptProposal(this, {{ cell.proposal | tojson }})">{{ cell.proposal }}</a>
@@ -189,10 +192,10 @@ setTimeout(function () {
         <span class="card-h-sub">{{ rows | length }} linhas</span>
       </div>
       <div class="card-b">
-        {% if t.index_loader %}
+        {% if t.index_loader and not is_raw %}
         {% include "_legend.html" %}
         {% endif %}
-        {% if review_order and not validated %}
+        {% if review_order and not readonly %}
         <p class="muted tiny" style="margin:0 0 10px;">
           Começa pelas linhas
           {% for i in review_order[:6] %}<a href="#row-{{ i }}" style="color:var(--accent-ink);"><b>{{ i + 1 }}</b></a>{{ ", " if not loop.last }}{% endfor %}
@@ -268,7 +271,7 @@ setTimeout(function () {
     </div>
     {% endif %}
 
-    {% if not validated %}
+    {% if not readonly %}
     <div class="card">
       <div class="card-h">
         <span class="card-h-title">Terminar</span>
