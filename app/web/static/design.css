@@ -879,3 +879,9 @@ input.cell-input.is-inherited::placeholder {
 .radio-chips input:checked + span {
   background: var(--ink); color: var(--paper); border-color: var(--ink);
 }
+
+/* Botão que abre as referências do plano, dentro da célula da marca. */
+.plano-btn {
+  padding: 1px 6px; font-size: 10px; line-height: 1.4;
+  margin-top: 3px; border-color: var(--rule-2);
+}

@@ -175,7 +175,7 @@ setTimeout(function () {
           {# Sem link de aceitar: o plano diz o que estava previsto, não o que
              foi produzido — copiar o número do plano falsificaria o registo. #}
           <div class="proposal">plano: {{ '%g' | format(cell.plan_limit) }}</div>
-        {% elif cell and cell.proposal and cell.status in ('snapped', 'very_different') and (cell.written or '') != cell.proposal %}
+        {% elif cell and cell.proposal and cell.status in ('snapped', 'very_different') and (cell.written or '') != cell.proposal and not herdado %}
           <div class="proposal">
             plano: <a href="#" onclick="return acceptProposal(this, {{ cell.proposal | tojson }})">{{ cell.proposal }}</a>
           </div>
@@ -242,7 +242,16 @@ setTimeout(function () {
                                             'over_limit': 'cc-over',
                                             'unmatched': 'cc-na-suspended',
                                             'na': 'cc-na'}.get(cell.status, 'cc-na') }}{% endif %}">
-                  {{ edit_cell('rows[' ~ i ~ '].' ~ f, row.get(f), cell, numeric=(f in ('esp', 'comp_mm', 'larg_mm', 'qtd', 'repeticoes'))) }}
+                  {{ edit_cell('rows[' ~ i ~ '].' ~ f, field_value(row, f), cell, numeric=(f in ('esp', 'comp_mm', 'larg_mm', 'qtd', 'repeticoes'))) }}
+                  {# Linha de perfil completo: vale por todas as referências
+                     daquele perfil na obra, por isso há que as poder ver. #}
+                  {% if f == 'perf_comp' and t.index_loader and is_marked(field_value(row, f)) %}
+                    <button type="button" class="btn ghost plano-btn"
+                            title="Ver as referências deste perfil na obra"
+                            hx-get="/sheet/{{ sheet.uid }}/plano/{{ i }}"
+                            hx-target="#plano-modal-body"
+                            onclick="abrirPlano()">ver refs</button>
+                  {% endif %}
                 </td>
                 {% endfor %}
                 {% if t.index_loader %}
@@ -317,9 +326,30 @@ setTimeout(function () {
 </div>
 </div>
 
+{# Pop-up das referências do perfil. Fica fora da tabela de propósito: dentro
+   de uma célula ficaria preso ao overflow do scroll horizontal. #}
+<div class="sheet-bg" id="plano-modal" style="display:none; align-items:center; justify-content:center;"
+     onclick="if (event.target === this) fecharPlano()">
+  <div class="sheet-modal" style="max-width:860px; width:92%; border-radius:12px;
+                                  max-height:82vh; overflow:auto;">
+    <div id="plano-modal-body"><div class="muted">A carregar…</div></div>
+    <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+      <button type="button" class="btn" onclick="fecharPlano()">Fechar</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 {% block scripts %}
 <script>
+function abrirPlano() {
+  document.getElementById('plano-modal').style.display = 'flex';
+}
+function fecharPlano() {
+  document.getElementById('plano-modal').style.display = 'none';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') fecharPlano(); });
+
 function acceptProposal(link, value) {
   const td = link.closest('td, .field');
   const input = td.querySelector('input[name=value]');

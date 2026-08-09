@@ -123,3 +123,27 @@ def test_limite_usa_a_identidade_herdada():
     qtd = {c["field"]: c for c in res["rows"][1]["cells"]}["qtd"]
     assert qtd["status"] == "over_limit"
     assert qtd["plan_limit"] == 12
+
+
+def test_linha_marcada_nao_recebe_proposta_de_modelo():
+    """A linha de perfil completo vale por todas as referências do perfil.
+
+    Propor-lhe «o» modelo seria escolher uma à sorte entre dezenas; o que
+    aquela linha precisa é da lista, que é o que o pop-up mostra.
+    """
+    cells = cells_of({"of": "263323", "perfil": "40x4", "perf_comp": "x"})
+    assert cells["modelo"].proposal is None
+    assert cells["modelo"].status == "na"
+
+
+def test_celula_herdada_confere_contra_o_valor_herdado():
+    """A célula em branco por «idem» não é «vazia»: vale o valor de cima."""
+    rows = [
+        {"of": "263323", "modelo": "AEH89"},
+        {"modelo": "AEH90"},                 # herda a OF
+    ]
+    res = check_sheet(rows, scorer(), {})
+    of_cell = {c["field"]: c for c in res["rows"][1]["cells"]}["of"]
+    assert of_cell["status"] == "confirmed", "herdado e igual ao plano = confirmado"
+    assert of_cell["written"] is None, "no papel continua em branco"
+    assert of_cell["inherited_from"] == 0

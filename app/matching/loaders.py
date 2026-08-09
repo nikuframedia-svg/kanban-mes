@@ -25,11 +25,11 @@ def _dsn() -> str:
     return os.environ.get("MES_PG_DSN") or settings.pg_dsn
 
 
-def _fetch(sql: str) -> list[dict]:
+def _fetch(sql: str, params: tuple | None = None) -> list[dict]:
     with psycopg.connect(_dsn(), row_factory=dict_row) as conn:
         conn.read_only = True
         with conn.cursor() as cur:
-            cur.execute(sql)
+            cur.execute(sql, params)
             return cur.fetchall()
 
 
@@ -181,3 +181,83 @@ def load_active_ofs(days: int = 14) -> set[str]:
         return {r["production_order"] for r in rows if r["production_order"]}
     except psycopg.Error:
         return set()
+
+
+# O padrão vai como parâmetro: num SQL com placeholders, um `%` literal seria
+# lido como início de placeholder.
+_CANTONEIRAS_LIKE = "mtg\\_%"
+_CANTONEIRAS_SNAPSHOT = (
+    "SELECT snapshot_id FROM audit_mtg.snapshots "
+    "WHERE snapshot_id LIKE %s ORDER BY loaded_at DESC LIMIT 1"
+)
+
+
+def plan_snapshot_info() -> dict:
+    """Identidade e idade do plano de cantoneiras em uso."""
+    rows = _fetch(
+        "SELECT snapshot_id, source_filename, loaded_at FROM audit_mtg.snapshots "
+        "WHERE snapshot_id LIKE %s ORDER BY loaded_at DESC LIMIT 1",
+        (_CANTONEIRAS_LIKE,),
+    )
+    if not rows:
+        return {}
+    info = dict(rows[0])
+    loaded = info.get("loaded_at")
+    info["age_hours"] = (
+        max(0.0, (datetime.now(timezone.utc) - loaded).total_seconds() / 3600.0)
+        if loaded else None
+    )
+    return info
+
+
+def fetch_profile_lines(of: str, perfil: str, limit: int = 500) -> list[dict]:
+    """Todas as referências do plano para a chave OF + Perfil.
+
+    É o que uma linha marcada com PERF. COMP. representa: o operador escreveu o
+    perfil e não listou modelo a modelo, portanto para conferir é preciso ver
+    quais são as referências que aquele perfil tem naquela obra.
+
+    `upper()` no perfil não é decorativo: o plano tem `l40X40X3` e `L40X40X3`
+    como valores distintos, e uma comparação sensível a maiúsculas perdia
+    linhas.
+    """
+    if not of or not perfil:
+        return []
+    return _fetch(
+        f"""
+        SELECT l.component_ref, l.length_mm, l.quantity_planned, l.quantity_made,
+               l.remaining_quantity, l.cutting_machine, l.planning_week,
+               l.cut_date::date AS cut_date, l.status, l.closed_x,
+               l.material_description
+          FROM core_mtg.production_lines l
+         WHERE l.snapshot_id = ({_CANTONEIRAS_SNAPSHOT})
+           AND l.production_order_no = %s
+           AND upper(btrim(l.profile_type)) = upper(btrim(%s))
+         ORDER BY l.closed_x, l.remaining_quantity DESC, l.component_ref
+         LIMIT %s
+        """,
+        (_CANTONEIRAS_LIKE, of, perfil, limit),
+    )
+
+
+def fetch_profiles_in_of(of: str) -> list[dict]:
+    """Perfis existentes numa obra, com quantas linhas tem cada um.
+
+    Serve para quando o perfil escrito não casa nada: em vez de um vazio, a
+    folha mostra o que a obra tem mesmo (casos reais de L200x100x12 escrito
+    numa obra que só tem L200X100X10).
+    """
+    if not of:
+        return []
+    return _fetch(
+        f"""
+        SELECT btrim(l.profile_type) AS perfil, count(*) AS n_linhas
+          FROM core_mtg.production_lines l
+         WHERE l.snapshot_id = ({_CANTONEIRAS_SNAPSHOT})
+           AND l.production_order_no = %s
+           AND l.profile_type IS NOT NULL AND btrim(l.profile_type) <> ''
+         GROUP BY 1 ORDER BY 2 DESC, 1
+         LIMIT 40
+        """,
+        (_CANTONEIRAS_LIKE, of),
+    )

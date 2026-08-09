@@ -151,17 +151,26 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
 
     entry = index.entries[match.winner.idx]
     p = confidence
+    # Linha de perfil completo: representa todas as referências daquele perfil
+    # na obra, não uma. Propor-lhe «o» modelo seria escolher uma à sorte entre
+    # dezenas — o que essa linha precisa é do pop-up com a lista.
+    linha_marcada = is_marked(scored_row.get("perf_comp"))
 
     for f in spec_fields:
         written = row.get(f.name)
         written_s = str(written).strip() if written is not None else ""
+        # Numa célula deixada em branco por «idem», o valor da linha é o
+        # herdado — é contra esse que o plano se confere. Sem isto a célula
+        # aparecia como «vazia, a preencher» e o motor propunha escrever o que
+        # a herança já dizia.
+        efectivo = written_s or str(inherited_values.get(f.name) or "").strip()
         raw_proposal = entry.get(f.entry_key)
         proposal = str(raw_proposal).strip() if raw_proposal is not None else ""
         # Confiança por campo: o valor de um campo pode ser certo (todas as
         # irmãs concordam) mesmo quando a linha exacta é incerta.
         marginal = match.marginals.get(f.name)
         p_field = marginal[1] if marginal else p
-        if not proposal:
+        if not proposal or (linha_marcada and f.name == "modelo" and not written_s):
             cells.append(CellCheck(
                 f.name, written_s or None, None, "na", 0.0, False, p_field,
                 inherited=inherited_values.get(f.name),
@@ -170,7 +179,7 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             continue
 
         if f.kind == "numeric":
-            w_num, t_num = sim.parse_number(written_s), sim.parse_number(proposal)
+            w_num, t_num = sim.parse_number(efectivo), sim.parse_number(proposal)
             similarity = sim.numeric_similarity(w_num, t_num, f.tolerance)
         elif f.kind in ("code", "profile"):
             # Comparar na convenção do plano: `263323` e `OF263323` são o mesmo
@@ -178,14 +187,14 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             # isto o motor marcava a vermelho valores certos e propunha
             # reescrevê-los só para lhes acrescentar o prefixo.
             truth = index.normalize_written(f.name, proposal)
-            if truth and truth in index.variants_for(f.name, written_s):
+            if truth and truth in index.variants_for(f.name, efectivo):
                 similarity = 1.0
             else:
                 similarity = sim.code_similarity(
-                    index.normalize_written(f.name, written_s), truth
+                    index.normalize_written(f.name, efectivo), truth
                 )
         else:
-            similarity = sim.text_similarity(written_s, proposal)
+            similarity = sim.text_similarity(efectivo, proposal)
 
         threshold = _threshold_for(f.name, params)
         # Campo herdado nunca é auto-escrito: seria transformar uma inferência
@@ -194,9 +203,9 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
                     and f.name not in inherited_from
                     and p_field >= threshold)
 
-        if written_s and similarity >= 1.0:
+        if efectivo and similarity >= 1.0:
             status, auto = "confirmed", False
-        elif similarity >= params.score.sim_near or not written_s:
+        elif similarity >= params.score.sim_near or not efectivo:
             # correção suave ou preenchimento de célula vazia
             status, auto = "snapped", writable
         else:

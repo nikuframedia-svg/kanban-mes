@@ -20,12 +20,12 @@ from fastapi.templating import Jinja2Templates
 
 from .. import db, imaging, pg_store
 from ..config import settings
-from ..matching import loaders
+from ..matching import carryover, loaders
 from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
 from ..ocr.provider import OcrError, empty_extraction, get_provider
-from ..templates_spec import TEMPLATES, get_template
+from ..templates_spec import TEMPLATES, field_value, get_template, is_marked
 from . import estado as estado_data
 from . import pdf as pdf_gen
 
@@ -47,6 +47,10 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["css_version"] = hashlib.sha1(
     (_STATIC_DIR / "design.css").read_bytes()
 ).hexdigest()[:10]
+# a folha decide o que é uma marca; o template não repete a regra
+templates.env.globals["is_marked"] = is_marked
+# lê a célula pelo nome atual e pelo antigo (folhas lidas antes do rename)
+templates.env.globals["field_value"] = field_value
 
 
 @app.middleware("http")
@@ -559,6 +563,65 @@ def sheet_rotate(uid: str):
     finally:
         conn.close()
     return {"ok": True, "rotation": rotation}
+
+
+@app.get("/sheet/{uid}/plano/{row_index}", response_class=HTMLResponse)
+def sheet_plano_perfil(request: Request, uid: str, row_index: int):
+    """As referências do plano para a chave OF + Perfil de uma linha.
+
+    Recebe a linha e não a chave: é o servidor que resolve a OF (incluindo a
+    herdada da linha de cima) e a forma canónica do perfil. Se fosse o template
+    a montar `?of=&perfil=`, teria de conhecer as convenções do plano e podia
+    perguntar por uma chave diferente daquela com que o motor cruzou.
+    """
+    conn = _conn()
+    try:
+        sheet = db.get_sheet(conn, uid)
+        human = db.human_fields_by_row(conn, uid)
+    finally:
+        conn.close()
+    if not sheet:
+        raise HTTPException(404)
+    template = get_template(sheet["template_name"])
+    rows = (sheet["sheet_data"] or {}).get("rows") or []
+    if row_index < 0 or row_index >= len(rows):
+        raise HTTPException(404)
+
+    ctx: dict = {"row_index": row_index, "of": None, "perfil": None,
+                 "linhas": [], "perfis": [], "erro": None, "plano": {}}
+    try:
+        index = get_index(template.index_loader) if template.index_loader else None
+        if index is None:
+            ctx["erro"] = "Esta folha não cruza com o plano."
+            return templates.TemplateResponse(request, "_plano_perfil.html", ctx)
+
+        content = tuple(f.name for f in index.spec.identity_fields
+                        if f.name not in carryover.CARRY_FIELDS)
+        identities = carryover.resolve(rows, content, human)
+        eff = carryover.effective_row(rows[row_index], identities[row_index])
+        escrito = str(eff.get("perfil") or "").strip()
+        of_escrita = str(eff.get("of") or "").strip()
+        # A OF no plano leva prefixo; procurar pela forma que lá existe.
+        of = next(
+            (index.entries[i]["of"] for i in index.exact_matches("of", of_escrita)),
+            of_escrita,
+        ) if of_escrita else ""
+        perfil = index.normalize_written("perfil", escrito) if escrito else ""
+        ctx.update({"of": of, "perfil": perfil, "perfil_escrito": escrito,
+                    "herdou_of": identities[row_index].is_inherited("of")})
+        if not of:
+            ctx["erro"] = "Esta linha não tem OF — escreve-a (ou herda-a da linha de cima)."
+        else:
+            ctx["plano"] = loaders.plan_snapshot_info()
+            if perfil:
+                ctx["linhas"] = loaders.fetch_profile_lines(of, perfil)
+            if not ctx["linhas"]:
+                # Sem correspondência mostra-se o que a obra tem mesmo: o caso
+                # comum é o perfil estar escrito com uma medida trocada.
+                ctx["perfis"] = loaders.fetch_profiles_in_of(of)
+    except Exception as exc:  # Postgres em baixo não pode rebentar a revisão
+        ctx["erro"] = f"Não foi possível ler o plano: {exc}"
+    return templates.TemplateResponse(request, "_plano_perfil.html", ctx)
 
 
 @app.get("/sheet/{uid}/pdf")

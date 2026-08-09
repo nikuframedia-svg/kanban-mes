@@ -1,0 +1,85 @@
+{# Conteúdo do pop-up «referências deste perfil na obra».
+
+   Aparece quando uma linha está marcada com PERF. COMP.: nessas linhas o
+   operador escreve o perfil e não lista modelo a modelo, portanto para
+   conferir é preciso ver o que a obra tem daquele perfil. #}
+<div class="lbl">Linha {{ row_index + 1 }}</div>
+<div style="font-size:18px; font-weight:600; margin:2px 0 2px;">
+  Referências do perfil nesta obra
+</div>
+<div class="muted tiny" style="margin-bottom:12px;">
+  {% if of %}OF <b class="mono">{{ of }}</b>{% if herdou_of %} (herdada da linha de cima){% endif %}{% endif %}
+  {% if perfil %} · perfil <b class="mono">{{ perfil }}</b>
+    {% if perfil_escrito and perfil_escrito|upper != perfil %}
+      <span class="muted">(escrito «{{ perfil_escrito }}»)</span>
+    {% endif %}
+  {% endif %}
+  {% if plano.age_hours is defined and plano.age_hours is not none %}
+    · plano de há {{ '%.0f' | format(plano.age_hours) }} h
+  {% endif %}
+</div>
+
+{% if erro %}
+  <div class="alert warn"><span>{{ erro }}</span></div>
+
+{% elif linhas %}
+  <div class="muted tiny" style="margin-bottom:6px;">
+    {{ linhas | length }} referência(s){% if linhas | length >= 500 %} — a mostrar as primeiras 500{% endif %}.
+    <input type="text" class="kv-select" placeholder="filtrar…"
+           style="float:right; padding:3px 8px; font-size:12px;"
+           oninput="filtrarPlano(this.value)">
+  </div>
+  <div class="scroll-x" style="max-height:52vh; overflow-y:auto;">
+    <table class="tbl" id="tabela-plano">
+      <thead>
+        <tr>
+          <th>Referência</th><th>Comp.</th><th>Planeada</th>
+          <th>Feita</th><th>Falta</th><th>Máquina</th><th>Semana</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in linhas %}
+        <tr{% if l.closed_x %} style="opacity:.55;"{% endif %}>
+          <td class="mono"><b>{{ l.component_ref or '—' }}</b></td>
+          <td class="mono tnum">{{ '%g' | format(l.length_mm) if l.length_mm is not none else '—' }}</td>
+          <td class="mono tnum">{{ '%g' | format(l.quantity_planned) if l.quantity_planned is not none else '—' }}</td>
+          <td class="mono tnum">{{ '%g' | format(l.quantity_made) if l.quantity_made is not none else '—' }}</td>
+          <td class="mono tnum">{{ '%g' | format(l.remaining_quantity) if l.remaining_quantity is not none else '—' }}</td>
+          <td class="tiny">{{ l.cutting_machine or '—' }}</td>
+          <td class="tiny mono">{{ l.planning_week or '—' }}</td>
+          <td>{% if l.closed_x %}<span class="pill neutral">fechada</span>
+              {% elif l.remaining_quantity is not none and l.remaining_quantity <= 0 %}<span class="pill ok">completa</span>
+              {% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+{% elif perfis %}
+  {# O perfil escrito não existe nesta obra. Em vez de um vazio, mostrar o que
+     a obra tem — o erro típico é uma medida trocada (L200x100x12 por x10). #}
+  <div class="alert warn" style="margin-bottom:10px;">
+    <span>O perfil <b>{{ perfil or perfil_escrito }}</b> não aparece nesta obra.
+      Estes são os perfis que a obra tem:</span>
+  </div>
+  <div style="display:flex; gap:6px; flex-wrap:wrap;">
+    {% for p in perfis %}
+      <span class="pill neutral mono" title="{{ p.n_linhas }} linhas no plano">
+        {{ p.perfil }} · {{ p.n_linhas }}
+      </span>
+    {% endfor %}
+  </div>
+
+{% else %}
+  <div class="alert warn"><span>Sem linhas no plano para esta obra.</span></div>
+{% endif %}
+
+<script>
+  function filtrarPlano(termo) {
+    const t = (termo || '').trim().toLowerCase();
+    document.querySelectorAll('#tabela-plano tbody tr').forEach(tr => {
+      tr.style.display = !t || tr.textContent.toLowerCase().includes(t) ? '' : 'none';
+    });
+  }
+</script>
