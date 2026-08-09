@@ -150,8 +150,10 @@ setTimeout(function () {
     {% endmacro %}
 
     {% macro edit_cell(field_path, value, cell=None, numeric=False) %}
+      {%- set herdado = cell.inherited if (cell and cell.inherited_from is not none and not value) else none -%}
       {% if readonly %}
         <div>{{ value if value is not none else '' }}{{ snap_mark(field_path) }}</div>
+        {% if herdado %}<div class="inherited" title="Vem da linha {{ cell.inherited_from + 1 }}">{{ herdado }}</div>{% endif %}
         {% if cell and cell.proposal and cell.status in ('snapped', 'very_different') %}
           <div class="proposal">plano: {{ cell.proposal }}</div>
         {% endif %}
@@ -160,8 +162,12 @@ setTimeout(function () {
           <input type="hidden" name="field_path" value="{{ field_path }}">
           <input type="hidden" name="revision" value="{{ sheet.revision }}">
           <input type="hidden" name="actor" value="operador">
-          <input type="text" class="cell-input" name="value"
+          {# O valor herdado vai como placeholder, não como value: o browser não
+             submete placeholders, portanto é impossível gravá-lo sem querer. #}
+          <input type="text" class="cell-input{% if herdado %} is-inherited{% endif %}" name="value"
                  value="{{ value if value is not none else '' }}"
+                 {% if herdado %}placeholder="{{ herdado }}"
+                 title="Herdado da linha {{ cell.inherited_from + 1 }} — a folha não repete o valor"{% endif %}
                  {% if numeric %}inputmode="decimal"{% endif %}
                  onchange="this.form.submit()">
         </form>{{ snap_mark(field_path) }}

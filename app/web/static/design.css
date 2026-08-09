@@ -802,6 +802,16 @@ input.cell-input:focus {
 .proposal { margin-top: 3px; font-size: 10px; color: var(--ink-4); }
 .proposal a { color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
 
+/* Valor herdado da linha de cima («idem»). Itálico e apagado para se ler à
+   primeira que não foi escrito ali — é uma leitura nossa, não o que está no
+   papel. Como é placeholder, nunca chega a ser gravado. */
+input.cell-input.is-inherited::placeholder {
+  font-style: italic;
+  color: var(--ink-5);
+  opacity: 1;
+}
+.inherited { margin-top: 2px; font-size: 10px; font-style: italic; color: var(--ink-5); }
+
 /* Campo com etiqueta por cima (formulários de cabeçalho/rodapé). Fora da
    tabela não há cor de cross-check a marcar a célula, por isso o fundo é o
    que diz ao operador que aquilo se escreve. */

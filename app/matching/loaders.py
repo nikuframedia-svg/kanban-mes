@@ -50,11 +50,15 @@ def _plan_age_days(snapshot_like: str) -> float:
 # - o plano escreve perfis como L60X60X5, a folha como "60 x 5";
 # - a OF é o campo que identifica de verdade, por isso não leva teto de
 #   candidatos: há OFs com mais de 600 linhas e ficavam invisíveis.
+#
+# `cliente` ficou de fora de propósito: o plano guarda o cliente interno da
+# Metalogalva ("c.m.e.-const. e") e o operador escreve o cliente final ("CMF")
+# ou uma nota. Como discorda sempre, era evidência negativa uniforme — não
+# ajudava a escolher candidato nenhum e mantinha a célula vermelha para sempre.
 CANTONEIRAS_SPEC = IndexSpec(
     identity_fields=(
         FieldSpec("of", "code", "of", code_prefix="OF", max_candidate_entries=None),
         FieldSpec("ov", "code", "ov", code_prefix="OV"),
-        FieldSpec("cliente", "text", "cliente"),
         FieldSpec("modelo", "code", "modelo"),
         FieldSpec("perfil", "profile", "perfil"),
     ),

@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
+from . import carryover
+from .carryover import RowIdentity
 from .params import CrossParams
 from .refs import PlanIndex
 from .scorer import RowMatch, Scorer
@@ -32,6 +34,11 @@ class CellCheck:
     similarity: float
     auto_write: bool
     p_correct: float
+    # Valor herdado da linha de cima (convenção «idem») e de que linha veio.
+    # Só serve para cruzar e para mostrar — nunca é gravado como se fosse
+    # escrito pelo operador.
+    inherited: str | None = None
+    inherited_from: int | None = None
 
 
 @dataclass
@@ -57,12 +64,22 @@ def _threshold_for(field_name: str, params: CrossParams) -> float:
 
 
 def check_row(row: dict, row_index: int, scorer: Scorer,
-              human_fields: set[str] | None = None) -> RowCheck:
-    """Cruza uma linha. `human_fields` = campos já editados por humanos (invioláveis)."""
+              human_fields: set[str] | None = None,
+              identity: RowIdentity | None = None) -> RowCheck:
+    """Cruza uma linha.
+
+    `human_fields` = campos já editados por humanos (invioláveis).
+    `identity` = identidade efectiva incluindo o que foi herdado da linha de
+    cima; o cruzamento usa-a, mas as células continuam a mostrar o que está
+    escrito, com o herdado à parte.
+    """
     human_fields = human_fields or set()
     params = scorer.params
     index: PlanIndex = scorer.index
-    match: RowMatch = scorer.match_row(row)
+    scored_row = carryover.effective_row(row, identity) if identity else row
+    match: RowMatch = scorer.match_row(scored_row)
+    inherited_from = dict(identity.inherited_from) if identity else {}
+    inherited_values = {f: identity.values.get(f) for f in inherited_from} if identity else {}
 
     spec_fields = list(index.spec.identity_fields) + list(index.spec.numeric_fields)
     cells: list[CellCheck] = []
@@ -81,6 +98,8 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
                 status="unmatched" if written_s else "na",
                 similarity=0.0, auto_write=False,
                 p_correct=confidence,
+                inherited=inherited_values.get(f.name),
+                inherited_from=inherited_from.get(f.name),
             ))
         priority = max(
             (params.policy.criticality.get(f.name, params.policy.criticality_default)
@@ -106,19 +125,37 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
         marginal = match.marginals.get(f.name)
         p_field = marginal[1] if marginal else p
         if not proposal:
-            cells.append(CellCheck(f.name, written_s or None, None, "na", 0.0, False, p_field))
+            cells.append(CellCheck(
+                f.name, written_s or None, None, "na", 0.0, False, p_field,
+                inherited=inherited_values.get(f.name),
+                inherited_from=inherited_from.get(f.name),
+            ))
             continue
 
         if f.kind == "numeric":
             w_num, t_num = sim.parse_number(written_s), sim.parse_number(proposal)
             similarity = sim.numeric_similarity(w_num, t_num, f.tolerance)
-        elif f.kind == "code":
-            similarity = sim.code_similarity(written_s, proposal)
+        elif f.kind in ("code", "profile"):
+            # Comparar na convenção do plano: `263323` e `OF263323` são o mesmo
+            # número de obra, e `60 x 5` é o mesmo perfil que `L60X60X5`. Sem
+            # isto o motor marcava a vermelho valores certos e propunha
+            # reescrevê-los só para lhes acrescentar o prefixo.
+            truth = index.normalize_written(f.name, proposal)
+            if truth and truth in index.variants_for(f.name, written_s):
+                similarity = 1.0
+            else:
+                similarity = sim.code_similarity(
+                    index.normalize_written(f.name, written_s), truth
+                )
         else:
             similarity = sim.text_similarity(written_s, proposal)
 
         threshold = _threshold_for(f.name, params)
-        writable = f.name not in human_fields and p_field >= threshold
+        # Campo herdado nunca é auto-escrito: seria transformar uma inferência
+        # nossa num valor registado como se o operador o tivesse escrito.
+        writable = (f.name not in human_fields
+                    and f.name not in inherited_from
+                    and p_field >= threshold)
 
         if written_s and similarity >= 1.0:
             status, auto = "confirmed", False
@@ -127,7 +164,11 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             status, auto = "snapped", writable
         else:
             status, auto = "very_different", writable
-        cells.append(CellCheck(f.name, written_s or None, proposal, status, similarity, auto, p_field))
+        cells.append(CellCheck(
+            f.name, written_s or None, proposal, status, similarity, auto, p_field,
+            inherited=inherited_values.get(f.name),
+            inherited_from=inherited_from.get(f.name),
+        ))
 
     priority = max(
         (params.policy.criticality.get(c.field, params.policy.criticality_default) * (1.0 - p)
@@ -150,8 +191,16 @@ def check_sheet(rows: list[dict], scorer: Scorer,
                 human_fields_by_row: dict[int, set[str]] | None = None) -> dict:
     """Cruza a folha inteira e devolve um dicionário serializável (JSON)."""
     human_fields_by_row = human_fields_by_row or {}
+    # A identidade resolve-se em conjunto, não linha a linha: o operador
+    # escreve a OF uma vez e as linhas seguintes valem-se dela.
+    content_fields = tuple(
+        f.name for f in list(scorer.index.spec.identity_fields)
+        + list(scorer.index.spec.numeric_fields)
+        if f.name not in carryover.CARRY_FIELDS
+    )
+    identities = carryover.resolve(rows, content_fields, human_fields_by_row)
     checks = [
-        check_row(row, i, scorer, human_fields_by_row.get(i))
+        check_row(row, i, scorer, human_fields_by_row.get(i), identities[i])
         for i, row in enumerate(rows)
     ]
     summary = {
@@ -163,6 +212,7 @@ def check_sheet(rows: list[dict], scorer: Scorer,
         "cells_confirmed": sum(1 for c in checks for x in c.cells if x.status == "confirmed"),
         "cells_snapped": sum(1 for c in checks for x in c.cells if x.status == "snapped"),
         "cells_very_different": sum(1 for c in checks for x in c.cells if x.status == "very_different"),
+        "cells_inherited": sum(1 for c in checks for x in c.cells if x.inherited_from is not None),
     }
     review_order = sorted(
         (c.row_index for c in checks if c.review_priority > 0),
