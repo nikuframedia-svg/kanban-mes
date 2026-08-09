@@ -43,11 +43,16 @@ class EntryScore:
 @dataclass
 class RowMatch:
     winner: EntryScore | None
-    p_correct: float
+    p_correct: float               # P(é esta a linha exacta do plano)
     margin_bits: float
     mode: str                      # strong | weak_guess | no_match
     rivals: list[EntryScore] = field(default_factory=list)
     candidates_evaluated: int = 0
+    # P(o valor do campo de identidade primário é o do vencedor). Soma as linhas
+    # irmãs em vez de as opor — é esta a confiança que interessa na revisão.
+    p_primary: float = 0.0
+    # campo -> (valor mais provável, probabilidade)
+    marginals: dict[str, tuple[str, float]] = field(default_factory=dict)
 
 
 class Scorer:
@@ -74,16 +79,26 @@ class Scorer:
 
     def _identity_evidence(self, f: FieldSpec, written_raw: object, idx: int) -> FieldEvidence:
         p = self.params.score
-        norm_fn = sim.normalize_code if f.kind == "code" else sim.compact
-        written = norm_fn(written_raw if written_raw is None else str(written_raw))
+        # Normalizar pelo índice: é ele que sabe as convenções do plano (prefixo
+        # das OF, forma canónica dos perfis).
+        written = self.index.normalize_written(
+            f.name, written_raw if written_raw is None else str(written_raw)
+        )
         truth = self.index.normalized(f.name, idx)
         if not written or not truth:
             return FieldEvidence(f.name, written or None, truth or None, 0.0, 0.0, "empty")
 
-        similarity = (
-            sim.code_similarity(written, truth) if f.kind == "code"
-            else sim.text_similarity(written_raw and str(written_raw), truth)
-        )
+        if f.kind == "code":
+            # O escrito pode vir sem o prefixo que o plano usa; qualquer variante
+            # que bata certo é uma concordância exacta, não uma parecença.
+            similarity = (
+                1.0 if truth in self.index.variants_for(f.name, written_raw)
+                else sim.code_similarity(written, truth)
+            )
+        elif f.kind == "profile":
+            similarity = 1.0 if written == truth else sim.code_similarity(written, truth)
+        else:
+            similarity = sim.text_similarity(written_raw and str(written_raw), truth)
         w = self.value_weight(f, truth)
 
         if similarity >= p.sim_full:
@@ -191,8 +206,10 @@ class Scorer:
 
     # ---- candidatos ----
 
-    # valores com mais entradas do que isto não geram candidatos sozinhos
-    # (continuam a contar como evidência na pontuação)
+    # Teto por omissão: valores com mais entradas do que isto não geram
+    # candidatos sozinhos (continuam a contar como evidência na pontuação).
+    # Campos que identificam mesmo — a OF — levantam-no no seu FieldSpec: uma
+    # OF de 600 linhas continua a ser uma OF, e com o teto ficava invisível.
     MAX_VALUE_ENTRIES = 500
 
     def candidates(self, row: dict, top_k: int = 10) -> list[int]:
@@ -203,7 +220,7 @@ class Scorer:
             if written is None or str(written).strip() == "":
                 continue
             exact = self.index.exact_matches(f.name, str(written),
-                                             max_entries=self.MAX_VALUE_ENTRIES)
+                                             max_entries=f.max_candidate_entries)
             out.update(exact)
             if not exact:
                 fuzzy_pending.append((f, str(written)))
@@ -215,7 +232,7 @@ class Scorer:
             if len(out) >= 300:
                 break
             out.update(self.index.fuzzy_candidates(f.name, written, top_k=top_k,
-                                                   max_entries=self.MAX_VALUE_ENTRIES))
+                                                   max_entries=f.max_candidate_entries))
         if not out and self.index.spec.numeric_fields:
             # sem pistas de identidade: restringir por dimensões
             compatible: set[int] | None = None
@@ -255,17 +272,55 @@ class Scorer:
                 break
 
         p_correct = self._posterior(pool, winner)
+        marginals = self._marginals(pool)
         pp = self.params.score
         mode = "strong" if (margin >= pp.margin_decisive_bits and winner.bits > 0) else "weak_guess"
         rivals = [s for s in pool[1:6] if winner.bits - s.bits <= 2.0]
         return RowMatch(
             winner=winner,
             p_correct=p_correct,
+            p_primary=marginals.get(self._primary, (None, 0.0))[1],
+            marginals=marginals,
             margin_bits=margin if margin != math.inf else winner.bits,
             mode=mode,
             rivals=rivals,
             candidates_evaluated=len(pool),
         )
+
+    def _marginals(self, pool: list[EntryScore]) -> dict[str, tuple[str, float]]:
+        """Probabilidade do VALOR de cada campo, somada sobre as linhas do pool.
+
+        `p_correct` responde a «é esta a linha exacta do plano?» — e numa OF com
+        300 linhas irmãs essa pergunta não tem resposta possível: a massa
+        divide-se por todas e nenhuma passa de 0,3. A pergunta útil na revisão é
+        «de que OF é esta linha?», e essa soma as irmãs em vez de as opor.
+        """
+        if not pool:
+            return {}
+        p = self.params.posterior
+        t = max(p.temperature_bits, 1e-6)
+        b_max = max(s.bits for s in pool)
+        weights = [math.pow(2.0, (s.bits - b_max) / t) for s in pool]
+
+        pi = min(p.pi_h0_max, p.pi_h0_base + p.pi_h0_per_day * max(self.index.plan_age_days, 0.0))
+        pi = max(pi, 1e-4)
+        b_h0 = p.b_h0_raw_bits + math.log2(max(self.index.n, 2))
+        w_h0 = (pi / (1.0 - pi)) * math.pow(2.0, (b_h0 - b_max) / t)
+        total = sum(weights) + w_h0
+        if total <= 0:
+            return {}
+
+        out: dict[str, tuple[str, float]] = {}
+        for f in self.index.spec.identity_fields:
+            by_value: dict[str, float] = {}
+            for s, w in zip(pool, weights):
+                value = self.index.normalized(f.name, s.idx)
+                if value:
+                    by_value[value] = by_value.get(value, 0.0) + w
+            if by_value:
+                best = max(by_value.items(), key=lambda kv: kv[1])
+                out[f.name] = (best[0], best[1] / total)
+        return out
 
     def _posterior(self, pool: list[EntryScore], winner: EntryScore) -> float:
         """Softmax sobre o pool avaliado + H₀ explícito.

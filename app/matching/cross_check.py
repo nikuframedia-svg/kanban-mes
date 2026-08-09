@@ -67,7 +67,11 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     spec_fields = list(index.spec.identity_fields) + list(index.spec.numeric_fields)
     cells: list[CellCheck] = []
 
-    if match.winner is None or match.p_correct < 0.5:
+    # A pergunta que decide se há ligação ao plano é «de que OF é esta linha?»,
+    # não «que linha exacta do plano é esta». Numa OF com 300 irmãs a segunda
+    # nunca passa de 0,3 por construção, e usá-la deitava fora tudo.
+    confidence = max(match.p_primary, match.p_correct)
+    if match.winner is None or confidence < 0.5:
         # H₀ plausível: nada de propostas; célula a célula fica "unmatched"
         for f in spec_fields:
             written = row.get(f.name)
@@ -76,29 +80,33 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
                 field=f.name, written=written_s or None, proposal=None,
                 status="unmatched" if written_s else "na",
                 similarity=0.0, auto_write=False,
-                p_correct=match.p_correct,
+                p_correct=confidence,
             ))
         priority = max(
             (params.policy.criticality.get(f.name, params.policy.criticality_default)
              for f in spec_fields), default=1,
-        ) * (1.0 - match.p_correct)
+        ) * (1.0 - confidence)
         return RowCheck(
             row_index=row_index, matched_plan_key=None,
-            p_correct=match.p_correct, margin_bits=match.margin_bits,
+            p_correct=confidence, margin_bits=match.margin_bits,
             mode="no_match" if match.winner is None else match.mode,
             review_priority=priority, cells=cells,
         )
 
     entry = index.entries[match.winner.idx]
-    p = match.p_correct
+    p = confidence
 
     for f in spec_fields:
         written = row.get(f.name)
         written_s = str(written).strip() if written is not None else ""
         raw_proposal = entry.get(f.entry_key)
         proposal = str(raw_proposal).strip() if raw_proposal is not None else ""
+        # Confiança por campo: o valor de um campo pode ser certo (todas as
+        # irmãs concordam) mesmo quando a linha exacta é incerta.
+        marginal = match.marginals.get(f.name)
+        p_field = marginal[1] if marginal else p
         if not proposal:
-            cells.append(CellCheck(f.name, written_s or None, None, "na", 0.0, False, p))
+            cells.append(CellCheck(f.name, written_s or None, None, "na", 0.0, False, p_field))
             continue
 
         if f.kind == "numeric":
@@ -110,7 +118,7 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             similarity = sim.text_similarity(written_s, proposal)
 
         threshold = _threshold_for(f.name, params)
-        writable = f.name not in human_fields and p >= threshold
+        writable = f.name not in human_fields and p_field >= threshold
 
         if written_s and similarity >= 1.0:
             status, auto = "confirmed", False
@@ -119,7 +127,7 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             status, auto = "snapped", writable
         else:
             status, auto = "very_different", writable
-        cells.append(CellCheck(f.name, written_s or None, proposal, status, similarity, auto, p))
+        cells.append(CellCheck(f.name, written_s or None, proposal, status, similarity, auto, p_field))
 
     priority = max(
         (params.policy.criticality.get(c.field, params.policy.criticality_default) * (1.0 - p)

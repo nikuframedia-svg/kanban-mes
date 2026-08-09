@@ -44,13 +44,19 @@ def _plan_age_days(snapshot_like: str) -> float:
     return max(0.0, (datetime.now(timezone.utc) - loaded).total_seconds() / 86400.0)
 
 
+# Convenções que separam o que o operador escreve do que o plano guarda:
+# - o plano prefixa todas as OF com "OF" e as OV com "OV"; a folha não (a
+#   coluna já se chama OF, ninguém repete o prefixo);
+# - o plano escreve perfis como L60X60X5, a folha como "60 x 5";
+# - a OF é o campo que identifica de verdade, por isso não leva teto de
+#   candidatos: há OFs com mais de 600 linhas e ficavam invisíveis.
 CANTONEIRAS_SPEC = IndexSpec(
     identity_fields=(
-        FieldSpec("of", "code", "of"),
-        FieldSpec("ov", "code", "ov"),
+        FieldSpec("of", "code", "of", code_prefix="OF", max_candidate_entries=None),
+        FieldSpec("ov", "code", "ov", code_prefix="OV"),
         FieldSpec("cliente", "text", "cliente"),
         FieldSpec("modelo", "code", "modelo"),
-        FieldSpec("perfil", "code", "perfil"),
+        FieldSpec("perfil", "profile", "perfil"),
     ),
     numeric_fields=(
         FieldSpec("comp_mm", "numeric", "comp_mm", tolerance=50.0),
