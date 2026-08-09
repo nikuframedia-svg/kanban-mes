@@ -11,6 +11,7 @@ import hashlib
 import io
 import threading
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
@@ -20,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 
 from .. import db, imaging, pg_store
 from ..config import settings
-from ..matching import carryover, loaders
+from ..matching import carryover, loaders, operador
 from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
@@ -108,6 +109,11 @@ def get_index(loader_name: str):
     return index
 
 
+def get_employees():
+    """Colaboradores com a mesma cache do índice do plano."""
+    return get_index("load_employees")
+
+
 def make_scorer(template_name: str) -> Scorer:
     template = get_template(template_name)
     index = get_index(template.index_loader)
@@ -115,12 +121,57 @@ def make_scorer(template_name: str) -> Scorer:
     return Scorer(index, CrossParams.load(), active_primary=active)
 
 
+def resolve_operator(conn, uid: str, sheet: dict) -> dict | None:
+    """Resolve o operador da folha contra a lista de colaboradores.
+
+    Corre para TODAS as folhas, incluindo o verso (paragens): é lá que estão
+    metade dos casos, e a mesma pessoa aparecia com nomes diferentes na frente
+    e no verso da mesma folha física.
+    """
+    header = (sheet["sheet_data"] or {}).get("header") or {}
+    try:
+        employees = get_employees()
+    except Exception:
+        return None
+    if not employees:
+        return None
+
+    match = operador.resolve(header.get("operador"), header.get("n_operador"), employees)
+    if match.cod is None and match.pernr is None:
+        return asdict(match)
+
+    protegidos = db.human_header_fields(conn, uid)
+    data = sheet["sheet_data"]
+    changed = False
+    for field, value in (("operador", match.name), ("n_operador", str(match.cod or ""))):
+        if not value or field in protegidos:
+            continue
+        if str(header.get(field) or "").strip() != value:
+            db.record_edit(conn, uid, f"header.{field}", header.get(field), value,
+                           "system", "colaboradores")
+            data["header"][field] = value
+            changed = True
+    if changed:
+        fresh = db.get_sheet(conn, uid)
+        fresh_data = fresh["sheet_data"]
+        fresh_data["header"] = data["header"]
+        db.save_sheet_data(conn, uid, fresh_data, fresh["revision"])
+    return asdict(match)
+
+
 def run_cross_check(conn, uid: str) -> None:
     sheet = db.get_sheet(conn, uid)
     if not sheet or not sheet["sheet_data"]:
         return
+    # O cabeçalho resolve-se sempre, antes de qualquer saída antecipada.
+    operator_match = resolve_operator(conn, uid, sheet)
     if get_template(sheet["template_name"]).index_loader is None:
-        return  # ex.: paragens — não há plano contra que cruzar
+        # ex.: paragens — não há plano contra que cruzar, mas o operador já foi
+        # resolvido e vale a pena guardar como.
+        if operator_match:
+            db.save_cross_check(conn, uid, {"summary": {}, "review_order": [],
+                                            "rows": [], "operator": operator_match})
+        return
     scorer = make_scorer(sheet["template_name"])
     rows = sheet["sheet_data"].get("rows") or []
     cross = check_sheet(rows, scorer, db.human_fields_by_row(conn, uid))
@@ -141,6 +192,8 @@ def run_cross_check(conn, uid: str) -> None:
         data = fresh["sheet_data"]
         data["rows"] = rows
         db.save_sheet_data(conn, uid, data, fresh["revision"])
+    if operator_match:
+        cross["operator"] = operator_match
     db.save_cross_check(conn, uid, cross)
 
 
@@ -523,6 +576,7 @@ def sheet_view(request: Request, uid: str, back: str | None = None,
         "review_order": (sheet["cross_check"] or {}).get("review_order", []),
         "stored": request.query_params.get("stored"),
         "has_ocr": has_ocr, "view_mode": view_mode,
+        "operator": (sheet["cross_check"] or {}).get("operator"),
         "diverged": diverged, "n_diverged": len(diverged),
         "back_url": _safe_back(back),
     })

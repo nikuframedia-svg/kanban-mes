@@ -13,7 +13,7 @@ import psycopg
 
 from .config import settings
 from .matching import similarity as sim
-from .templates_spec import KanbanTemplate, is_marked
+from .templates_spec import LEGACY_FIELD_ALIASES, KanbanTemplate, is_marked
 
 APP_VERSION = "kanban-mes 0.1.0"
 
@@ -61,7 +61,8 @@ def _columns_present(cur) -> set[str]:
 
 
 def _store_stoppages(cur, sheet: dict, header: dict, filled: list,
-                     sheet_date: str | None, operator: str) -> int:
+                     sheet_date: str | None, operator: str,
+                     operator_pernr: str | None = None) -> int:
     """Linhas do verso da folha (paragens) → mes_kanban.stoppage_records."""
     machine = str(header.get("setor_maquina") or "").strip() or None
     n = 0
@@ -70,8 +71,9 @@ def _store_stoppages(cur, sheet: dict, header: dict, filled: list,
             """
             INSERT INTO mes_kanban.stoppage_records
                 (sheet_uid, row_index, sheet_date, machine, operator_name,
-                 motivo, inicio, fim, duracao_horas, resolvido, validated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                 motivo, inicio, fim, duracao_horas, resolvido,
+                 operator_pernr, validated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
             """,
             (
                 sheet["uid"], i, sheet_date, machine,
@@ -81,6 +83,7 @@ def _store_stoppages(cur, sheet: dict, header: dict, filled: list,
                 str(row.get("fim") or "").strip() or None,
                 sim.parse_number(row.get("duracao")),
                 str(row.get("resolvido") or "").strip() or None,
+                operator_pernr,
             ),
         )
         n += 1
@@ -101,6 +104,10 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
 
     sheet_date = str(header.get("data") or "")[:10] or None
     operator = str(header.get("operador") or "").strip()
+    # Identidade resolvida contra a lista de colaboradores (ver app/matching/operador.py).
+    op_match = cross.get("operator") or {}
+    operator_pernr = op_match.get("pernr") or None
+    operator_rule = op_match.get("rule") or None
     # valor de folha (rodapé), desnormalizado para cada linha — é a única
     # coluna de horas no schema
     hours_worked = sim.parse_number(footer.get("horas_trabalhadas"))
@@ -119,8 +126,8 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                     (sheet_uid, sheet_date, template_name, family, operator_name,
                      operator_no, sector_machine, shift, image_sha256,
                      raw_extraction, sheet_data, cross_check, edit_count,
-                     validated_by, app_version)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     validated_by, app_version, operator_pernr, operator_match_rule)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     sheet["uid"], sheet_date, template.name, template.family,
@@ -133,10 +140,12 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                     json.dumps(data, ensure_ascii=False, default=str),
                     json.dumps(cross, ensure_ascii=False, default=str),
                     edit_count, actor, APP_VERSION,
+                    operator_pernr, operator_rule,
                 ),
             )
             if template.name == "cantoneiras_paragens":
-                n = _store_stoppages(cur, sheet, header, filled, sheet_date, operator)
+                n = _store_stoppages(cur, sheet, header, filled, sheet_date, operator,
+                                     operator_pernr)
                 conn.commit()
                 return n
             present = _columns_present(cur)
@@ -147,13 +156,14 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 " machine, production_order, sales_order, customer_name, "
                 " model_ref, matched_plan_key, match_confidence, "
                 " quantity, length_mm, width_mm, thickness_mm, lot_ref, "
-                " scrap, hours_worked, extra, validated_at"
+                " scrap, hours_worked, extra, operator_pernr, validated_at"
                 + "".join(f", {c}" for c in optional)
                 + ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-                  "%s, %s, %s, %s, %s, %s, %s, %s, now()"
+                  "%s, %s, %s, %s, %s, %s, %s, %s, %s, now()"
                 + ", %s" * len(optional)
                 + ")"
             )
+            row_fields = set(template.row_fields)
             n = 0
             for i, row in filled:
                 cr = cross_rows.get(i) or {}
@@ -163,6 +173,8 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 for f, value in row.items():
                     if value is None or str(value).strip() == "":
                         continue
+                    # folhas lidas antes de a coluna mudar de nome
+                    f = LEGACY_FIELD_ALIASES.get(f, f) if f not in row_fields else f
                     col = _FIELD_TO_COLUMN.get(f)
                     if col is None:
                         extra[f] = value
@@ -206,6 +218,7 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                         cols.get("lot_ref"), cols.get("scrap"),
                         hours_worked,
                         json.dumps(extra, ensure_ascii=False, default=str) if extra else None,
+                        operator_pernr,
                         *[cols.get(c) for c in optional],
                     ),
                 )

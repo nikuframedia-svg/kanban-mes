@@ -261,3 +261,30 @@ def fetch_profiles_in_of(of: str) -> list[dict]:
         """,
         (_CANTONEIRAS_LIKE, of),
     )
+
+
+def load_employees() -> dict[int, "Employee"]:
+    """Colaboradores do snapshot mais recente, indexados pelo número escrito.
+
+    Devolve vazio (em vez de rebentar) se a tabela ainda não existir: a lista é
+    uma referência para melhorar a leitura, não uma dependência da revisão.
+    """
+    from .operador import Employee
+
+    try:
+        rows = _fetch(
+            """
+            SELECT cod, pernr, full_name FROM core_mtg.employees
+             WHERE snapshot_id = (
+                SELECT snapshot_id FROM audit_mtg.snapshots
+                 WHERE dataset_id = 'ds-colaboradores'
+                 ORDER BY loaded_at DESC LIMIT 1
+             )
+            """
+        )
+    except psycopg.Error:
+        return {}
+    return {
+        int(r["cod"]): Employee(int(r["cod"]), str(r["pernr"]).strip(), str(r["full_name"]).strip())
+        for r in rows
+    }

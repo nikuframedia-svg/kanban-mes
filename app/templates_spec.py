@@ -66,6 +66,8 @@ def is_marked(value: object) -> bool:
 # Ler pelos dois nomes evita reescrever `raw_extraction`, que é a transcrição
 # original e não se falsifica para arrumar o schema.
 _LEGACY_FIELD = {"perf_comp": "comp_mm"}
+# o contrário: nome antigo -> nome de hoje, para quem percorre a linha guardada
+LEGACY_FIELD_ALIASES = {old: new for new, old in _LEGACY_FIELD.items()}
 
 
 def field_value(row: dict, field: str):

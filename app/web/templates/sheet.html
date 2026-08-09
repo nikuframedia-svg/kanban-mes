@@ -189,6 +189,33 @@ setTimeout(function () {
         <span class="card-h-sub">operador e data obrigatórios</span>
       </div>
       <div class="card-b">
+        {% if operator and not is_raw %}
+        {# O número é o que vem escrito de forma fiável nos kanbans; o nome não.
+           Por isso o nome mostrado é o do SAP, e diz-se de onde veio. #}
+        <div class="alert {{ 'ok' if operator.confident else 'warn' }}"
+             style="margin-bottom:12px; padding:8px 12px;">
+          <span>
+            {% if operator.pernr %}
+              <b class="mono">{{ operator.pernr }}</b> · <b>{{ operator.name }}</b>
+              <span class="muted tiny">(nº {{ operator.cod }})</span>
+              {% if operator.rule == 'corrigido' %}
+                <span class="muted tiny">— o nº escrito ({{ operator.written_name }}) não existe na
+                lista; este é o único parecido. Confirma.</span>
+              {% elif operator.rule == 'so_numero' %}
+                <span class="muted tiny">— o nº bate mas o nome lido era
+                «{{ operator.written_name }}». Confirma qual está certo.</span>
+              {% elif operator.changed_name %}
+                <span class="muted tiny">— nome da lista de colaboradores
+                (lido: «{{ operator.written_name }}»)</span>
+              {% endif %}
+            {% else %}
+              <b>{{ operator.written_name or '—' }}</b>
+              <span class="muted tiny">— sem correspondência na lista de colaboradores.
+              {% if operator.rule == 'sem_numero' %}Falta o nº do operador.{% endif %}</span>
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
         <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px;">
           {% for f in t.header_fields %}
           <div class="field">

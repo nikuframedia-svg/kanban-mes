@@ -278,6 +278,21 @@ def human_fields_by_row(conn: sqlite3.Connection, uid: str) -> dict[int, set[str
     return out
 
 
+def human_header_fields(conn: sqlite3.Connection, uid: str) -> set[str]:
+    """Campos do cabeçalho corrigidos à mão — o motor não lhes toca.
+
+    Se o revisor escreveu o nome do operador, foi uma decisão: substituí-lo
+    pelo nome da lista seria desfazê-la.
+    """
+    return {
+        r["field_path"][len("header."):]
+        for r in conn.execute(
+            "SELECT field_path FROM edits WHERE sheet_uid = ? AND source = 'human' "
+            "AND field_path LIKE 'header.%'", (uid,)
+        ).fetchall()
+    }
+
+
 def mark_validated(conn: sqlite3.Connection, uid: str, actor: str) -> bool:
     cur = conn.execute(
         "UPDATE sheets SET status = 'validated', validated_at = ?, validated_by = ? "
