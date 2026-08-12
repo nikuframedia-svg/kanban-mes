@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from datetime import date
 
 import psycopg
 
 from .config import settings
+from .matching import carryover
 from .matching import similarity as sim
 from .templates_spec import LEGACY_FIELD_ALIASES, KanbanTemplate, is_marked
 
@@ -38,26 +41,58 @@ _NUMERIC_COLUMNS = {"quantity", "length_mm", "width_mm", "thickness_mm", "plan_q
 _BOOLEAN_COLUMNS = {"full_profile"}
 
 # Colunas acrescentadas por migrações posteriores ao primeiro schema. A app
-# sonda-as no arranque em vez de as assumir: assim a ordem entre o deploy do
-# código e a aplicação do SQL deixa de importar — sem isto, código novo com
-# base antiga fazia falhar TODAS as validações.
+# sonda-as a cada validação em vez de as assumir: assim a ordem entre o deploy
+# do código e a aplicação do SQL deixa de importar. Sem cache de propósito —
+# a sonda é um SELECT ao information_schema por validação (raras), e a cache
+# fixava para sempre o schema visto na primeira validação do processo.
 _OPTIONAL_COLUMNS = ("profile_type", "full_profile", "plan_quantity")
-_available_columns: set[str] | None = None
 
 
 def _dsn() -> str:
     return os.environ.get("MES_PG_DSN") or settings.pg_dsn
 
 
+# dd/mm/aaaa, dd-mm-aa, aaaa-mm-dd… — o que os operadores escrevem de facto
+_DATE_DMY = re.compile(r"^\s*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})\s*$")
+_DATE_ISO = re.compile(r"^\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*$")
+
+
+class InvalidSheetDate(ValueError):
+    """Data manuscrita que não se consegue interpretar — o chamador decide
+    como a devolver ao utilizador (422, não 500)."""
+
+
+def normalize_sheet_date(raw: object) -> str:
+    """Data manuscrita → ISO (aaaa-mm-dd), SEMPRE dia/mês/ano à portuguesa.
+
+    Antes ia crua para a coluna `date` e era o Postgres a adivinhar — com
+    `DateStyle MDY`, «06/08/2026» ficou gravado como 8 de junho (aconteceu na
+    primeira folha validada). Datas ambíguas cá dentro não existem: quem
+    escreve 06/08 numa fábrica portuguesa quer dizer 6 de agosto.
+    """
+    text = str(raw or "").strip()
+    m = _DATE_ISO.match(text)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    else:
+        m = _DATE_DMY.match(text)
+        if not m:
+            raise InvalidSheetDate(text)
+        d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if y < 100:
+            y += 2000
+    try:
+        return date(y, mo, d).isoformat()
+    except ValueError as exc:
+        raise InvalidSheetDate(text) from exc
+
+
 def _columns_present(cur) -> set[str]:
-    global _available_columns
-    if _available_columns is None:
-        cur.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = 'mes_kanban' AND table_name = 'production_records'"
-        )
-        _available_columns = {r[0] for r in cur.fetchall()}
-    return _available_columns
+    cur.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = 'mes_kanban' AND table_name = 'production_records'"
+    )
+    return {r[0] for r in cur.fetchall()}
 
 
 def _store_stoppages(cur, sheet: dict, header: dict, filled: list,
@@ -102,7 +137,9 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
     cross = sheet.get("cross_check") or {}
     cross_rows = {r["row_index"]: r for r in cross.get("rows", [])}
 
-    sheet_date = str(header.get("data") or "")[:10] or None
+    # Levanta InvalidSheetDate se a data não se interpretar — o chamador
+    # transforma isso num 422 com mensagem, nunca num 500.
+    sheet_date = normalize_sheet_date(header.get("data")) if str(header.get("data") or "").strip() else None
     operator = str(header.get("operador") or "").strip()
     # Identidade resolvida contra a lista de colaboradores (ver app/matching/operador.py).
     op_match = cross.get("operator") or {}
@@ -118,8 +155,37 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
         if any(v is not None and str(v).strip() != "" for v in row.values())
     ]
 
-    with psycopg.connect(_dsn()) as conn:
+    # Identidade herdada resolvida aqui, não lida das células do cross: o
+    # `cliente` das cantoneiras não cruza com o plano (fora do IndexSpec),
+    # logo não tem célula — e as linhas herdadas iam para o Postgres com
+    # customer_name NULL. O carryover é a fonte de verdade da herança.
+    identities = carryover.resolve(
+        rows, tuple(f for f in template.row_fields if f not in carryover.CARRY_FIELDS),
+    ) if template.name != "cantoneiras_paragens" else []
+
+    with psycopg.connect(_dsn(), connect_timeout=10) as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM mes_kanban.validated_sheets WHERE sheet_uid = %s",
+                (sheet["uid"],),
+            )
+            if cur.fetchone():
+                # A folha JÁ está no Postgres (o INSERT anterior confirmou e o
+                # que falhou foi marcar o staging): o commit é atómico, por
+                # isso as linhas também lá estão — repetir daria colisão de PK
+                # e um 500 permanente. Devolve-se o que existe.
+                cur.execute(
+                    "SELECT count(*) FROM mes_kanban.production_records WHERE sheet_uid = %s",
+                    (sheet["uid"],),
+                )
+                n_prod = cur.fetchone()[0]
+                if n_prod:
+                    return n_prod
+                cur.execute(
+                    "SELECT count(*) FROM mes_kanban.stoppage_records WHERE sheet_uid = %s",
+                    (sheet["uid"],),
+                )
+                return cur.fetchone()[0]
             cur.execute(
                 """
                 INSERT INTO mes_kanban.validated_sheets
@@ -186,15 +252,18 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                         cols.setdefault(col, str(value).strip())
                 # Identidade herdada da linha de cima: no staging fica em branco
                 # (é o que está no papel), mas aqui tem de ser explícita, senão
-                # a linha chega ao Postgres sem OF. A proveniência fica em
-                # `extra` para se saber depois o que foi escrito e o que foi lido.
+                # a linha chega ao Postgres sem OF. Vem do carryover (não das
+                # células do cross: o cliente não cruza e não tem célula). A
+                # proveniência fica em `extra` para se saber depois o que foi
+                # escrito e o que foi lido.
+                identity = identities[i] if i < len(identities) else None
                 inherited: dict[str, int] = {}
-                for f, col in (("of", "production_order"), ("ov", "sales_order"),
-                               ("cliente", "customer_name")):
-                    cell = cells.get(f)
-                    if not cols.get(col) and cell and cell.get("inherited"):
-                        cols[col] = str(cell["inherited"]).strip()
-                        inherited[f] = cell.get("inherited_from")
+                if identity is not None:
+                    for f, col in (("of", "production_order"), ("ov", "sales_order"),
+                                   ("cliente", "customer_name")):
+                        if not cols.get(col) and identity.is_inherited(f):
+                            cols[col] = str(identity.values[f]).strip()
+                            inherited[f] = identity.inherited_from[f]
                 if inherited:
                     extra["identidade_herdada"] = inherited
                 # Quantidade planeada da linha do plano que casou, para se poder

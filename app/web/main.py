@@ -9,8 +9,10 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import re
 import threading
 import time
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 
@@ -42,7 +44,27 @@ class NoCacheStaticFiles(StaticFiles):
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
-app = FastAPI(title="Kanban MES")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """No arranque, re-enfileirar folhas que um restart deixou em `pending`:
+    as threads do worker são daemon e morrem com o processo — sem isto, um
+    deploy a meio de um lote deixava folhas em spinner eterno."""
+    try:
+        conn = db.connect()
+        try:
+            stuck = db.pending_with_image(conn)
+        finally:
+            conn.close()
+        if stuck:
+            print(f"[arranque] a retomar OCR de {len(stuck)} folha(s) pendente(s)", flush=True)
+            threading.Thread(target=_process_batch, args=(stuck,), daemon=True).start()
+    except Exception as exc:
+        print(f"[arranque] retoma de pendentes falhou: {exc}", flush=True)
+    yield
+
+
+app = FastAPI(title="Kanban MES", lifespan=_lifespan)
 app.mount("/static", NoCacheStaticFiles(directory=str(_STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["css_version"] = hashlib.sha1(
@@ -62,6 +84,12 @@ async def _attach_watermark(request: Request, call_next):
     header de cada poll HTMX; a diferença são as folhas que entraram entretanto,
     e é isso que alimenta o banner «N folhas novas».
     """
+    # Estáticos e fotos não precisam de marca de água — e abrir uma ligação
+    # SQLite (com executescript do schema) por cada imagem servida punha o
+    # event loop a pagar até 5 s de busy_timeout em cada pedido.
+    path = request.url.path
+    if path.startswith("/static/") or path.endswith("/photo"):
+        return await call_next(request)
     watermark = 0
     if request.method == "GET":
         try:
@@ -165,21 +193,30 @@ def resolve_operator(conn, uid: str, sheet: dict) -> dict | None:
         return asdict(match)
 
     protegidos = db.human_header_fields(conn, uid)
-    data = sheet["sheet_data"]
-    changed = False
-    for field, value in (("operador", match.name), ("n_operador", str(match.cod or ""))):
-        if not value or field in protegidos:
-            continue
-        if str(header.get(field) or "").strip() != value:
-            db.record_edit(conn, uid, f"header.{field}", header.get(field), value,
-                           "system", "colaboradores")
-            data["header"][field] = value
-            changed = True
-    if changed:
+    updates = [
+        (field, value)
+        for field, value in (("operador", match.name), ("n_operador", str(match.cod or "")))
+        if value and field not in protegidos
+        and str(header.get(field) or "").strip() != value
+    ]
+    if updates:
+        # Aplicar sobre o estado FRESCO, nunca sobre a cópia com que se
+        # calculou: substituir o header inteiro por uma cópia velha apagava
+        # edições humanas feitas enquanto o worker corria. Se a folha mudou
+        # entretanto, desiste-se — a edição que a mudou dispara novo ciclo.
         fresh = db.get_sheet(conn, uid)
-        fresh_data = fresh["sheet_data"]
-        fresh_data["header"] = data["header"]
-        db.save_sheet_data(conn, uid, fresh_data, fresh["revision"])
+        if fresh and fresh["sheet_data"] and fresh["revision"] == sheet["revision"]:
+            data = fresh["sheet_data"]
+            if db.save_sheet_data(
+                conn, uid,
+                {**data, "header": {**(data.get("header") or {}),
+                                    **dict(updates)}},
+                fresh["revision"],
+            ):
+                for field, value in updates:
+                    db.record_edit(conn, uid, f"header.{field}",
+                                   (data.get("header") or {}).get(field), value,
+                                   "system", "colaboradores")
     return asdict(match)
 
 
@@ -196,29 +233,39 @@ def run_cross_check(conn, uid: str) -> None:
             db.save_cross_check(conn, uid, {"summary": {}, "review_order": [],
                                             "rows": [], "operator": operator_match})
         return
-    scorer = make_scorer(sheet["template_name"])
-    rows = sheet["sheet_data"].get("rows") or []
+    # Reler DEPOIS do resolve_operator (que pode ter escrito): o cruzamento é
+    # calculado sobre uma revisão conhecida e só se grava se a folha ainda for
+    # essa — um cross calculado sobre linhas velhas não pode pintar as novas.
+    base = db.get_sheet(conn, uid)
+    if not base or not base["sheet_data"]:
+        return
+    scorer = make_scorer(base["template_name"])
+    data = base["sheet_data"]
+    rows = data.get("rows") or []
     cross = check_sheet(rows, scorer, db.human_fields_by_row(conn, uid))
+    expected = base["revision"]
 
-    # aplicar escrita automática (política de perda esperada), auditada como 'system'
-    changed = False
+    # escrita automática (política de perda esperada), auditada como 'system';
+    # a auditoria só se grava depois de a escrita ter mesmo acontecido
+    edits: list[tuple[str, object, str]] = []
     for rc in cross["rows"]:
         for cell in rc["cells"]:
             if cell["auto_write"] and cell["proposal"] is not None:
                 i, f = rc["row_index"], cell["field"]
-                old = rows[i].get(f)
-                if str(old or "").strip() != cell["proposal"]:
-                    db.record_edit(conn, uid, f"rows[{i}].{f}", old, cell["proposal"], "system", "cross")
+                if i < len(rows) and str(rows[i].get(f) or "").strip() != cell["proposal"]:
+                    edits.append((f"rows[{i}].{f}", rows[i].get(f), cell["proposal"]))
                     rows[i][f] = cell["proposal"]
-                    changed = True
-    if changed:
-        fresh = db.get_sheet(conn, uid)
-        data = fresh["sheet_data"]
-        data["rows"] = rows
-        db.save_sheet_data(conn, uid, data, fresh["revision"])
+    if edits:
+        if not db.save_sheet_data(conn, uid, data, expected):
+            # o humano editou entre o cálculo e a gravação: desistir — a
+            # edição dele dispara um run_cross_check novo com os dados certos
+            return
+        for path, old, new in edits:
+            db.record_edit(conn, uid, path, old, new, "system", "cross")
+        expected += 1
     if operator_match:
         cross["operator"] = operator_match
-    db.save_cross_check(conn, uid, cross)
+    db.save_cross_check(conn, uid, cross, expected_revision=expected)
 
 
 # ---------- páginas ----------
@@ -235,10 +282,12 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
         options = db.filter_options(conn)
     finally:
         conn.close()
-    # querystring dos filtros não-status, para os chips preservarem os filtros
-    parts = [f"&{k}={v}" for k, v in (("operador", operador), ("setor", setor),
-                                      ("data", data), ("data_captura", data_captura),
-                                      ("of", of)) if v]
+    # querystring dos filtros não-status, para os chips preservarem os filtros.
+    # URL-encoded: um operador «SILVA & VINHA» truncava o filtro no «&».
+    from urllib.parse import quote
+    parts = [f"&{k}={quote(v)}" for k, v in (("operador", operador), ("setor", setor),
+                                             ("data", data), ("data_captura", data_captura),
+                                             ("of", of)) if v]
     return templates.TemplateResponse(request, "home.html", {
         "sheets": sheets, "options": options,
         "f": {"status": status, "operador": operador, "setor": setor,
@@ -333,7 +382,7 @@ def _pdf_to_images(content: bytes, stem: str) -> list[tuple[bytes, str]]:
 PROCESS_IN_BACKGROUND = True
 
 
-def _process_sheet(uid: str) -> None:
+def _process_sheet(uid: str, force_ocr: bool = False) -> None:
     conn = db.connect()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -347,44 +396,118 @@ def _process_sheet(uid: str) -> None:
         image_path = imaging.render_oriented(
             Path(sheet["image_path"]), int(sheet.get("image_rotation") or 0)
         )
-        # folha TPL102 tem frente (produção) e verso (paragens): detetar por página
-        if template_name == "cantoneiras_kanban" and hasattr(provider, "classify_page"):
-            try:
-                if provider.classify_page(image_path) == "paragens":
-                    template_name = "cantoneiras_paragens"
-                    template = get_template(template_name)
-                    db.set_template(conn, uid, template_name)
-            except OcrError:
-                pass  # em dúvida, segue como produção
+        # Verso em branco do scanner: sem tinta não há nada para ler, e mandar
+        # uma página vazia ao modelo produzia folhas inventadas inteiras.
+        # `force_ocr` é o revisor a discordar da deteção — respeita-se.
+        if not force_ocr and imaging.is_blank_page(image_path, settings.blank_ink_threshold):
+            extraction = empty_extraction(template)
+            extraction["_blank_page"] = True
+            if db.set_extraction(conn, uid, extraction):
+                run_cross_check(conn, uid)
+            return
+        # Folha TPL102 tem frente (produção) e verso (paragens). O provider
+        # classifica E transcreve na MESMA chamada — eram duas por página, e a
+        # classificação sozinha gastava metade da quota do free tier.
         try:
-            extraction = provider.extract(image_path, template)
+            if template.family == "cantoneiras" and hasattr(provider, "extract_auto"):
+                kinds = {"producao": get_template("cantoneiras_kanban"),
+                         "paragens": get_template("cantoneiras_paragens")}
+                kind, extraction = provider.extract_auto(image_path, kinds)
+                if kinds[kind].name != template_name:
+                    template_name = kinds[kind].name
+                    template = kinds[kind]
+                    db.set_template(conn, uid, template_name)
+            else:
+                extraction = provider.extract(image_path, template)
         except OcrError as exc:
             # OCR falhou (rede, quota, chave): a folha abre vazia para
             # preenchimento manual; o erro fica no trilho de auditoria
             extraction = empty_extraction(template)
             extraction["_ocr_error"] = str(exc)
-        db.set_extraction(conn, uid, extraction)
+        if not db.set_extraction(conn, uid, extraction):
+            return  # o revisor começou a editar entretanto: o trabalho dele manda
         run_cross_check(conn, uid)
     except Exception as exc:  # nunca matar o worker do lote por causa de uma folha
         print(f"[worker] folha {uid}: {exc}", flush=True)
+        try:
+            err_conn = db.connect()
+            try:
+                # sem isto a folha ficava `pending` para sempre: spinner
+                # eterno na página e nenhum botão para a recuperar
+                db.set_error(err_conn, uid, str(exc))
+            finally:
+                err_conn.close()
+        except Exception:
+            pass
     finally:
         conn.close()
 
 
+# Entre folhas: 1 chamada/folha, ~10 RPM — o limite do free tier do primário.
+_BATCH_SLEEP_S = 6.0
+# Antes da segunda passagem: tempo para um pico de 503 («high demand») passar.
+_RETRY_DELAY_S = 60.0
+# Só se re-tenta o que recupera sozinho: 5xx e rede. Quota (429) não — essa
+# volta pelo botão «Tentar OCR outra vez» ou pelo fallback pago, se existir.
+_TRANSIENT_MARKERS = ("HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504", "indisponível")
+
+
+def _transient_failures(uids: list[str]) -> list[str]:
+    """Folhas do lote cujo OCR falhou por causa passageira e ninguém tocou."""
+    out: list[str] = []
+    conn = db.connect()
+    try:
+        for uid in uids:
+            sheet = db.get_sheet(conn, uid)
+            if not sheet or sheet["status"] != "extracted":
+                continue                      # em revisão/validada: não mexer
+            if db.edit_count(conn, uid):
+                continue                      # já há trabalho humano em cima
+            err = (sheet.get("raw_extraction") or {}).get("_ocr_error") or ""
+            if any(m in err for m in _TRANSIENT_MARKERS):
+                out.append(uid)
+    finally:
+        conn.close()
+    return out
+
+
 def _process_batch(uids: list[str]) -> None:
-    for uid in uids:
+    for i, uid in enumerate(uids):
         _process_sheet(uid)
-        time.sleep(6.0)  # 2 chamadas/folha: manter o lote abaixo do limite RPM
+        if i < len(uids) - 1:
+            time.sleep(_BATCH_SLEEP_S)
+    # Segunda passagem única pelas falhas passageiras: um pico de 503 a meio de
+    # um lote de 26 páginas não deve deixar folhas mortas à espera de cliques.
+    retry = _transient_failures(uids)
+    if not retry:
+        return
+    time.sleep(_RETRY_DELAY_S)
+    conn = db.connect()
+    try:
+        for uid in retry:
+            db.mark_pending(conn, uid)
+    finally:
+        conn.close()
+    for i, uid in enumerate(retry):
+        _process_sheet(uid)
+        if i < len(retry) - 1:
+            time.sleep(_BATCH_SLEEP_S)
 
 
 @app.post("/upload")
-async def upload(template_name: str = Form(...), photos: list[UploadFile] = []):
-    template = get_template(template_name)
+def upload(template_name: str = Form(...), photos: list[UploadFile] = []):
+    # Rota síncrona de propósito: corre no threadpool. Como `async def`, o
+    # render do PDF (26 páginas × pypdfium) bloqueava o event loop dezenas de
+    # segundos e a app inteira deixava de responder durante um upload.
+    try:
+        template = get_template(template_name)
+    except KeyError:
+        raise HTTPException(422, f"Template desconhecido: {template_name}")
     images: list[tuple[bytes, str]] = []
     for up in photos:
         if not up.filename:
             continue
-        content = await up.read()
+        content = up.file.read()
         name = Path(up.filename).name
         if name.lower().endswith(".pdf") or up.content_type == "application/pdf":
             images.extend(_pdf_to_images(content, Path(name).stem))
@@ -424,9 +547,81 @@ def upload_get_redirect():
     return RedirectResponse("/captura", status_code=303)
 
 
+# PDFs de kanban que o scanner da fábrica põe no Drive: «06-08-2026 - Rapid20T 1.pdf»,
+# «10-08-2026_Rapid 20t 1_2.PDF»… O padrão comum é a data e a máquina.
+_KANBAN_PDF_RE = re.compile(r"^\d{2}-\d{2}-\d{4}.*rapid.*\.pdf$", re.IGNORECASE)
+
+# caminhos de célula aceites no /edit; nomes de campo só minúsculas/underscore
+_FIELD_PATH_RE = re.compile(
+    r"^(?:rows\[(?P<idx>\d{1,4})\]\.(?P<rfield>[a-z_]{1,40})"
+    r"|(?P<section>header|footer)\.(?P<sfield>[a-z_]{1,40}))$"
+)
+_MAX_ROWS = 200   # nenhuma folha física tem 200 linhas
+
+
+@app.post("/ingest/drive")
+def ingest_drive(request: Request):
+    """Ingestão dos PDFs de kanban que o sync do Drive deixou no servidor.
+
+    Fecha o ciclo scanner → Drive → app: até aqui o sync trazia os PDFs para a
+    máquina e ficavam à espera de um upload manual (4 lotes chegaram a
+    acumular-se). Idempotente a dois níveis: sha256 do PDF (versão nova do
+    mesmo ficheiro reprocessa) e sha256 de cada página (o que já entrou — por
+    upload manual, por exemplo — nunca duplica). O OCR segue em background,
+    como no upload manual.
+    """
+    if settings.admin_token and request.headers.get("X-Admin-Token") != settings.admin_token:
+        raise HTTPException(403, "X-Admin-Token inválido.")
+    drive = settings.drive_dir
+    if not drive.is_dir():
+        raise HTTPException(503, f"Pasta do Drive não encontrada: {drive}")
+
+    pdfs = sorted(p for p in drive.iterdir()
+                  if p.is_file() and _KANBAN_PDF_RE.match(p.name))
+    report = {"pdfs_novos": 0, "folhas_criadas": 0, "paginas_repetidas": 0,
+              "pdfs_vistos": len(pdfs)}
+    uids: list[str] = []
+    conn = _conn()
+    try:
+        done = db.ingested_shas(conn)
+        for pdf in pdfs:
+            content = pdf.read_bytes()
+            pdf_sha = hashlib.sha256(content).hexdigest()
+            if pdf_sha in done:
+                continue
+            try:
+                pages = _pdf_to_images(content, pdf.stem)
+            except Exception as exc:
+                # PDF estragado não pode encravar o ciclo diário inteiro
+                print(f"[ingest] {pdf.name}: PDF ilegível ({exc})", flush=True)
+                continue
+            report["pdfs_novos"] += 1
+            for page_bytes, page_name in pages:
+                page_sha = hashlib.sha256(page_bytes).hexdigest()
+                if db.image_sha_exists(conn, page_sha):
+                    report["paginas_repetidas"] += 1
+                    continue
+                image_path, sha = _save_image(page_bytes, page_name)
+                uids.append(db.create_sheet(conn, "cantoneiras_kanban", image_path, sha))
+                report["folhas_criadas"] += 1
+            db.record_ingested(conn, pdf.name, pdf_sha, len(pages))
+    finally:
+        conn.close()
+
+    if uids:
+        if PROCESS_IN_BACKGROUND:
+            threading.Thread(target=_process_batch, args=(uids,), daemon=True).start()
+        else:  # testes: determinístico
+            _process_batch(uids)
+    return report
+
+
 @app.post("/sheet/{uid}/reocr")
-def sheet_reocr(uid: str):
-    """Re-ler a foto com OCR (ex.: depois de um 429 de quota)."""
+def sheet_reocr(uid: str, force: int = 0):
+    """Re-ler a foto com OCR (ex.: depois de um 429 de quota).
+
+    `?force=1` salta a deteção de página em branco — é o revisor a dizer que a
+    página tem mesmo conteúdo, e a palavra dele vale mais que a heurística."""
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -436,13 +631,19 @@ def sheet_reocr(uid: str):
             raise HTTPException(409, "Folha validada é imutável.")
         if not sheet.get("image_path"):
             raise HTTPException(422, "Folha sem foto — não há nada para reler.")
+        if not force and db.edit_count(conn, uid):
+            # já há trabalho humano em cima: re-ler substituía-o todo pela
+            # transcrição nova; exige-se a intenção explícita (?force=1)
+            raise HTTPException(
+                409, "Esta folha já tem correções manuais — re-ler o OCR "
+                     "substituía-as. Usa «Forçar OCR» se for mesmo isso que queres.")
         db.mark_pending(conn, uid)
     finally:
         conn.close()
     if PROCESS_IN_BACKGROUND:
-        threading.Thread(target=_process_sheet, args=(uid,), daemon=True).start()
+        threading.Thread(target=_process_sheet, args=(uid, bool(force)), daemon=True).start()
     else:
-        _process_sheet(uid)
+        _process_sheet(uid, bool(force))
     return RedirectResponse(f"/sheet/{uid}", status_code=303)
 
 
@@ -456,11 +657,15 @@ def sheet_delete(uid: str):
             raise HTTPException(404)
         except PermissionError:
             raise HTTPException(409, "Folha validada é imutável — não se apaga.")
+        # O ficheiro pode ser partilhado (frente/verso, uploads repetidos):
+        # só se apaga quando NENHUMA outra folha ainda aponta para ele.
+        shared = bool(image_path) and db.image_path_in_use(conn, image_path)
     finally:
         conn.close()
-    if image_path:
+    if image_path and not shared:
         p = Path(image_path).resolve()
         if p.is_relative_to(settings.images_dir.resolve()) and p.is_file():
+            imaging.clear_renders(p)   # os .rotN.png derivados vão junto
             p.unlink()
     return RedirectResponse("/?deleted=1", status_code=303)
 
@@ -529,8 +734,10 @@ def export_xlsx():
 
 
 def _safe_back(back: str | None) -> str | None:
-    """Só aceita caminhos internos — impede que um ?back= leve para fora do site."""
-    if not back or not back.startswith("/") or back.startswith("//"):
+    """Só aceita caminhos internos — impede que um ?back= leve para fora do site.
+    O `\\` conta como `//`: os browsers normalizam `/\\evil.com` para
+    `//evil.com` e o filtro de prefixo deixava-o passar."""
+    if not back or not back.startswith("/") or back.startswith("//") or "\\" in back:
         return None
     return back
 
@@ -730,24 +937,28 @@ def sheet_edit(uid: str, field_path: str = Form(...), value: str = Form(""),
         if sheet["status"] == "validated":
             raise HTTPException(409, "Folha validada é imutável.")
         data = sheet["sheet_data"] or {"header": {}, "rows": [], "footer": {}}
-        # field_path: 'header.data' | 'rows[3].of' | 'footer.horas_trabalhadas'
+        # field_path: 'header.data' | 'rows[3].of' | 'footer.horas_trabalhadas'.
+        # Validação estrita: o endpoint é público (túnel sem auth) e um
+        # rows[50000000] criava 50 M de dicts — OOM e queda do processo; um
+        # índice negativo corrompia a proteção de células humanas.
+        m = _FIELD_PATH_RE.match(field_path)
+        if not m:
+            raise HTTPException(400, "field_path inválido.")
         old = None
         value_clean = value.strip() or None
-        if field_path.startswith("rows["):
-            idx_s, _, fname = field_path[5:].partition("].")
-            i = int(idx_s)
+        if m.group("idx") is not None:
+            i = int(m.group("idx"))
+            if i > _MAX_ROWS:
+                raise HTTPException(422, f"Linha {i} fora do limite ({_MAX_ROWS}).")
+            fname = m.group("rfield")
             while len(data["rows"]) <= i:
                 data["rows"].append({})
             old = data["rows"][i].get(fname)
             data["rows"][i][fname] = value_clean
-        elif "." in field_path:
-            section, _, fname = field_path.partition(".")
-            if section not in ("header", "footer"):
-                raise HTTPException(400)
+        else:
+            section, fname = m.group("section"), m.group("sfield")
             old = (data.get(section) or {}).get(fname)
             data.setdefault(section, {})[fname] = value_clean
-        else:
-            raise HTTPException(400)
         # controlo otimista: a revisão vem do formulário — se a folha mudou
         # desde que a página foi carregada, recusa em vez de sobrescrever
         if not db.save_sheet_data(conn, uid, data, revision):
@@ -769,9 +980,12 @@ def add_row(uid: str):
         if sheet["status"] == "validated":
             raise HTTPException(409, "Folha validada é imutável.")
         data = sheet["sheet_data"]
+        if data is None:
+            raise HTTPException(409, "A folha ainda está a ser lida pelo OCR.")
         template = get_template(sheet["template_name"])
         data["rows"].append({f: None for f in template.row_fields})
-        db.save_sheet_data(conn, uid, data, sheet["revision"])
+        if not db.save_sheet_data(conn, uid, data, sheet["revision"]):
+            raise HTTPException(409, "A folha mudou entretanto — recarrega a página.")
     finally:
         conn.close()
     return RedirectResponse(f"/sheet/{uid}", status_code=303)
@@ -808,8 +1022,12 @@ def validate(uid: str, actor: str = Form("operador")):
         if not str(header.get("data") or "").strip():
             raise HTTPException(422, "Validação exige data preenchida no cabeçalho.")
         template = get_template(sheet["template_name"])
-        n = pg_store.store_validated_sheet(
-            sheet, template, db.edit_count(conn, uid), actor)
+        try:
+            n = pg_store.store_validated_sheet(
+                sheet, template, db.edit_count(conn, uid), actor)
+        except pg_store.InvalidSheetDate as exc:
+            raise HTTPException(
+                422, f"Data «{exc}» não é interpretável — escreve dd/mm/aaaa.")
         db.mark_validated(conn, uid, actor)
     finally:
         conn.close()

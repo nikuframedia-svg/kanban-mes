@@ -9,6 +9,7 @@ Três tipos de campo:
 from __future__ import annotations
 
 import re
+import unicodedata
 from functools import lru_cache
 
 _NON_ALNUM = re.compile(r"[^A-Z0-9]+")
@@ -21,10 +22,16 @@ _CLIENT_STOPWORDS = frozenset(
 
 
 def compact(value: str | None) -> str:
-    """Maiúsculas, só alfanumérico. 'of 250002' → 'OF250002'."""
+    """Maiúsculas, só alfanumérico ASCII. 'of 250002' → 'OF250002'.
+
+    Acentos decompõem-se primeiro (NFKD) para a letra base sobreviver:
+    'CONCEIÇÃO' → 'CONCEICAO', não 'CONCEIO' — senão um nome corretamente
+    lido pelo OCR ficava a 2 de distância da lista de colaboradores.
+    """
     if not value:
         return ""
-    return _NON_ALNUM.sub("", str(value).upper())
+    text = unicodedata.normalize("NFKD", str(value))
+    return _NON_ALNUM.sub("", text.upper())
 
 
 _YEAR_PREFIX = re.compile(r"^\s*\d{2}_")
@@ -186,6 +193,10 @@ def numeric_similarity(written: float | None, truth: float | None, tolerance: fl
     return max(0.0, 1.0 - (diff - tolerance) / span)
 
 
+# «1.200» é milhar; «0.125» não (milhares não começam por zero)
+_THOUSANDS_DOT = re.compile(r"^-?[1-9]\d{0,2}(\.\d{3})+$")
+
+
 def parse_number(value: object) -> float | None:
     if value is None:
         return None
@@ -193,8 +204,18 @@ def parse_number(value: object) -> float | None:
         return float(value)
     text = re.sub(r"[^0-9.,\-]", "", str(value).strip())
     if "." in text and "," in text:
-        # formato europeu: ponto de milhares, vírgula decimal
-        text = text.replace(".", "").replace(",", ".")
+        if text.rindex(",") > text.rindex("."):
+            # europeu: ponto de milhares, vírgula decimal (1.234,56)
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            # americano: vírgula de milhares, ponto decimal (1,234.56)
+            text = text.replace(",", "")
+    elif _THOUSANDS_DOT.match(text):
+        # Só pontos, em grupos de 3: «1.200» é mil e duzentos, não 1,2 — em
+        # português o decimal escreve-se com vírgula. Lido como 1.2, uma
+        # quantidade de 1.200 passava no limite do plano e ia para o Postgres
+        # como um.
+        text = text.replace(".", "")
     else:
         text = text.replace(",", ".")
     if not text or text in {"-", "."}:

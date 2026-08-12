@@ -261,7 +261,9 @@ def main() -> None:
     print(f"Relatório: {out_path}")
 
     if args.save_params:
-        fitted = CrossParams()
+        # Partir do ficheiro ATUAL, não dos defaults: senão cada backtest
+        # apagava o que lá estivesse afinado (learned_subs, políticas).
+        fitted = CrossParams.load()
         # Só o m medido em ESCRITA REAL de operadores (kanban diário da chapa)
         # entra nos parâmetros. O m das cantoneiras vem de ruído sintético —
         # serve para relatório, não para calibrar; fica o default até haver

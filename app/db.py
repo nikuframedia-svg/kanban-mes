@@ -46,15 +46,24 @@ CREATE TABLE IF NOT EXISTS edits (
     edited_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS edits_sheet_idx ON edits(sheet_uid);
+CREATE TABLE IF NOT EXISTS ingested_files (
+    filename    TEXT NOT NULL,     -- nome do PDF na pasta do Drive
+    sha256      TEXT NOT NULL PRIMARY KEY,  -- do FICHEIRO; muda → reprocessa
+    n_pages     INTEGER NOT NULL,
+    ingested_at TEXT NOT NULL
+);
 """
 
 # Colunas acrescentadas depois de já haver bases em uso. Bases novas nascem com
 # elas (estão no SCHEMA); as antigas precisam de ALTER, e o SQLite não tem
 # "ADD COLUMN IF NOT EXISTS". A escada por user_version corre uma vez por
 # ficheiro de base; o try/except cobre a corrida entre processos.
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _MIGRATIONS = (
     (1, "ALTER TABLE sheets ADD COLUMN image_rotation INTEGER NOT NULL DEFAULT 0"),
+    # v2: ingested_files já nasce no SCHEMA (CREATE TABLE IF NOT EXISTS corre
+    # em todas as ligações); a versão sobe só para o registo ficar honesto.
+    (2, "SELECT 1"),
 )
 _migrated: set[str] = set()
 _migrate_lock = threading.Lock()
@@ -94,6 +103,10 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
+    # WAL: as escritas do worker de OCR deixam de bloquear as leituras das
+    # páginas (em journal delete, um lote a gravar prendia o Histórico e o
+    # event loop até 5 s por pedido).
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
     _migrate(conn, str(db_path))
     return conn
@@ -109,6 +122,26 @@ def create_sheet(conn: sqlite3.Connection, template_name: str,
     )
     conn.commit()
     return uid
+
+
+def set_error(conn: sqlite3.Connection, uid: str, message: str) -> None:
+    """O worker rebentou nesta folha: fica `error`, visível e recuperável.
+    Antes ficava `pending` com spinner eterno e sem botão nenhum."""
+    conn.execute(
+        "UPDATE sheets SET status = 'error', error_message = ?, revision = revision + 1 "
+        "WHERE uid = ? AND status = 'pending'",
+        (message[:500], uid),
+    )
+    conn.commit()
+
+
+def pending_with_image(conn: sqlite3.Connection) -> list[str]:
+    """Folhas à espera de OCR — para o arranque re-enfileirar o que um restart
+    a meio de um lote deixou penduradas (as threads do worker são daemon)."""
+    return [r[0] for r in conn.execute(
+        "SELECT uid FROM sheets WHERE status = 'pending' AND image_path IS NOT NULL "
+        "ORDER BY created_at"
+    ).fetchall()]
 
 
 def mark_pending(conn: sqlite3.Connection, uid: str) -> bool:
@@ -131,14 +164,21 @@ def set_template(conn: sqlite3.Connection, uid: str, template_name: str) -> None
     conn.commit()
 
 
-def set_extraction(conn: sqlite3.Connection, uid: str, extraction: dict) -> None:
-    conn.execute(
+def set_extraction(conn: sqlite3.Connection, uid: str, extraction: dict) -> bool:
+    """Grava a transcrição — SÓ em folhas ainda pendentes.
+
+    Se o revisor começou a editar enquanto o OCR corria (status já saiu de
+    'pending'), gravar por cima apagava o trabalho dele. Devolve False nesse
+    caso: o worker desiste e a folha fica como o humano a tem.
+    """
+    cur = conn.execute(
         "UPDATE sheets SET raw_extraction = ?, sheet_data = ?, status = 'extracted', "
-        "extracted_at = ?, revision = revision + 1 WHERE uid = ? AND status != 'validated'",
+        "extracted_at = ?, revision = revision + 1 WHERE uid = ? AND status = 'pending'",
         (json.dumps(extraction, ensure_ascii=False, default=str),
          json.dumps(extraction, ensure_ascii=False, default=str), now_iso(), uid),
     )
     conn.commit()
+    return cur.rowcount == 1
 
 
 def get_sheet(conn: sqlite3.Connection, uid: str) -> dict | None:
@@ -163,7 +203,8 @@ def list_sheets(conn: sqlite3.Connection, status: str | None = None,
         "SELECT uid, template_name, status, image_path, created_at, validated_at, revision, "
         "  json_extract(sheet_data, '$.header.operador')      AS operador, "
         "  json_extract(sheet_data, '$.header.data')          AS data_folha, "
-        "  json_extract(sheet_data, '$.header.setor_maquina') AS setor "
+        "  json_extract(sheet_data, '$.header.setor_maquina') AS setor, "
+        "  json_extract(raw_extraction, '$._blank_page')      AS blank_page "
         "FROM sheets WHERE 1=1"
     )
     args: list = []
@@ -241,12 +282,19 @@ def set_image_rotation(conn: sqlite3.Connection, uid: str, rotation: int) -> int
     return norm
 
 
-def save_cross_check(conn: sqlite3.Connection, uid: str, cross: dict) -> None:
-    conn.execute(
-        "UPDATE sheets SET cross_check = ? WHERE uid = ? AND status != 'validated'",
-        (json.dumps(cross, ensure_ascii=False, default=str), uid),
-    )
+def save_cross_check(conn: sqlite3.Connection, uid: str, cross: dict,
+                     expected_revision: int | None = None) -> bool:
+    """Grava o cruzamento. Com `expected_revision`, só se a folha ainda for a
+    mesma sobre a qual ele foi calculado — um cross velho a sobrepor-se ao
+    novo pintava cores calculadas sobre valores que já não existem."""
+    sql = "UPDATE sheets SET cross_check = ? WHERE uid = ? AND status != 'validated'"
+    args: list = [json.dumps(cross, ensure_ascii=False, default=str), uid]
+    if expected_revision is not None:
+        sql += " AND revision = ?"
+        args.append(expected_revision)
+    cur = conn.execute(sql, args)
     conn.commit()
+    return cur.rowcount == 1
 
 
 def record_edit(conn: sqlite3.Connection, uid: str, field_path: str,
@@ -301,6 +349,38 @@ def mark_validated(conn: sqlite3.Connection, uid: str, actor: str) -> bool:
     )
     conn.commit()
     return cur.rowcount == 1
+
+
+def ingested_shas(conn: sqlite3.Connection) -> set[str]:
+    """sha256 dos PDFs do Drive já processados — a versão conta, o nome não."""
+    return {r[0] for r in conn.execute("SELECT sha256 FROM ingested_files")}
+
+
+def record_ingested(conn: sqlite3.Connection, filename: str, sha256: str,
+                    n_pages: int) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO ingested_files (filename, sha256, n_pages, ingested_at) "
+        "VALUES (?, ?, ?, ?)",
+        (filename, sha256, n_pages, now_iso()),
+    )
+    conn.commit()
+
+
+def image_path_in_use(conn: sqlite3.Connection, image_path: str) -> bool:
+    """Outra folha ainda aponta para este ficheiro? Uploads repetidos e
+    frente/verso partilham o mesmo PNG — apagá-lo com o rascunho deixava a
+    folha irmã sem foto e sem prova de auditoria."""
+    return conn.execute(
+        "SELECT 1 FROM sheets WHERE image_path = ? LIMIT 1", (image_path,)
+    ).fetchone() is not None
+
+
+def image_sha_exists(conn: sqlite3.Connection, sha256: str) -> bool:
+    """Já existe uma folha com esta imagem? Protege o ingest de duplicar
+    páginas que entraram por upload manual (ex.: os lotes de 06 e 10-08)."""
+    return conn.execute(
+        "SELECT 1 FROM sheets WHERE image_sha256 = ? LIMIT 1", (sha256,)
+    ).fetchone() is not None
 
 
 def edit_count(conn: sqlite3.Connection, uid: str) -> int:

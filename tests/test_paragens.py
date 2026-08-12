@@ -68,20 +68,26 @@ def test_paragens_edit_e_validar(client):
     assert client.stored == ["cantoneiras_paragens"]
 
 
+def make_inked_image(path):
+    """Imagem com tinta suficiente para passar a deteção de página em branco."""
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (400, 300), "white")
+    d = ImageDraw.Draw(im)
+    for y in range(20, 280, 30):
+        d.line([(10, y), (390, y)], fill="black", width=3)
+    im.save(path)
+    return path
+
+
 def test_classificacao_escolhe_template_paragens(client, tmp_path, monkeypatch):
-    img = tmp_path / "verso.png"
-    from PIL import Image
-    Image.new("RGB", (60, 60), "white").save(img)
+    img = make_inked_image(tmp_path / "verso.png")
 
     class FakeProvider:
         name = "fake"
 
-        def classify_page(self, image_path):
-            return "paragens"
-
-        def extract(self, image_path, template):
-            assert template.name == "cantoneiras_paragens"
-            return {
+        def extract_auto(self, image_path, templates):
+            template = templates["paragens"]
+            return "paragens", {
                 "header": {f: None for f in template.header_fields},
                 "rows": [{"motivo": "Sem problemas", "inicio": None, "fim": None,
                           "duracao": None, "resolvido": None}],
@@ -103,25 +109,22 @@ def test_classificacao_escolhe_template_paragens(client, tmp_path, monkeypatch):
 
 
 def test_reocr_reprocessa_folha_com_foto(client, tmp_path, monkeypatch):
-    img = tmp_path / "f.png"
-    from PIL import Image
-    Image.new("RGB", (60, 60), "white").save(img)
+    img = make_inked_image(tmp_path / "f.png")
 
     calls = {"n": 0}
 
     class FlakyProvider:
         name = "flaky"
 
-        def classify_page(self, image_path):
-            return "producao"
-
-        def extract(self, image_path, template):
+        def extract_auto(self, image_path, templates):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise ocr.OcrError("Gemini HTTP 429: quota")
-            return {"header": {f: None for f in template.header_fields},
-                    "rows": [{f: "ok" if f == "of" else None for f in template.row_fields}],
-                    "footer": {f: None for f in template.footer_fields}}
+            template = templates["producao"]
+            return "producao", {
+                "header": {f: None for f in template.header_fields},
+                "rows": [{f: "ok" if f == "of" else None for f in template.row_fields}],
+                "footer": {f: None for f in template.footer_fields}}
 
     monkeypatch.setattr(main, "get_provider", lambda: FlakyProvider())
     monkeypatch.setattr(main, "get_index", lambda name: __import__("tests.test_web", fromlist=["make_index"]).make_index())
@@ -144,20 +147,120 @@ def test_reocr_reprocessa_folha_com_foto(client, tmp_path, monkeypatch):
     assert sheet["sheet_data"]["rows"][0]["of"] == "ok"
 
 
+def test_lote_retenta_falhas_transitorias(client, tmp_path, monkeypatch):
+    """503 a meio do lote: segunda passagem única apanha a folha, sem clique."""
+    img = make_inked_image(tmp_path / "x.png")
+    calls = {"n": 0}
+
+    class Flaky503:
+        name = "flaky"
+
+        def extract_auto(self, image_path, templates):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ocr.OcrError("Gemini [m] HTTP 503: high demand")
+            t = templates["producao"]
+            return "producao", {
+                "header": {f: None for f in t.header_fields},
+                "rows": [{f: "ok" if f == "of" else None for f in t.row_fields}],
+                "footer": {f: None for f in t.footer_fields}}
+
+    monkeypatch.setattr(main, "get_provider", lambda: Flaky503())
+    monkeypatch.setattr(main, "get_index", lambda name: __import__(
+        "tests.test_web", fromlist=["make_index"]).make_index())
+    monkeypatch.setattr(main, "_RETRY_DELAY_S", 0.0)
+    monkeypatch.setattr(main, "_BATCH_SLEEP_S", 0.0)
+
+    r = client.post("/upload", data={"template_name": "cantoneiras_kanban"},
+                    files=[("photos", ("x.png", img.read_bytes(), "image/png"))])
+    uid = r.headers["location"].rsplit("/", 1)[1]
+    conn = db.connect()
+    try:
+        sheet = db.get_sheet(conn, uid)
+    finally:
+        conn.close()
+    assert calls["n"] == 2
+    assert not sheet["sheet_data"].get("_ocr_error")
+    assert sheet["sheet_data"]["rows"][0]["of"] == "ok"
+
+
+def test_quota_429_nao_e_retentada_no_lote(client, tmp_path, monkeypatch):
+    img = make_inked_image(tmp_path / "y.png")
+    calls = {"n": 0}
+
+    class Quota:
+        name = "quota"
+
+        def extract_auto(self, image_path, templates):
+            calls["n"] += 1
+            raise ocr.OcrError("Gemini [m] HTTP 429: quota exceeded")
+
+    monkeypatch.setattr(main, "get_provider", lambda: Quota())
+    monkeypatch.setattr(main, "_RETRY_DELAY_S", 0.0)
+    monkeypatch.setattr(main, "_BATCH_SLEEP_S", 0.0)
+
+    r = client.post("/upload", data={"template_name": "cantoneiras_kanban"},
+                    files=[("photos", ("y.png", img.read_bytes(), "image/png"))])
+    uid = r.headers["location"].rsplit("/", 1)[1]
+    conn = db.connect()
+    try:
+        sheet = db.get_sheet(conn, uid)
+    finally:
+        conn.close()
+    assert calls["n"] == 1, "quota não recupera em segundos — fica para o clique"
+    assert "429" in sheet["sheet_data"]["_ocr_error"]
+
+
 def test_parse_duracao():
     from app.matching import similarity as sim
     assert sim.parse_number("1H") == 1.0
     assert sim.parse_number("6.5") == 6.5
 
 
-def test_classify_fallback_para_producao():
-    p = ocr.GeminiOcrProvider(api_key="t", model="m")
-    # resposta inválida → assume produção (comportamento antigo)
+def test_extract_auto_uma_chamada_por_pagina(tmp_path):
+    """kind + transcrição vêm do MESMO pedido; kind inválido cai para produção."""
+    import json as jsonlib
     import types
-    p._call = types.MethodType(lambda self, body: {"candidates": []}, p)
-    from pathlib import Path
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix=".png") as f:
-        f.write(b"png")
-        f.flush()
-        assert p.classify_page(Path(f.name)) == "producao"
+
+    from app.templates_spec import CANTONEIRAS_KANBAN, CANTONEIRAS_PARAGENS
+
+    templates = {"producao": CANTONEIRAS_KANBAN, "paragens": CANTONEIRAS_PARAGENS}
+    img = make_inked_image(tmp_path / "p.png")
+
+    def fake_call(payload):
+        def _call(self, body):
+            _call.n += 1
+            return {"candidates": [{"content": {"parts": [
+                {"text": jsonlib.dumps(payload)}]}}]}
+        _call.n = 0
+        return _call
+
+    p = ocr.GeminiOcrProvider(api_key="t", model="m")
+    call = fake_call({"kind": "paragens", "header": {"operador": "Zé"},
+                      "rows": [{"motivo": "Avaria", "of": "ignorado-na-face-errada"}],
+                      "footer": {}})
+    p._call = types.MethodType(call, p)
+    kind, out = p.extract_auto(img, templates)
+    assert call.n == 1, "uma chamada, não duas"
+    assert kind == "paragens"
+    assert out["rows"][0]["motivo"] == "Avaria"
+    assert "of" not in out["rows"][0], "campos da outra face ficam de fora"
+
+    # kind em falta/inválido → primeira face (produção), como o classificador antigo
+    call = fake_call({"kind": "outra-coisa", "header": {}, "rows": [], "footer": {}})
+    p._call = types.MethodType(call, p)
+    kind, out = p.extract_auto(img, templates)
+    assert kind == "producao"
+    assert set(out["rows"][0]) == set(CANTONEIRAS_KANBAN.row_fields)
+
+
+def test_auto_schema_cobre_as_duas_faces():
+    from app.templates_spec import CANTONEIRAS_KANBAN, CANTONEIRAS_PARAGENS
+
+    p = ocr.GeminiOcrProvider(api_key="t", model="m")
+    schema = p._auto_schema({"producao": CANTONEIRAS_KANBAN,
+                             "paragens": CANTONEIRAS_PARAGENS})
+    assert schema["properties"]["kind"]["enum"] == ["producao", "paragens"]
+    row_props = set(schema["properties"]["rows"]["items"]["properties"])
+    assert set(CANTONEIRAS_KANBAN.row_fields) <= row_props
+    assert set(CANTONEIRAS_PARAGENS.row_fields) <= row_props

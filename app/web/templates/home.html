@@ -152,6 +152,8 @@
                 <span class="pill crit">erro</span>
               {% elif s.status == 'pending' %}
                 <span class="pill neutral">por extrair</span>
+              {% elif s.blank_page %}
+                <span class="pill neutral">em branco</span>
               {% else %}
                 <span class="pill warn">pendente</span>
               {% endif %}

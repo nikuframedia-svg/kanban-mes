@@ -21,7 +21,7 @@ from . import carryover
 from .carryover import RowIdentity
 from .params import CrossParams
 from .refs import PlanIndex
-from ..templates_spec import is_marked
+from ..templates_spec import field_value, is_marked
 from .scorer import RowMatch, Scorer
 from . import similarity as sim
 
@@ -125,22 +125,43 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     # não «que linha exacta do plano é esta». Numa OF com 300 irmãs a segunda
     # nunca passa de 0,3 por construção, e usá-la deitava fora tudo.
     confidence = max(match.p_primary, match.p_correct)
-    if match.winner is None or confidence < 0.5:
-        # H₀ plausível: nada de propostas; célula a célula fica "unmatched"
+    if match.winner is None or confidence < params.policy.propose_threshold:
+        # H₀ plausível: nada de propostas. Mas mesmo sem linha vencedora há
+        # uma pergunta respondível célula a célula: este VALOR existe no
+        # plano? Caso real: OF escrita e exata ficava vermelha só porque o
+        # modelo ao lado não existe — a linha é incerta, a OF não é.
         for f in spec_fields:
             written = row.get(f.name)
+            # marca de «idem»: o que lá está não é um valor, é a herança
+            if carryover.is_ditto(written):
+                written = None
             written_s = str(written).strip() if written is not None else ""
+            efectivo = written_s or str(inherited_values.get(f.name) or "").strip()
+            # Sem teto de entradas: o teto serve para não GERAR candidatos a
+            # partir de valores comuns, mas aqui a pergunta é só «existe?» —
+            # um perfil com 1700 linhas no plano existe, obviamente.
+            exists = bool(
+                efectivo and f.kind in ("code", "profile")
+                and index.exact_matches(f.name, efectivo)
+            )
+            p_field = confidence
+            if exists:
+                # o marginal, quando aponta para o mesmo valor, dá um p mais
+                # honesto do que a confiança (esmagada pelo H₀) da linha
+                marginal = match.marginals.get(f.name)
+                if marginal and marginal[0] in index.variants_for(f.name, efectivo):
+                    p_field = max(p_field, marginal[1])
             cells.append(CellCheck(
                 field=f.name, written=written_s or None, proposal=None,
-                status="unmatched" if written_s else "na",
-                similarity=0.0, auto_write=False,
-                p_correct=confidence,
+                status="confirmed" if exists else ("unmatched" if written_s else "na"),
+                similarity=1.0 if exists else 0.0, auto_write=False,
+                p_correct=p_field,
                 inherited=inherited_values.get(f.name),
                 inherited_from=inherited_from.get(f.name),
             ))
         priority = max(
-            (params.policy.criticality.get(f.name, params.policy.criticality_default)
-             for f in spec_fields), default=1,
+            (params.policy.criticality.get(c.field, params.policy.criticality_default)
+             for c in cells if c.status not in ("confirmed", "na")), default=1,
         ) * (1.0 - confidence)
         return RowCheck(
             row_index=row_index, matched_plan_key=None,
@@ -154,10 +175,16 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     # Linha de perfil completo: representa todas as referências daquele perfil
     # na obra, não uma. Propor-lhe «o» modelo seria escolher uma à sorte entre
     # dezenas — o que essa linha precisa é do pop-up com a lista.
-    linha_marcada = is_marked(scored_row.get("perf_comp"))
+    # `field_value` e não `.get`: folhas lidas antes do rename guardaram o
+    # visto em `comp_mm`, e ignorá-las punha o motor a propor modelos nelas.
+    linha_marcada = is_marked(field_value(scored_row, "perf_comp"))
 
     for f in spec_fields:
         written = row.get(f.name)
+        # Marca de «idem» (aspas, =): não é um valor escrito, é o pedido de
+        # herança — a célula cruza e mostra-se como herdada.
+        if carryover.is_ditto(written):
+            written = None
         written_s = str(written).strip() if written is not None else ""
         # Numa célula deixada em branco por «idem», o valor da linha é o
         # herdado — é contra esse que o plano se confere. Sem isto a célula
@@ -167,9 +194,16 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
         raw_proposal = entry.get(f.entry_key)
         proposal = str(raw_proposal).strip() if raw_proposal is not None else ""
         # Confiança por campo: o valor de um campo pode ser certo (todas as
-        # irmãs concordam) mesmo quando a linha exacta é incerta.
+        # irmãs concordam) mesmo quando a linha exacta é incerta. MAS o
+        # marginal só vale para a proposta se apontar para o MESMO valor —
+        # senão autorizava-se a escrita do valor do vencedor com a
+        # probabilidade do valor rival (aconteceu: perfil errado gravado
+        # com «91%» que era a probabilidade do perfil certo).
         marginal = match.marginals.get(f.name)
-        p_field = marginal[1] if marginal else p
+        if marginal and proposal and marginal[0] in index.variants_for(f.name, proposal):
+            p_field = marginal[1]
+        else:
+            p_field = p
         if not proposal or (linha_marcada and f.name == "modelo" and not written_s):
             cells.append(CellCheck(
                 f.name, written_s or None, None, "na", 0.0, False, p_field,
@@ -219,7 +253,7 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     # Qtd: limite superior, não valor esperado. Não entra nos campos cruzados
     # porque a pergunta não é «é parecido com o plano?» mas «cabe no plano?».
     qtd_written = str(row.get("qtd") or "").strip()
-    if qtd_written and not is_marked(scored_row.get("perf_comp")):
+    if qtd_written and not is_marked(field_value(scored_row, "perf_comp")):
         qtd_num = sim.parse_number(qtd_written) if _looks_numeric(qtd_written) else None
         limite = plan_quantity_for(
             index,

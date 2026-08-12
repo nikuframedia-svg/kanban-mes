@@ -87,15 +87,26 @@ def main() -> int:
             template_name = r["template_name"]
             before = db.get_sheet(conn, uid)["sheet_data"] or {}
             try:
-                if template_name == "cantoneiras_kanban" and hasattr(provider, "classify_page"):
-                    if provider.classify_page(image) == "paragens":
-                        template_name = "cantoneiras_paragens"
+                if (get_template(template_name).family == "cantoneiras"
+                        and hasattr(provider, "extract_auto")):
+                    kinds = {"producao": get_template("cantoneiras_kanban"),
+                             "paragens": get_template("cantoneiras_paragens")}
+                    kind, extraction = provider.extract_auto(image, kinds)
+                    if kinds[kind].name != template_name:
+                        template_name = kinds[kind].name
                         db.set_template(conn, uid, template_name)
-                extraction = provider.extract(image, get_template(template_name))
+                else:
+                    extraction = provider.extract(image, get_template(template_name))
             except OcrError as exc:
                 print(f"  [{i}/{len(todo)}] {uid}: FALHOU — {exc}")
                 continue
-            db.set_extraction(conn, uid, extraction)
+            # set_extraction agora exige status 'pending' (proteção contra
+            # esmagar edições humanas) — este script já só toca folhas sem
+            # edições, portanto re-enfileirar é seguro.
+            db.mark_pending(conn, uid)
+            if not db.set_extraction(conn, uid, extraction):
+                print(f"  [{i}/{len(todo)}] {uid}: SALTADA (mudou entretanto)")
+                continue
             run_cross_check(conn, uid)
             n_before = len([x for x in (before.get("rows") or []) if any(x.values())])
             n_after = len(extraction.get("rows") or [])

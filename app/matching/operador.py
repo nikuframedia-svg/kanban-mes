@@ -73,8 +73,17 @@ def _name_is_compatible(written: str | None, canonical: str) -> bool:
 
 
 def _parse_cod(value: object) -> int | None:
-    text = "".join(ch for ch in str(value or "") if ch.isdigit())
-    return int(text) if text else None
+    """Número de colaborador tal como o OCR o lê.
+
+    O↔0 resolve-se (leitura «21O5» é 2105); qualquer OUTRA letra invalida o
+    número — descartá-la em silêncio transformava «21A5» em 215, que pode ser
+    um colaborador diferente e válido: pior que não resolver é resolver errado.
+    """
+    text = "".join(ch for ch in str(value or "") if ch.isalnum())
+    text = text.replace("O", "0").replace("o", "0")
+    if not text or not text.isdigit():
+        return None
+    return int(text)
 
 
 def resolve(written_name: str | None, written_cod: object,

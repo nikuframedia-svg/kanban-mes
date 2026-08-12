@@ -83,3 +83,56 @@ def test_effective_row_nao_toca_no_original():
 
 def test_campos_transportados_sao_os_de_identidade_da_obra():
     assert CARRY_FIELDS == ("of", "ov", "cliente")
+
+
+def test_aspas_de_idem_herdam_e_nao_cortam_o_bloco():
+    """Folha real fd88081e: o operador escreveu «"» em cliente/OV/OF e o motor
+    cortava o bloco — 5 linhas boas ficavam sem identidade nenhuma."""
+    rows = [
+        {"cliente": "Tennet", "ov": "2504634", "of": "263322",
+         "perfil": "40x5", "modelo": "AT2T562", "qtd": "4"},
+        {"cliente": '"', "ov": '"', "of": '"', "perfil": "50x5",
+         "modelo": "AEH46", "qtd": "4"},
+        {"modelo": "AT1T515", "qtd": "2"},
+    ]
+    ids = ident(rows)
+    assert ids[1].values["of"] == "263322", "a aspa é um pedido de herança"
+    assert ids[1].is_inherited("of")
+    assert ids[1].values["cliente"] == "Tennet"
+    assert ids[2].values["of"] == "263322", "o bloco continua depois das aspas"
+    assert ids[2].inherited_from["of"] == 0
+
+
+def test_variantes_de_aspas_e_idem_sao_reconhecidas():
+    from app.matching.carryover import is_ditto
+    for mark in ('"', "”", "“", "„", "''", "=", "idem", "IDEM", " Idem "):
+        assert is_ditto(mark), mark
+    for value in ("263323", "", None, "x", "C.M.E."):
+        assert not is_ditto(value), value
+
+
+def test_aspas_com_producao_escrita_herdam():
+    """Linha de perfil-completo real: identidade em aspas + qtd + visto. A qtd
+    e o perf_comp não estão no IndexSpec, e a linha era tratada como muda —
+    ficava sem OF e ainda cortava o bloco às seguintes."""
+    rows = [
+        {"cliente": "CMF", "ov": "2504650", "of": "263323",
+         "perfil": "40x4", "modelo": "AT1T220", "qtd": "56"},
+        {"cliente": '"', "ov": '"', "of": '"', "qtd": "12", "perf_comp": "x"},
+        {"modelo": "AEH89", "qtd": "12"},
+    ]
+    ids = ident(rows)
+    assert ids[1].values["of"] == "263323", "produção escrita = linha real = herda"
+    assert ids[2].values["of"] == "263323", "e o bloco não se corta"
+
+
+def test_linha_so_de_aspas_nao_conta_como_conteudo():
+    """Aspas sem produção à frente são lixo de OCR, não uma linha de trabalho."""
+    rows = [
+        {"of": "263323", "modelo": "A"},
+        {"cliente": '"', "ov": '"', "of": '"'},
+        {"modelo": "B"},
+    ]
+    ids = ident(rows)
+    assert ids[1].values == {}, "linha vazia — e corta o bloco como qualquer vazia"
+    assert ids[2].values == {}

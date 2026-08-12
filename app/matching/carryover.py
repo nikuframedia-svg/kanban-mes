@@ -21,6 +21,19 @@ from . import similarity as sim
 # a OF é a âncora, o resto acompanha-a.
 CARRY_FIELDS = ("of", "ov", "cliente")
 
+# Marcas de «idem» que os operadores usam em vez de deixar em branco: aspas
+# (nas várias grafias que o OCR devolve), o sinal de igual, a palavra escrita.
+# Sem isto, uma célula com «"» contava como valor — não batia com a OF do
+# bloco, CORTAVA a herança, e as linhas seguintes herdavam aspas literais
+# (folha real fd88081e: 5 linhas boas perdidas).
+_DITTO_MARKS = frozenset({'"', "''", "”", "“", "„", "〃", "="})
+
+
+def is_ditto(value: object) -> bool:
+    """A célula diz «o mesmo que em cima»? (aspas, =, «idem»)"""
+    text = str(value or "").strip()
+    return bool(text) and (text in _DITTO_MARKS or text.lower() == "idem")
+
 
 @dataclass(frozen=True)
 class RowIdentity:
@@ -34,7 +47,11 @@ class RowIdentity:
 
 
 def _written(row: dict, field: str) -> str:
+    """O que o operador escreveu de facto — uma marca de «idem» não é um
+    valor, é um pedido de herança, e trata-se como a célula em branco."""
     value = row.get(field)
+    if is_ditto(value):
+        return ""
     return str(value).strip() if value is not None else ""
 
 
@@ -43,9 +60,16 @@ def _has_content(row: dict, content_fields: tuple[str, ...]) -> bool:
 
     Uma folha criada à mão nasce com 10 linhas em branco; sem esta regra
     ficavam todas com a identidade da última linha preenchida e apareciam a
-    cruzar com o plano.
+    cruzar com o plano. Uma linha só com marcas de «idem» também não é
+    conteúdo — aspas sem produção à frente são lixo de OCR.
+
+    Conta TUDO o que não é identidade da obra, não só os campos que o motor
+    cruza: uma linha com aspas + qtd + visto de perfil completo é produção
+    real (qtd/perf_comp não estão no IndexSpec) — tratá-la como muda deixava-a
+    sem OF e ainda cortava o bloco às linhas seguintes.
     """
-    return any(_written(row, f) for f in content_fields)
+    extra = tuple(f for f in row if f not in content_fields and f not in CARRY_FIELDS)
+    return any(_written(row, f) for f in (*content_fields, *extra))
 
 
 def resolve(rows: list[dict], content_fields: tuple[str, ...],

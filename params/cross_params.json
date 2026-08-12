@@ -55,7 +55,9 @@
       "cliente": 3,
       "modelo": 3,
       "lote": 3,
-      "nesting": 3
+      "nesting": 3,
+      "perfil": 3,
+      "maquina": 3
     },
     "criticality_default": 1
   },

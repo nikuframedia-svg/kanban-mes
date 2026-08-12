@@ -71,7 +71,9 @@ class Scorer:
         p = self.params.score
         n = max(self.index.n, p.u_min_corpus)
         u = max(self.index.value_frequency(f.name, value), 1) / n
-        m = p.m_by_field.get(f.name, p.m_default)
+        # clamp: o backtest pode medir m=0.0 num campo que nunca concorda
+        # exato, e log2(0) rebentava TODOS os match_row do processo
+        m = min(max(p.m_by_field.get(f.name, p.m_default), 1e-3), 1.0)
         w = math.log2(m / u)
         return max(p.w_min_bits, min(p.w_cap_bits, w))
 
@@ -113,9 +115,14 @@ class Scorer:
             return FieldEvidence(f.name, written, truth, similarity, g * w, "channel")
 
         # discordância franca
-        if f.kind == "code" and self.index.value_frequency(f.name, written) > 0:
+        if f.kind == "code" and any(
+            self.index.value_frequency(f.name, v) > 0
+            for v in self.index.variants_for(f.name, written)
+        ):
             # o operador escreveu um código que EXISTE no plano e não é este:
-            # contradizer evidência escrita válida custa mais
+            # contradizer evidência escrita válida custa mais. Pelas VARIANTES:
+            # o plano prefixa (OF263323) e o operador não (263323) — comparar o
+            # escrito cru dava sempre frequência 0 e o veto nunca disparava.
             return FieldEvidence(f.name, written, truth, similarity, p.veto_valid_code_bits, "veto")
         bits = p.disagree_code_bits if f.kind == "code" else p.disagree_text_bits
         return FieldEvidence(f.name, written, truth, similarity, bits, "disagree")
@@ -224,15 +231,28 @@ class Scorer:
             out.update(exact)
             if not exact:
                 fuzzy_pending.append((f, str(written)))
-        # fuzzy só quando preciso, do campo mais seletivo para o menos, com
-        # paragem antecipada — evita varrer dezenas de milhares de referências
-        # quando já há candidatos suficientes de campos mais fortes
-        fuzzy_pending.sort(key=lambda fw: len(self.index._keys.get(fw[0].name, ())))
+        # fuzzy só quando preciso, do campo mais seletivo (mais valores
+        # distintos) para o menos, com paragem antecipada. A ordenação estava
+        # invertida: o campo com MENOS valores (ex.: máquina, 4 valores) era
+        # processado primeiro, enchia o teto de 300 e o campo identificador
+        # (nesting, milhares de valores) nunca chegava a gerar candidatos.
+        fuzzy_pending.sort(key=lambda fw: len(self.index._keys.get(fw[0].name, ())),
+                           reverse=True)
         for f, written in fuzzy_pending:
             if len(out) >= 300:
                 break
             out.update(self.index.fuzzy_candidates(f.name, written, top_k=top_k,
                                                    max_entries=f.max_candidate_entries))
+        if not out:
+            # Nada de exato nem fuzzy dentro dos tetos: repetir o exato SEM
+            # teto. Um valor certo com >500 linhas no plano (OV de obra
+            # grande, perfil comum) não pode ficar invisível — mais vale um
+            # pool grande do que um no_match falso ou um vencedor de ruído.
+            for f in self.index.spec.identity_fields:
+                written = row.get(f.name)
+                if written is None or str(written).strip() == "":
+                    continue
+                out.update(self.index.exact_matches(f.name, str(written)))
         if not out and self.index.spec.numeric_fields:
             # sem pistas de identidade: restringir por dimensões
             compatible: set[int] | None = None
@@ -298,7 +318,7 @@ class Scorer:
         if not pool:
             return {}
         p = self.params.posterior
-        t = max(p.temperature_bits, 1e-6)
+        t = max(p.temperature_bits, 0.1)   # 1e-6 dava 2^(dezenas de milhões) → OverflowError
         b_max = max(s.bits for s in pool)
         weights = [math.pow(2.0, (s.bits - b_max) / t) for s in pool]
 
@@ -330,7 +350,7 @@ class Scorer:
         derivar silenciosamente quando o plano cresce.
         """
         p = self.params.posterior
-        t = max(p.temperature_bits, 1e-6)
+        t = max(p.temperature_bits, 0.1)   # 1e-6 dava 2^(dezenas de milhões) → OverflowError
         b_max = winner.bits
 
         z_entries = sum(math.pow(2.0, (s.bits - b_max) / t) for s in pool)

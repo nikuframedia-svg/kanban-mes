@@ -66,6 +66,31 @@ setTimeout(function () {
 </script>
 {% endif %}
 
+{% if sheet.status == 'error' %}
+<div class="alert crit" style="margin-bottom:14px; flex-wrap:wrap; align-items:center;">
+  <div style="flex:1; min-width:240px;">
+    <strong>O processamento desta folha rebentou</strong> — podes tentar de novo.
+    <div class="mono tiny" style="opacity:.8;">{{ (sheet.error_message or '')[:200] }}</div>
+  </div>
+  <form method="post" action="/sheet/{{ sheet.uid }}/reocr">
+    <button type="submit" class="btn">Tentar outra vez</button>
+  </form>
+</div>
+{% endif %}
+
+{% if data.get('_blank_page') and not readonly %}
+<div class="alert warn" style="margin-bottom:14px; flex-wrap:wrap; align-items:center;">
+  <div style="flex:1; min-width:240px;">
+    <strong>Página em branco</strong> — o scanner digitalizou um verso vazio; não foi gasto OCR.
+    Se afinal tiver conteúdo (ex.: muito claro), podes forçar a leitura.
+  </div>
+  <form method="post" action="/sheet/{{ sheet.uid }}/reocr?force=1"
+        onsubmit="return confirm('Esta página foi detetada como vazia. Forçar OCR na mesma?');">
+    <button type="submit" class="btn">Forçar OCR</button>
+  </form>
+</div>
+{% endif %}
+
 {% if data.get('_ocr_error') and not readonly %}
 <div class="alert crit" style="margin-bottom:14px; flex-wrap:wrap; align-items:center;">
   <div style="flex:1; min-width:240px;">
@@ -176,8 +201,13 @@ setTimeout(function () {
              foi produzido — copiar o número do plano falsificaria o registo. #}
           <div class="proposal">plano: {{ '%g' | format(cell.plan_limit) }}</div>
         {% elif cell and cell.proposal and cell.status in ('snapped', 'very_different') and (cell.written or '') != cell.proposal and not herdado %}
+          {# O valor vai num data-attribute (autoescape normal e seguro), NUNCA
+             interpolado dentro do onclick: o tojson do Jinja não escapa
+             aspas duplas e o atributo fechava no primeiro «"» — o clique
+             ficou morto desde sempre, e era injetável a partir do plano. #}
           <div class="proposal">
-            plano: <a href="#" onclick="return acceptProposal(this, {{ cell.proposal | tojson }})">{{ cell.proposal }}</a>
+            plano: <a href="#" data-proposal="{{ cell.proposal }}"
+                      onclick="return acceptProposal(this)">{{ cell.proposal }}</a>
           </div>
         {% endif %}
       {% endif %}
@@ -275,9 +305,14 @@ setTimeout(function () {
                   {% if f == 'perf_comp' and t.index_loader and is_marked(field_value(row, f)) %}
                     <button type="button" class="btn ghost plano-btn"
                             title="Ver as referências deste perfil na obra"
-                            hx-get="/sheet/{{ sheet.uid }}/plano/{{ i }}"
-                            hx-target="#plano-modal-body"
-                            onclick="abrirPlano()">ver refs</button>
+                            onclick="abrirPlano('/sheet/{{ sheet.uid }}/plano/{{ i }}')">ver refs</button>
+                  {% endif %}
+                  {# E na própria célula do perfil — é aqui que é natural
+                     clicar para ver o que a obra tem daquele perfil. #}
+                  {% if f == 'perfil' and t.index_loader and (field_value(row, f) or (cell and cell.inherited)) %}
+                    <button type="button" class="btn ghost plano-btn"
+                            title="Ver as referências deste perfil na obra"
+                            onclick="abrirPlano('/sheet/{{ sheet.uid }}/plano/{{ i }}')">refs</button>
                   {% endif %}
                 </td>
                 {% endfor %}
@@ -369,18 +404,37 @@ setTimeout(function () {
 {% endblock %}
 {% block scripts %}
 <script>
-function abrirPlano() {
+function abrirPlano(url) {
+  // fetch puro, sem depender do htmx: o pop-up é caminho crítico da revisão,
+  // e uma falha tem de aparecer NO modal — «A carregar…» eterno é invisível.
+  const body = document.getElementById('plano-modal-body');
+  body.innerHTML = '<div class="muted">A carregar…</div>';
   document.getElementById('plano-modal').style.display = 'flex';
+  fetch(url)
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    .then(html => {
+      body.innerHTML = html;
+      // os <script> injetados por innerHTML não correm — re-executá-los
+      body.querySelectorAll('script').forEach(old => {
+        const s = document.createElement('script');
+        s.textContent = old.textContent;
+        old.replaceWith(s);
+      });
+    })
+    .catch(e => {
+      body.innerHTML = '<div class="alert crit"><span>Não foi possível carregar as ' +
+        'referências (' + e.message + '). Fecha e tenta outra vez.</span></div>';
+    });
 }
 function fecharPlano() {
   document.getElementById('plano-modal').style.display = 'none';
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') fecharPlano(); });
 
-function acceptProposal(link, value) {
+function acceptProposal(link) {
   const td = link.closest('td, .field');
   const input = td.querySelector('input[name=value]');
-  if (input) { input.value = value; input.form.submit(); }
+  if (input) { input.value = link.dataset.proposal; input.form.submit(); }
   return false;
 }
 

@@ -66,6 +66,88 @@ def edit(client, uid, field_path, value):
     return r
 
 
+def test_field_path_hostil_e_rejeitado(client):
+    """Endpoint público sem auth: um índice gigante criava 50M de dicts (OOM
+    e queda do processo); um negativo corrompia a proteção de células humanas."""
+    uid = create_sheet(client)
+    for bad in ("rows[50000000].of", "rows[-1].of", "rows[abc].of",
+                "x", "header.<script>", "rows[1].of; DROP"):
+        r = client.post(f"/sheet/{uid}/edit", data={
+            "field_path": bad, "value": "x",
+            "revision": get_revision(client, uid), "actor": "t"})
+        assert r.status_code in (400, 422), bad
+
+
+def test_scripts_sao_self_hosted(client):
+    """htmx/Alpine de /static/vendor, não do unpkg: sem CDN alcançável os
+    cliques da app morriam em silêncio."""
+    r = client.get("/")
+    assert "/static/vendor/htmx.min.js" in r.text
+    assert "unpkg.com" not in r.text
+
+
+def test_proposta_vai_em_data_attribute(client):
+    """O tojson dentro de onclick="..." fechava o atributo no primeiro «"» — o
+    link «aceitar proposta» nunca funcionou. O valor vai em data-proposal."""
+    uid = create_sheet(client)
+    edit(client, uid, "rows[0].of", "OF250001")   # linha ligada, OV por preencher
+    r = client.get(f"/sheet/{uid}")
+    if "proposal" in r.text and "acceptProposal" in r.text:
+        assert "data-proposal=" in r.text
+        assert "acceptProposal(this)" in r.text
+        assert "acceptProposal(this, " not in r.text, "valor interpolado no onclick"
+
+
+def test_reocr_com_edicoes_humanas_exige_force(client, tmp_path, monkeypatch):
+    import dataclasses
+
+    from PIL import Image, ImageDraw
+    monkeypatch.setattr(main, "settings",
+                        dataclasses.replace(main.settings, data_dir=tmp_path))
+    im = Image.new("RGB", (400, 300), "white")
+    d = ImageDraw.Draw(im)
+    for y in range(20, 280, 30):
+        d.line([(10, y), (390, y)], fill="black", width=3)
+    im.save(tmp_path / "f.png")
+
+    class Fake:
+        name = "fake"
+
+        def extract_auto(self, image_path, templates):
+            t = templates["producao"]
+            return "producao", {
+                "header": {f: None for f in t.header_fields},
+                "rows": [dict.fromkeys(t.row_fields) | {"of": "lido"}],
+                "footer": {f: None for f in t.footer_fields}}
+
+    monkeypatch.setattr(main, "get_provider", lambda: Fake())
+    r = client.post("/upload", data={"template_name": "cantoneiras_kanban"},
+                    files=[("photos", ("f.png", (tmp_path / "f.png").read_bytes(),
+                                       "image/png"))])
+    uid = r.headers["location"].rsplit("/", 1)[1]
+
+    edit(client, uid, "rows[0].of", "CORRIGIDO-A-MAO")
+    assert client.post(f"/sheet/{uid}/reocr").status_code == 409, \
+        "re-ler por cima de correções manuais exige intenção explícita"
+    assert client.post(f"/sheet/{uid}/reocr?force=1").status_code == 303
+
+
+def test_worker_nao_esmaga_folha_em_revisao(client, tmp_path, monkeypatch):
+    """O humano começou a editar enquanto o OCR corria: set_extraction tem de
+    recusar (status já não é pending) e o trabalho humano fica intacto."""
+    uid = create_sheet(client)                    # extracted (manual)
+    edit(client, uid, "rows[0].of", "TRABALHO-HUMANO")
+    conn = db.connect()
+    try:
+        ok = db.set_extraction(conn, uid, {"header": {}, "rows": [{"of": "OCR"}],
+                                           "footer": {}})
+        sheet = db.get_sheet(conn, uid)
+    finally:
+        conn.close()
+    assert not ok
+    assert sheet["sheet_data"]["rows"][0]["of"] == "TRABALHO-HUMANO"
+
+
 def test_historico_renders(client):
     r = client.get("/")
     assert r.status_code == 200

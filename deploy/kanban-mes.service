@@ -1,4 +1,4 @@
-# Kanban MES — app web (uvicorn em 127.0.0.1:8000).
+# Kanban MES — app web (uvicorn em 127.0.0.1:8100; a 8000 é da bridge do PP1).
 # Instalar como unidade de UTILIZADOR (sem sudo): ver deploy/README.md
 [Unit]
 Description=Kanban MES (uvicorn)

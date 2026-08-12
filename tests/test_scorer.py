@@ -47,6 +47,73 @@ def scorer():
     return Scorer(make_index(), CrossParams())
 
 
+def test_m_zero_medido_nao_rebenta(scorer):
+    """O backtest pode medir m=0.0 num campo; log2(0) matava todos os matches."""
+    scorer.params.score.m_by_field["of"] = 0.0
+    row = {"of": "OF259999", "ov": "OV2409999", "cliente": "SILVA & VINHA"}
+    m = scorer.match_row(row)          # não pode levantar
+    assert m.winner is not None
+
+
+def test_temperatura_zero_nao_rebenta(scorer):
+    scorer.params.posterior.temperature_bits = 0.0
+    row = {"of": "OF259999", "ov": "OV2409999", "cliente": "SILVA & VINHA"}
+    m = scorer.match_row(row)          # OverflowError antes do clamp a 0.1
+    assert 0.0 <= m.p_correct <= 1.0
+
+
+def test_veto_dispara_com_prefixo_do_plano():
+    """O plano guarda OF263323; o operador escreve 263323. O veto («escreveste
+    um código que existe e não é este») tem de reconhecer a variante — antes a
+    frequência do escrito sem prefixo era 0 e o veto nunca disparava."""
+    from app.matching.loaders import CANTONEIRAS_SPEC
+
+    entries = [
+        {"plan_key": "A", "of": "OF263323", "ov": "OV1", "modelo": "M1", "perfil": "L60X60X5"},
+        {"plan_key": "B", "of": "OF999999", "ov": "OV2", "modelo": "M2", "perfil": "L60X60X5"},
+    ]
+    s = Scorer(PlanIndex(entries, CANTONEIRAS_SPEC), CrossParams())
+    fe = s._identity_evidence(CANTONEIRAS_SPEC.identity_fields[0], "263323", 1)
+    assert fe.reason == "veto", "código válido contra entrada errada = veto"
+    assert fe.bits == s.params.score.veto_valid_code_bits
+
+
+def test_fuzzy_processa_o_campo_mais_seletivo_primeiro():
+    """Nesting mal lido + máquina mal lida: o fuzzy da máquina (4 valores,
+    centenas de linhas cada) enchia o teto de 300 candidatos e o nesting — o
+    único campo que identifica — nunca chegava a gerar os dele."""
+    spec = IndexSpec(
+        identity_fields=(
+            FieldSpec("nesting", "code", "nesting"),
+            FieldSpec("maquina", "text", "maquina"),
+        ),
+        key_field="plan_key",
+    )
+    entries = []
+    for i in range(2000):
+        entries.append({"plan_key": f"N{i}", "nesting": f"S{i:05d}.CH5_1",
+                        "maquina": f"LASER {i % 4 + 1}"})
+    s = Scorer(PlanIndex(entries, spec), CrossParams())
+    # nesting com um erro de OCR (l final em vez de 1), máquina com erro
+    cands = s.candidates({"nesting": "S00123.CH5_l", "maquina": "LASE 3"})
+    truth_idx = next(i for i, e in enumerate(entries) if e["plan_key"] == "N123")
+    assert truth_idx in cands, "o dono do nesting tem de estar nos candidatos"
+
+
+def test_valor_certo_com_mais_de_500_linhas_gera_candidatos():
+    """OV de obra grande (>500 linhas): o teto de candidatos escondia-a por
+    completo e a linha dava no_match — agora, sem nada dentro dos tetos,
+    repete-se o exato sem teto."""
+    spec = IndexSpec(
+        identity_fields=(FieldSpec("ov", "code", "ov", code_prefix="OV"),),
+        key_field="plan_key",
+    )
+    entries = [{"plan_key": f"E{i}", "ov": "OV900001"} for i in range(601)]
+    s = Scorer(PlanIndex(entries, spec), CrossParams())
+    cands = s.candidates({"ov": "900001"})
+    assert len(cands) == 601
+
+
 def test_exact_match_wins_with_high_confidence(scorer):
     row = {"of": "OF259999", "ov": "OV2409999", "cliente": "SILVA & VINHA", "comp_mm": 1230}
     m = scorer.match_row(row)

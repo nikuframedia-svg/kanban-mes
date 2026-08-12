@@ -11,7 +11,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def _env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default).strip()
+    """Var vazia = var ausente: uma linha `MES_PG_PORT=` no .env devolvia ""
+    e o int("") rebentava o arranque — com Restart=always, em ciclo."""
+    return os.environ.get(name, "").strip() or default
 
 
 @dataclass(frozen=True)
@@ -30,6 +32,22 @@ class Settings:
     # Primário com quota free decente; o provider tem fallbacks se esgotar.
     gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY"))
     ocr_model: str = field(default_factory=lambda: _env("MES_OCR_MODEL", "gemini-3-flash-preview"))
+
+    # Último recurso pago: API Claude quando TODA a cadeia Gemini falha.
+    # Sem chave, não existe — o comportamento fica exatamente o de hoje.
+    anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
+    claude_ocr_model: str = field(default_factory=lambda: _env("MES_CLAUDE_OCR_MODEL", "claude-haiku-4-5"))
+
+    # Página com fração de tinta abaixo disto é um verso em branco do scanner:
+    # não se gasta OCR nela (e evita-se a folha alucinada). Medido: brancas
+    # ficam ≈0.0001, a folha real mais rala ≈0.002 — ver imaging.ink_fraction.
+    blank_ink_threshold: float = field(
+        default_factory=lambda: float(_env("MES_BLANK_INK_THRESHOLD", "0.0008")))
+
+    # Pasta onde o sync do Drive (DATARESEARCHMTG) deixa os PDFs de kanban;
+    # o POST /ingest/drive vai lá buscá-los sozinho.
+    drive_dir: Path = field(default_factory=lambda: Path(
+        _env("MES_DRIVE_DIR", str(Path.home() / "projects" / "DATARESEARCHMTG"))))
 
     host: str = field(default_factory=lambda: _env("MES_HOST", "127.0.0.1"))
     # 8000 é da bridge do PP1 neste servidor — o MES vive na 8100

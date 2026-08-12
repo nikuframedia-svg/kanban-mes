@@ -9,8 +9,11 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/static/design.css?v={{ css_version }}">
   <link rel="icon" href="data:image/svg+xml,{{ '<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%2316140F%22/><text x=%2232%22 y=%2244%22 font-family=%22Inter,Arial,sans-serif%22 font-weight=%22700%22 font-size=%2228%22 fill=%22%23F4F1EB%22 text-anchor=%22middle%22>M</text></svg>' }}">
-  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-  <script src="https://unpkg.com/alpinejs@3.13.10/dist/cdn.min.js" defer></script>
+  {# Self-hosted (htmx 2.0.4, Alpine 3.13.10): a app é usada em chão de
+     fábrica atrás de túnel — depender do unpkg.com no caminho crítico deixava
+     os cliques mortos sempre que o CDN não estivesse alcançável. #}
+  <script src="/static/vendor/htmx.min.js" defer></script>
+  <script src="/static/vendor/alpine.min.js" defer></script>
 </head>
 <body>
 {% set path = request.url.path %}

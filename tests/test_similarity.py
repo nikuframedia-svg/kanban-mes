@@ -1,6 +1,30 @@
 from app.matching import similarity as sim
 
 
+def test_parse_number_milhares_europeus():
+    """«1.200» é mil e duzentos (decimal em PT é vírgula) — lido como 1.2, uma
+    quantidade acima do plano passava como confirmada e ia errada p/ Postgres."""
+    assert sim.parse_number("1.200") == 1200.0
+    assert sim.parse_number("12.500") == 12500.0
+    assert sim.parse_number("6.000") == 6000.0
+    assert sim.parse_number("-1.200") == -1200.0
+    # decimais continuam decimais
+    assert sim.parse_number("1,2") == 1.2
+    assert sim.parse_number("1.2") == 1.2         # só 1 dígito após o ponto
+    assert sim.parse_number("1.23") == 1.23       # 2 dígitos: não é milhar
+    assert sim.parse_number("0.125") == 0.125     # milhares não começam por 0
+    assert sim.parse_number("1.234,56") == 1234.56
+    assert sim.parse_number("1,234.56") == 1234.56
+
+
+def test_compact_normaliza_acentos():
+    """CONCEIÇÃO tem de bater com CONCEICAO da lista SAP — antes o Ç e o Ã
+    caíam fora e o nome certo ficava a distância 2."""
+    assert sim.compact("Conceição") == "CONCEICAO"
+    assert sim.compact("João Araújo") == "JOAOARAUJO"
+    assert sim.compact("of 250002") == "OF250002"
+
+
 def test_compact_and_code():
     assert sim.compact(" of 250002 ") == "OF250002"
     assert sim.code_similarity("OF25OOO2", "OF250002") == 1.0  # O↔0

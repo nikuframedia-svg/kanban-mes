@@ -97,10 +97,16 @@ class PolicyParams:
     write_threshold_identity: float = 0.95
     write_threshold_critical_dim: float = 0.98
     write_threshold_default: float = 0.90
+    # Abaixo disto não há linha do plano credível: nada de propostas, e as
+    # células passam a validar-se valor a valor contra o plano (existe ou não).
+    propose_threshold: float = 0.50
     criticality: dict[str, int] = field(
         default_factory=lambda: {
             "esp": 5, "thickness_mm": 5, "comp_mm": 5, "length_mm": 5,
             "of": 3, "ov": 3, "cliente": 3, "modelo": 3, "lote": 3, "nesting": 3,
+            # perfil e máquina são identidade: sem isto usavam o limiar de
+            # escrita default (0.90) e pesavam o mínimo na fila de revisão
+            "perfil": 3, "maquina": 3,
         }
     )
     criticality_default: int = 1
