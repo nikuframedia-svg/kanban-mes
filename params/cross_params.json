@@ -2,7 +2,7 @@
   "channel": {
     "sub_default_bits": 8.0,
     "glyph_pair_bits": 2.0,
-    "indel_bits": 4.0,
+    "indel_bits": 5.0,
     "case_free": true,
     "g_l0_bits": 12.0,
     "g_cap": 0.85,

@@ -21,33 +21,33 @@
   "chapa_noisy": {
     "scenario": "chapa ruído",
     "rows": 800,
-    "top1_accuracy": 0.8888,
-    "strong": 682,
-    "strong_precision": 0.9428,
-    "weak_guess": 118,
+    "top1_accuracy": 0.8925,
+    "strong": 704,
+    "strong_precision": 0.9418,
+    "weak_guess": 96,
     "no_match": 0
   },
   "brier_by_t": {
-    "1.0": 0.59,
-    "1.5": 0.4551,
-    "2.0": 0.3793,
-    "2.5": 0.3754,
-    "3.0": 0.4128,
-    "4.0": 0.4951
+    "1.0": 0.5956,
+    "1.5": 0.4624,
+    "2.0": 0.3859,
+    "2.5": 0.3807,
+    "3.0": 0.4175,
+    "4.0": 0.4993
   },
   "best_t": 2.5,
   "cantoneiras_noisy": {
     "scenario": "cantoneiras ruído",
     "rows": 800,
-    "top1_accuracy": 0.9962,
-    "strong": 775,
-    "strong_precision": 1.0,
-    "weak_guess": 25,
+    "top1_accuracy": 0.995,
+    "strong": 777,
+    "strong_precision": 0.9987,
+    "weak_guess": 23,
     "no_match": 0
   },
   "m_by_field_cantoneiras": {
-    "of": 0.3312,
-    "ov": 0.362,
-    "modelo": 0.0112
+    "of": 0.325,
+    "ov": 0.3633,
+    "modelo": 0.0088
   }
 }

@@ -82,7 +82,23 @@ def test_effective_row_nao_toca_no_original():
 
 
 def test_campos_transportados_sao_os_de_identidade_da_obra():
-    assert CARRY_FIELDS == ("of", "ov", "cliente")
+    # perfil incluído desde 19/08: escreve-se uma vez por bloco nas folhas
+    # reais, e herdá-lo desempata linhas irmãs (caso AT1T515/AT2T515)
+    assert CARRY_FIELDS == ("of", "ov", "cliente", "perfil")
+
+
+def test_perfil_herda_por_bloco_e_corta_com_perfil_novo():
+    rows = [
+        {"of": "263322", "perfil": "50x6", "modelo": "AT2T562", "qtd": "4"},
+        {"modelo": "AT2T561", "qtd": "3"},
+        {"perfil": "50x5", "modelo": "AEH46", "qtd": "4"},
+        {"modelo": "AT2T515", "qtd": "2"},
+    ]
+    ids = ident(rows)
+    assert ids[1].values["perfil"] == "50x6"
+    assert ids[1].is_inherited("perfil")
+    assert ids[2].values["perfil"] == "50x5", "perfil novo escrito manda"
+    assert ids[3].values["perfil"] == "50x5", "e passa às linhas seguintes"
 
 
 def test_aspas_de_idem_herdam_e_nao_cortam_o_bloco():

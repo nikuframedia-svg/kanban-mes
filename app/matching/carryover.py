@@ -18,8 +18,11 @@ from dataclasses import dataclass
 from . import similarity as sim
 
 # Campos que se transportam em bloco. A ordem importa para as regras abaixo:
-# a OF é a âncora, o resto acompanha-a.
-CARRY_FIELDS = ("of", "ov", "cliente")
+# a OF é a âncora, o resto acompanha-a. O perfil também se escreve uma vez por
+# bloco nas folhas reais («50x5» vale para as linhas seguintes) — herdá-lo é o
+# sinal que desempata linhas irmãs quando o modelo está ambíguo (o caso
+# AT1T515: o perfil do bloco distinguia AT2T515/50x5 de AT1T145/40x5).
+CARRY_FIELDS = ("of", "ov", "cliente", "perfil")
 
 # Marcas de «idem» que os operadores usam em vez de deixar em branco: aspas
 # (nas várias grafias que o OCR devolve), o sinal de igual, a palavra escrita.

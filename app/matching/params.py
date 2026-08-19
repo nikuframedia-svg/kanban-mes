@@ -34,7 +34,10 @@ class ChannelParams:
 
     sub_default_bits: float = 8.0     # substituição arbitrária
     glyph_pair_bits: float = 2.0      # par visualmente confundível (0↔O, 5↔S…)
-    indel_bits: float = 4.0           # inserção/omissão de um carácter
+    # Inserção/omissão de um carácter. Maior que sub/2 (8/2) de propósito:
+    # com 4.0, del+ins custava o mesmo que UMA substituição e quase tudo era
+    # «leitura plausível» — deu 8 irmãs empatadas no caso AT1T515/AT1T145.
+    indel_bits: float = 5.0
     case_free: bool = True            # maiúsculas/minúsculas sem custo
     g_l0_bits: float = 12.0           # normalizador: g = 1 - custo/g_l0
     g_cap: float = 0.85               # evidência do canal nunca vale um match exato

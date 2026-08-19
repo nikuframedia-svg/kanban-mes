@@ -172,7 +172,14 @@ def _cliente_check(row: dict, scored_row: dict, index: PlanIndex,
     else:
         similarity = sim.text_similarity(efectivo, nome)
         if similarity >= params.score.sim_near:
-            status, proposal, auto = "confirmed", None, False
+            # mesmo cliente. Se o texto difere só na forma (restos antigos da
+            # customer_key: «tecpoles gmbh» vs «TECPOLES GMBH»), a
+            # substituição escreve a forma legível do plano.
+            canonizar = (replace_all and permitir_escrita
+                         and "cliente" not in human_fields
+                         and written_s and written_s != nome
+                         and sim.compact(written_s) == sim.compact(nome))
+            status, proposal, auto = "confirmed", (nome if canonizar else None), canonizar
         elif replace_all and permitir_escrita and "cliente" not in human_fields:
             status, proposal, auto = "snapped", nome, True
         else:
@@ -340,9 +347,15 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             similarity = sim.text_similarity(efectivo, proposal_plan)
 
         threshold = _threshold_for(f.name, params)
+        # A lição AT1T515: «strong» responde «é desta OF», nunca «é esta
+        # irmã». of/ov são função da OF e a substituição total pode confiar
+        # neles; modelo/perfil escolhem a linha ENTRE irmãs e continuam a
+        # exigir o marginal do campo — sem isto gravou-se um modelo com
+        # p_field=0.013, escolhido por ordem alfabética entre 8 empatadas.
+        anchored = f.name in ("of", "ov")
         if replace_all:
-            # substituição total: match forte manda; só o humano é inviolável
-            writable = f.name not in human_fields
+            writable = (f.name not in human_fields
+                        and (anchored or p_field >= threshold))
         else:
             # Campo herdado nunca é auto-escrito: seria transformar uma
             # inferência nossa num valor registado como se o operador o
@@ -354,14 +367,17 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
         if efectivo and similarity >= 1.0:
             # Certo — mas se o valor só existe por herança/aspas (nada escrito
             # na célula), a substituição total materializa-o: a folha fica
-            # auto-contida, sem células vazias «a valer» por outras.
-            status, auto = "confirmed", bool(replace_all and writable and not written_s)
+            # auto-contida, sem células vazias «a valer» por outras. É seguro
+            # mesmo sem marginal: o valor efetivo JÁ é este.
+            auto_materialize = bool(replace_all and f.name not in human_fields
+                                    and not written_s)
+            status, auto = "confirmed", auto_materialize
         elif similarity >= params.score.sim_near or not efectivo:
             # correção suave ou preenchimento de célula vazia
             status, auto = "snapped", writable
         else:
-            # com substituição total escreve-se na mesma; a cor vermelha
-            # continua a dizer «isto veio de longe — confere»
+            # com substituição total escreve-se na mesma quando o campo tem
+            # confiança própria; a cor vermelha continua a pedir revisão
             status, auto = "very_different", writable
         cells.append(CellCheck(
             f.name, written_s or None, proposal, status, similarity, auto, p_field,

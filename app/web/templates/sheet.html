@@ -205,9 +205,11 @@ setTimeout(function () {
              interpolado dentro do onclick: o tojson do Jinja não escapa
              aspas duplas e o atributo fechava no primeiro «"» — o clique
              ficou morto desde sempre, e era injetável a partir do plano. #}
+          {# p_field baixo = palpite entre linhas irmãs da mesma obra, não uma
+             correção — a percentagem diz ao revisor o peso que isto tem. #}
           <div class="proposal">
             plano: <a href="#" data-proposal="{{ cell.proposal }}"
-                      onclick="return acceptProposal(this)">{{ cell.proposal }}</a>
+                      onclick="return acceptProposal(this)">{{ cell.proposal }}</a>{% if cell.p_correct < 0.5 %} <span class="muted" title="palpite entre várias linhas da obra — vê «refs»">· {{ '%.0f' | format(cell.p_correct * 100) }}%</span>{% endif %}
           </div>
         {% endif %}
       {% endif %}

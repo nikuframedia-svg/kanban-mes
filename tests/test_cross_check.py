@@ -295,22 +295,57 @@ def test_escrito_com_prefixo_confirma_contra_proposta_nua():
 
 
 def test_substituicao_total_em_linha_forte():
-    """Política de 19/08: linha com match forte fica com os valores do plano,
-    very_different e vazias incluídas — só as edições humanas são invioláveis.
-    E as propostas OF/OV vêm como números puros (convenção do planeamento)."""
+    """Política de 19/08 (revista): linha com match forte substitui os campos
+    ANCORADOS na obra (of/ov/cliente) sem limiar; modelo/perfil escolhem a
+    linha ENTRE irmãs e exigem o marginal do campo — a lição AT1T515."""
     s = _cantoneiras_scorer(_entries_obra())
-    # modelo escrito errado (QS129 não existe; near de QS120), OV em branco
     row = {"of": "262796", "modelo": "QS128", "perfil": "60 x 4"}
     rc = check_row(row, 0, s)
     by_field = {c.field: c for c in rc.cells}
     if rc.mode == "strong":
         assert by_field["ov"].proposal == "2603660", "proposta sem prefixo OV"
-        assert by_field["ov"].auto_write
-        assert by_field["modelo"].auto_write, "substitui mesmo o que difere"
+        assert by_field["ov"].auto_write, "OV é função da obra — substitui-se"
+        modelo = by_field["modelo"]
+        limiar = s.params.policy.write_threshold_identity
+        assert modelo.auto_write == (modelo.p_correct >= limiar), \
+            "modelo só se substitui com o marginal a autorizá-lo"
     # humano continua inviolável
     rc2 = check_row(row, 0, s, human_fields={"modelo"})
     by_field2 = {c.field: c for c in rc2.cells}
     assert not by_field2["modelo"].auto_write
+
+
+def test_caso_at1t515_nao_e_substituido():
+    """Reprodução do caso real: modelo manuscrito inexistente com MUITAS irmãs
+    plausíveis na mesma obra. O motor não pode gravar um palpite escolhido por
+    ordem alfabética — p_field baixo trava a escrita; a proposta fica visível
+    mas fraca; e o perfil herdado do bloco desempata para a irmã certa."""
+    entries = []
+    # obra grande com famílias AT1Txxx (40x5) e AT2T5xx (50x5)
+    for i in range(100, 200):
+        entries.append({"plan_key": f"A{i}", "of": "OF263322", "ov": "OV2504634",
+                        "cliente": "meta", "cliente_nome": "METALOGALVA GMBH",
+                        "n_clientes": 1, "modelo": f"AT1T{i}", "perfil": "L40X40X5"})
+    for i in range(500, 600):
+        entries.append({"plan_key": f"B{i}", "of": "OF263322", "ov": "OV2504634",
+                        "cliente": "meta", "cliente_nome": "METALOGALVA GMBH",
+                        "n_clientes": 1, "modelo": f"AT2T{i}", "perfil": "L50X50X5"})
+    s = _cantoneiras_scorer(entries)
+    rows = [
+        {"of": "263322", "ov": "2504634", "perfil": "50x5", "modelo": "AEH46", "qtd": "4"},
+        {"modelo": "AT1T515", "qtd": "2"},   # manuscrito; não existe no plano
+    ]
+    result = check_sheet(rows, s)
+    linha = result["rows"][1]
+    by_field = {c["field"]: c for c in linha["cells"]}
+    modelo = by_field["modelo"]
+    assert not modelo["auto_write"], \
+        "palpite entre irmãs NUNCA substitui o manuscrito"
+    if modelo["proposal"]:
+        # com o perfil 50x5 herdado do bloco e o indel mais caro, o palpite
+        # apresentado tem de ser da família do perfil certo
+        assert modelo["proposal"].startswith("AT2T5"), \
+            f"o perfil do bloco devia desempatar (veio {modelo['proposal']})"
 
 
 def test_linha_incerta_nao_substitui():
