@@ -295,11 +295,13 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
         # a herança já dizia.
         efectivo = written_s or str(inherited_values.get(f.name) or "").strip()
         raw_proposal = entry.get(f.entry_key)
-        proposal = str(raw_proposal).strip() if raw_proposal is not None else ""
-        # OF/OV mostram-se e gravam-se como números puros (convenção do
-        # planeamento); o prefixo é formatação do Excel do plano.
-        if f.code_prefix and proposal:
-            proposal = sim.strip_ref_prefix(proposal)
+        # A COMPARAÇÃO usa o valor completo do plano (com prefixo): se o
+        # operador escreveu «OF251525», tem de bater com «OF251525» — despir
+        # antes de comparar pintava de vermelho valores idênticos. O strip é
+        # só apresentação/gravação (convenção do planeamento: números puros).
+        proposal_plan = str(raw_proposal).strip() if raw_proposal is not None else ""
+        proposal = (sim.strip_ref_prefix(proposal_plan)
+                    if f.code_prefix and proposal_plan else proposal_plan)
         # Confiança por campo: o valor de um campo pode ser certo (todas as
         # irmãs concordam) mesmo quando a linha exacta é incerta. MAS o
         # marginal só vale para a proposta se apontar para o MESMO valor —
@@ -307,7 +309,7 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
         # probabilidade do valor rival (aconteceu: perfil errado gravado
         # com «91%» que era a probabilidade do perfil certo).
         marginal = match.marginals.get(f.name)
-        if marginal and proposal and marginal[0] in index.variants_for(f.name, proposal):
+        if marginal and proposal_plan and marginal[0] in index.variants_for(f.name, proposal_plan):
             p_field = marginal[1]
         else:
             p_field = p
@@ -320,14 +322,14 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             continue
 
         if f.kind == "numeric":
-            w_num, t_num = sim.parse_number(efectivo), sim.parse_number(proposal)
+            w_num, t_num = sim.parse_number(efectivo), sim.parse_number(proposal_plan)
             similarity = sim.numeric_similarity(w_num, t_num, f.tolerance)
         elif f.kind in ("code", "profile"):
             # Comparar na convenção do plano: `263323` e `OF263323` são o mesmo
             # número de obra, e `60 x 5` é o mesmo perfil que `L60X60X5`. Sem
             # isto o motor marcava a vermelho valores certos e propunha
             # reescrevê-los só para lhes acrescentar o prefixo.
-            truth = index.normalize_written(f.name, proposal)
+            truth = index.normalize_written(f.name, proposal_plan)
             if truth and truth in index.variants_for(f.name, efectivo):
                 similarity = 1.0
             else:
@@ -335,7 +337,7 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
                     index.normalize_written(f.name, efectivo), truth
                 )
         else:
-            similarity = sim.text_similarity(efectivo, proposal)
+            similarity = sim.text_similarity(efectivo, proposal_plan)
 
         threshold = _threshold_for(f.name, params)
         if replace_all:

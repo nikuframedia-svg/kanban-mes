@@ -1,55 +1,53 @@
 {
-  "sample": 500,
+  "sample": 800,
   "kanban_rows": 20618,
   "kanban_coverage": 0.5684,
   "m_by_field_nesting": {
     "nesting": 1.0,
-    "maquina": 0.97,
-    "esp": 0.984,
-    "comp_mm": 0.916,
-    "larg_mm": 0.846
+    "maquina": 0.9725,
+    "esp": 0.985,
+    "comp_mm": 0.9175,
+    "larg_mm": 0.8475
   },
   "chapa_clean": {
     "scenario": "chapa limpo",
-    "rows": 500,
+    "rows": 800,
     "top1_accuracy": 1.0,
-    "strong": 499,
+    "strong": 799,
     "strong_precision": 1.0,
     "weak_guess": 1,
     "no_match": 0
   },
   "chapa_noisy": {
     "scenario": "chapa ruído",
-    "rows": 500,
-    "top1_accuracy": 0.624,
-    "strong": 312,
-    "strong_precision": 0.8718,
-    "weak_guess": 188,
+    "rows": 800,
+    "top1_accuracy": 0.8888,
+    "strong": 682,
+    "strong_precision": 0.9428,
+    "weak_guess": 118,
     "no_match": 0
   },
   "brier_by_t": {
-    "1.0": 0.2901,
-    "1.5": 0.1741,
-    "2.0": 0.1413,
-    "2.5": 0.1546,
-    "3.0": 0.1897,
-    "4.0": 0.2602
+    "1.0": 0.59,
+    "1.5": 0.4551,
+    "2.0": 0.3793,
+    "2.5": 0.3754,
+    "3.0": 0.4128,
+    "4.0": 0.4951
   },
-  "best_t": 2.0,
+  "best_t": 2.5,
   "cantoneiras_noisy": {
     "scenario": "cantoneiras ruído",
-    "rows": 500,
-    "top1_accuracy": 0.894,
-    "strong": 441,
-    "strong_precision": 0.9887,
-    "weak_guess": 59,
+    "rows": 800,
+    "top1_accuracy": 0.9962,
+    "strong": 775,
+    "strong_precision": 1.0,
+    "weak_guess": 25,
     "no_match": 0
   },
   "m_by_field_cantoneiras": {
-    "of": 0.31,
-    "ov": 0.375,
-    "cliente": 0.525,
-    "modelo": 0.002,
-    "comp_mm": 0.054
+    "of": 0.3312,
+    "ov": 0.362,
+    "modelo": 0.0112
   }
 }

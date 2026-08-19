@@ -277,6 +277,23 @@ def test_plan_customer_for():
     assert plan_customer_for(PlanIndex(sem_nome, CANTONEIRAS_SPEC), "262796") is None
 
 
+def test_escrito_com_prefixo_confirma_contra_proposta_nua():
+    """Bug apanhado no teste de qualidade: quem escreveu «OF251525» via a
+    célula vermelha porque a proposta despida («251525») comparava mal — a
+    comparação usa o valor completo do plano; o strip é só apresentação."""
+    s = _cantoneiras_scorer(_entries_obra())
+    row = {"of": "OF262796", "ov": "OV2603660", "modelo": "QS120", "perfil": "60 x 4"}
+    rc = check_row(row, 0, s)
+    by_field = {c.field: c for c in rc.cells}
+    assert by_field["of"].status == "confirmed", "OF262796 escrito = OF262796 do plano"
+    assert by_field["ov"].status == "confirmed"
+    # e a proposta, quando existe, continua nua
+    rc2 = check_row({"of": "262796", "modelo": "QS120", "perfil": "60 x 4"}, 0, s)
+    ov = next(c for c in rc2.cells if c.field == "ov")
+    if ov.proposal:
+        assert ov.proposal == "2603660"
+
+
 def test_substituicao_total_em_linha_forte():
     """Política de 19/08: linha com match forte fica com os valores do plano,
     very_different e vazias incluídas — só as edições humanas são invioláveis.
