@@ -100,6 +100,12 @@ class PolicyParams:
     # Abaixo disto não há linha do plano credível: nada de propostas, e as
     # células passam a validar-se valor a valor contra o plano (existe ou não).
     propose_threshold: float = 0.50
+    # Linha com match FORTE substitui-se por inteiro pelos valores do plano
+    # (decisão do Luís, 19/08): identidade, cliente e herdados incluídos.
+    # Linhas incertas (weak/H₀) continuam só com propostas — substituir com
+    # base num palpite propagava matches errados em massa. Edições humanas e
+    # a transcrição original ficam sempre intactas.
+    replace_with_plan: bool = True
     criticality: dict[str, int] = field(
         default_factory=lambda: {
             "esp": 5, "thickness_mm": 5, "comp_mm": 5, "length_mm": 5,

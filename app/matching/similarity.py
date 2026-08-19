@@ -196,6 +196,18 @@ def numeric_similarity(written: float | None, truth: float | None, tolerance: fl
 # «1.200» é milhar; «0.125» não (milhares não começam por zero)
 _THOUSANDS_DOT = re.compile(r"^-?[1-9]\d{0,2}(\.\d{3})+$")
 
+_REF_PREFIX = re.compile(r"^\s*(OF|OV)\s*(\d+)\s*$", re.IGNORECASE)
+
+
+def strip_ref_prefix(value: object) -> str:
+    """«OF263323» → «263323». No planeamento e na Metalogalva 2 as ordens são
+    números puros; o prefixo é convenção interna do Excel do plano. Tudo o que
+    se MOSTRA e GRAVA fica nu — o matching continua a usar variantes por
+    dentro. Só OF/OV: um modelo «QS122» não pode perder o Q."""
+    text = str(value or "").strip()
+    m = _REF_PREFIX.match(text)
+    return m.group(2) if m else text
+
 
 def parse_number(value: object) -> float | None:
     if value is None:

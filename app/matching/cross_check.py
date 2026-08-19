@@ -59,6 +59,11 @@ class RowCheck:
     review_priority: float
     cells: list[CellCheck] = field(default_factory=list)
     rivals: list[str] = field(default_factory=list)
+    # Comprimento da peça no plano (mm) e metros teóricos da linha
+    # (qtd × comprimento). É contra a soma disto que os METROS PRODUZIDOS do
+    # rodapé se conferem — a diferença é o desperdício/excedente.
+    plan_length_mm: float | None = None
+    line_meters: float | None = None
 
 
 def plan_quantity_for(index: PlanIndex, of: str, modelo: str) -> float | None:
@@ -135,14 +140,19 @@ def _threshold_for(field_name: str, params: CrossParams) -> float:
 def _cliente_check(row: dict, scored_row: dict, index: PlanIndex,
                    params: CrossParams, inherited_values: dict,
                    inherited_from: dict, human_fields: set[str],
-                   p: float, permitir_escrita: bool) -> CellCheck | None:
+                   p: float, permitir_escrita: bool,
+                   replace_all: bool = False) -> CellCheck | None:
     """Célula do cliente, fora do scorer.
 
     O cliente não entra na identificação da linha (o plano guarda o cliente
     interno da Metalogalva, o operador escreve o final — discordar é o caso
     normal, não um erro de OCR). Mas resolvida a OF, o plano sabe de quem é a
     obra: célula vazia recebe proposta; escrita e parecida confirma; escrita e
-    diferente fica `alias` — proposta visível, nunca sobrescrita, sem revisão.
+    diferente fica `alias` — proposta visível, sem revisão. Com
+    `replace_all` (linha com match forte e política de substituição total), o
+    nome do plano é ESCRITO por cima do que difere: o cliente da folha passa a
+    ser sempre o do planeamento; o que o operador escreveu fica no raw e no
+    trilho de auditoria.
     """
     nome = plan_customer_for(index, str(scored_row.get("of") or ""))
     if not nome:
@@ -155,13 +165,16 @@ def _cliente_check(row: dict, scored_row: dict, index: PlanIndex,
     if not efectivo:
         writable = (permitir_escrita
                     and "cliente" not in human_fields
-                    and "cliente" not in inherited_from
-                    and p >= _threshold_for("cliente", params))
+                    and (replace_all
+                         or ("cliente" not in inherited_from
+                             and p >= _threshold_for("cliente", params))))
         status, proposal, similarity, auto = "snapped", nome, 0.0, writable
     else:
         similarity = sim.text_similarity(efectivo, nome)
         if similarity >= params.score.sim_near:
             status, proposal, auto = "confirmed", None, False
+        elif replace_all and permitir_escrita and "cliente" not in human_fields:
+            status, proposal, auto = "snapped", nome, True
         else:
             status, proposal, auto = "alias", nome, False
     return CellCheck(
@@ -263,6 +276,11 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     # `field_value` e não `.get`: folhas lidas antes do rename guardaram o
     # visto em `comp_mm`, e ignorá-las punha o motor a propor modelos nelas.
     linha_marcada = is_marked(field_value(scored_row, "perf_comp"))
+    # Política de substituição total (decisão do Luís, 19/08): linha com match
+    # FORTE fica com os valores do plano — very_different e herdadas
+    # incluídas. Só as edições humanas continuam invioláveis; linhas incertas
+    # (weak) mantêm o regime de propostas.
+    replace_all = params.policy.replace_with_plan and match.mode == "strong"
 
     for f in spec_fields:
         written = row.get(f.name)
@@ -278,6 +296,10 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
         efectivo = written_s or str(inherited_values.get(f.name) or "").strip()
         raw_proposal = entry.get(f.entry_key)
         proposal = str(raw_proposal).strip() if raw_proposal is not None else ""
+        # OF/OV mostram-se e gravam-se como números puros (convenção do
+        # planeamento); o prefixo é formatação do Excel do plano.
+        if f.code_prefix and proposal:
+            proposal = sim.strip_ref_prefix(proposal)
         # Confiança por campo: o valor de um campo pode ser certo (todas as
         # irmãs concordam) mesmo quando a linha exacta é incerta. MAS o
         # marginal só vale para a proposta se apontar para o MESMO valor —
@@ -316,11 +338,16 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             similarity = sim.text_similarity(efectivo, proposal)
 
         threshold = _threshold_for(f.name, params)
-        # Campo herdado nunca é auto-escrito: seria transformar uma inferência
-        # nossa num valor registado como se o operador o tivesse escrito.
-        writable = (f.name not in human_fields
-                    and f.name not in inherited_from
-                    and p_field >= threshold)
+        if replace_all:
+            # substituição total: match forte manda; só o humano é inviolável
+            writable = f.name not in human_fields
+        else:
+            # Campo herdado nunca é auto-escrito: seria transformar uma
+            # inferência nossa num valor registado como se o operador o
+            # tivesse escrito.
+            writable = (f.name not in human_fields
+                        and f.name not in inherited_from
+                        and p_field >= threshold)
 
         if efectivo and similarity >= 1.0:
             status, auto = "confirmed", False
@@ -328,6 +355,8 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             # correção suave ou preenchimento de célula vazia
             status, auto = "snapped", writable
         else:
+            # com substituição total escreve-se na mesma; a cor vermelha
+            # continua a dizer «isto veio de longe — confere»
             status, auto = "very_different", writable
         cells.append(CellCheck(
             f.name, written_s or None, proposal, status, similarity, auto, p_field,
@@ -362,9 +391,19 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     cliente_cell = _cliente_check(
         row, scored_row, index, params, inherited_values,
         inherited_from, human_fields, p=p, permitir_escrita=True,
+        replace_all=replace_all,
     )
     if cliente_cell is not None:
         cells.append(cliente_cell)
+
+    # Metros teóricos da linha: qtd × comprimento da peça no plano (mm→m).
+    # Linhas de perfil completo não têm «a» peça, portanto não têm metros.
+    plan_length = sim.parse_number(entry.get("comp_mm"))
+    line_meters = None
+    if plan_length is not None and not linha_marcada:
+        qtd_m = sim.parse_number(qtd_written) if _looks_numeric(qtd_written) else None
+        if qtd_m is not None:
+            line_meters = round(qtd_m * plan_length / 1000.0, 2)
 
     priority = max(
         (params.policy.criticality.get(c.field, params.policy.criticality_default) * (1.0 - p)
@@ -380,12 +419,18 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
         review_priority=priority,
         cells=cells,
         rivals=[r.plan_key for r in match.rivals],
+        plan_length_mm=plan_length,
+        line_meters=line_meters,
     )
 
 
 def check_sheet(rows: list[dict], scorer: Scorer,
-                human_fields_by_row: dict[int, set[str]] | None = None) -> dict:
-    """Cruza a folha inteira e devolve um dicionário serializável (JSON)."""
+                human_fields_by_row: dict[int, set[str]] | None = None,
+                footer: dict | None = None) -> dict:
+    """Cruza a folha inteira e devolve um dicionário serializável (JSON).
+
+    `footer` traz os totais manuscritos (METROS PRODUZIDOS) para o confronto
+    com os metros teóricos do plano."""
     human_fields_by_row = human_fields_by_row or {}
     # A identidade resolve-se em conjunto, não linha a linha: o operador
     # escreve a OF uma vez e as linhas seguintes valem-se dela.
@@ -411,6 +456,18 @@ def check_sheet(rows: list[dict], scorer: Scorer,
         "cells_inherited": sum(1 for c in checks for x in c.cells if x.inherited_from is not None),
         "cells_over_limit": sum(1 for c in checks for x in c.cells if x.status == "over_limit"),
     }
+    # METROS PRODUZIDOS (rodapé, em metros) vs Σ qtd × comprimento do plano
+    # (mm→m): a diferença é a coluna principal do controlo — positiva é
+    # excedente/desperdício, negativa é produção abaixo do teórico.
+    metros_teoricos = round(
+        sum(c.line_meters for c in checks if c.line_meters is not None), 2)
+    metros_produzidos = sim.parse_number((footer or {}).get("metros_produzidos"))
+    summary["metros_teoricos"] = metros_teoricos if metros_teoricos else None
+    summary["metros_produzidos"] = metros_produzidos
+    summary["desperdicio_m"] = (
+        round(metros_produzidos - metros_teoricos, 2)
+        if metros_produzidos is not None and metros_teoricos else None
+    )
     review_order = sorted(
         (c.row_index for c in checks if c.review_priority > 0),
         key=lambda i: -checks[i].review_priority,

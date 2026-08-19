@@ -152,7 +152,8 @@ def test_historico_renders(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "Folhas Kanban" in r.text
-    assert "Exportar Excel" in r.text
+    assert "Exportar CPIS" in r.text
+    assert 'action="/export/cpis"' in r.text
 
 
 def test_captura_page_has_upload_form(client):

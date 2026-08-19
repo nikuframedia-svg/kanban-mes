@@ -17,6 +17,19 @@ def test_parse_number_milhares_europeus():
     assert sim.parse_number("1,234.56") == 1234.56
 
 
+def test_strip_ref_prefix():
+    """OF/OV mostram-se e gravam-se nuas (convenção do planeamento/MTG2);
+    modelos e perfis nunca perdem letras."""
+    assert sim.strip_ref_prefix("OF263323") == "263323"
+    assert sim.strip_ref_prefix("OV2504650") == "2504650"
+    assert sim.strip_ref_prefix("of 263323") == "263323"
+    assert sim.strip_ref_prefix("263323") == "263323"
+    assert sim.strip_ref_prefix("QS122") == "QS122"
+    assert sim.strip_ref_prefix("L60X60X5") == "L60X60X5"
+    assert sim.strip_ref_prefix(None) == ""
+    assert sim.strip_ref_prefix("OFICINA") == "OFICINA", "OF+letras não é uma ordem"
+
+
 def test_compact_normaliza_acentos():
     """CONCEIÇÃO tem de bater com CONCEICAO da lista SAP — antes o Ç e o Ã
     caíam fora e o nome certo ficava a distância 2."""

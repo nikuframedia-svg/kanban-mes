@@ -156,11 +156,26 @@ def test_cliente_vazio_com_of_confiavel_propoe_nome():
         assert by_field["cliente"].auto_write
 
 
-def test_cliente_final_diferente_do_interno_nao_e_erro():
-    """O operador escreve o cliente final («CMF»), o plano guarda o interno
-    («C.M.E.-CONST. E»). Discordar é o caso normal: proposta visível, nunca
-    auto-escrita, e a linha NÃO entra na fila de revisão por causa disto."""
+def test_cliente_do_plano_substitui_em_linha_forte():
+    """Política de 19/08: o cliente é SEMPRE o do planeamento. Em linha com
+    match forte, o nome do plano escreve-se por cima do que o operador
+    escreveu (que fica no raw + trilho); a linha não entra na revisão."""
     s = _cantoneiras_scorer(_entries_obra(nome="C.M.E.-CONST. E"))
+    row = {"of": "262796", "ov": "2603660", "cliente": "CMF",
+           "modelo": "QS120", "perfil": "60 x 4"}
+    rc = check_row(row, 0, s)
+    by_field = {c.field: c for c in rc.cells}
+    if rc.mode == "strong":
+        assert by_field["cliente"].status == "snapped"
+        assert by_field["cliente"].proposal == "C.M.E.-CONST. E"
+        assert by_field["cliente"].auto_write, "cliente vem sempre do planeamento"
+
+
+def test_cliente_alias_quando_substituicao_desligada():
+    """Com `replace_with_plan` desligado volta o regime de 17/08: proposta
+    visível («alias»), nunca auto-escrita, fora da fila de revisão."""
+    s = _cantoneiras_scorer(_entries_obra(nome="C.M.E.-CONST. E"))
+    s.params.policy.replace_with_plan = False
     row = {"of": "262796", "ov": "2603660", "cliente": "CMF",
            "modelo": "QS120", "perfil": "60 x 4"}
     rc = check_row(row, 0, s)
@@ -217,8 +232,12 @@ def test_h0_com_of_exata_resolve_cliente():
     assert "cliente" not in {c.field for c in rc2.cells}
 
 
-def test_cliente_herdado_nunca_auto_escrito():
+def test_cliente_herdado_sem_substituicao_nao_e_auto_escrito():
+    """Sem a política de substituição total, um valor herdado nunca é gravado
+    como se o operador o tivesse escrito. (Com a política ligada — o default —
+    a linha forte fica com o valor do plano, herdadas incluídas.)"""
     s = _cantoneiras_scorer(_entries_obra(nome="C.M.E.-CONST. E"))
+    s.params.policy.replace_with_plan = False
     rows = [
         {"of": "262796", "ov": "2603660", "cliente": "CMF",
          "modelo": "QS120", "perfil": "60 x 4"},
@@ -247,6 +266,87 @@ def test_plan_customer_for():
 
     sem_nome = [dict(e, cliente_nome=None) for e in _entries_obra()]
     assert plan_customer_for(PlanIndex(sem_nome, CANTONEIRAS_SPEC), "262796") is None
+
+
+def test_substituicao_total_em_linha_forte():
+    """Política de 19/08: linha com match forte fica com os valores do plano,
+    very_different e vazias incluídas — só as edições humanas são invioláveis.
+    E as propostas OF/OV vêm como números puros (convenção do planeamento)."""
+    s = _cantoneiras_scorer(_entries_obra())
+    # modelo escrito errado (QS129 não existe; near de QS120), OV em branco
+    row = {"of": "262796", "modelo": "QS128", "perfil": "60 x 4"}
+    rc = check_row(row, 0, s)
+    by_field = {c.field: c for c in rc.cells}
+    if rc.mode == "strong":
+        assert by_field["ov"].proposal == "2603660", "proposta sem prefixo OV"
+        assert by_field["ov"].auto_write
+        assert by_field["modelo"].auto_write, "substitui mesmo o que difere"
+    # humano continua inviolável
+    rc2 = check_row(row, 0, s, human_fields={"modelo"})
+    by_field2 = {c.field: c for c in rc2.cells}
+    assert not by_field2["modelo"].auto_write
+
+
+def test_linha_incerta_nao_substitui():
+    """weak_guess mantém o regime de propostas — substituir com base num
+    palpite propagava matches errados em massa."""
+    entries = _entries_obra() + [
+        {"plan_key": f"B{i}", "of": "OF262797", "ov": "OV2699999",
+         "cliente": "outro", "cliente_nome": "OUTRO, LDA", "n_clientes": 1,
+         "modelo": f"QS12{i}", "perfil": "L60X60X4"}
+        for i in range(3)
+    ]
+    s = _cantoneiras_scorer(entries)
+    # sem OF: modelo QS120 existe nas duas obras → incerto
+    rc = check_row({"modelo": "QS120", "perfil": "60 x 4"}, 0, s)
+    if rc.mode != "strong":
+        assert all(not c.auto_write for c in rc.cells if c.status == "very_different"), \
+            "linha incerta nunca substitui o que difere"
+
+
+def test_metros_por_linha_e_desperdicio():
+    """qtd × comprimento do plano (mm→m) por linha; o rodapé confere os
+    METROS PRODUZIDOS contra o total — a diferença é a coluna principal."""
+    entries = [
+        {"plan_key": "A0", "of": "OF262796", "ov": "OV2603660",
+         "cliente": "painhas, sa", "cliente_nome": "PAINHAS, SA", "n_clientes": 1,
+         "modelo": "QS120", "perfil": "L60X60X4", "comp_mm": 1500},
+        {"plan_key": "A1", "of": "OF262796", "ov": "OV2603660",
+         "cliente": "painhas, sa", "cliente_nome": "PAINHAS, SA", "n_clientes": 1,
+         "modelo": "QS121", "perfil": "L60X60X4", "comp_mm": 2000},
+    ]
+    s = _cantoneiras_scorer(entries)
+    rows = [
+        {"of": "262796", "ov": "2603660", "modelo": "QS120", "perfil": "60 x 4",
+         "qtd": "10"},                                   # 10 × 1.5 m = 15 m
+        {"modelo": "QS121", "qtd": "4"},                 # 4 × 2.0 m = 8 m
+    ]
+    result = check_sheet(rows, s, footer={"metros_produzidos": "25"})
+    assert result["rows"][0]["line_meters"] == 15.0
+    assert result["rows"][0]["plan_length_mm"] == 1500.0
+    assert result["rows"][1]["line_meters"] == 8.0
+    su = result["summary"]
+    assert su["metros_teoricos"] == 23.0
+    assert su["metros_produzidos"] == 25.0
+    assert su["desperdicio_m"] == 2.0, "produzido acima do teórico = excedente"
+
+    # sem rodapé preenchido não há diferença para mostrar
+    sem = check_sheet(rows, s)["summary"]
+    assert sem["metros_teoricos"] == 23.0
+    assert sem["desperdicio_m"] is None
+
+
+def test_linha_perf_comp_nao_tem_metros():
+    entries = [
+        {"plan_key": "A0", "of": "OF262796", "ov": "OV2603660",
+         "cliente": "painhas, sa", "cliente_nome": "PAINHAS, SA", "n_clientes": 1,
+         "modelo": "QS120", "perfil": "L60X60X4", "comp_mm": 1500},
+    ]
+    s = _cantoneiras_scorer(entries)
+    rc = check_row({"of": "262796", "perfil": "60 x 4", "perf_comp": "x",
+                    "qtd": "10"}, 0, s)
+    assert rc.line_meters is None, \
+        "perfil completo cobre várias referências — não há «o» comprimento"
 
 
 def test_check_sheet_summary_and_review_order():

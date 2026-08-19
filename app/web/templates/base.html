@@ -55,7 +55,25 @@
                 gap:10px; padding:10px 24px; border-bottom:1px solid var(--rule-2);
                 background:var(--surface); position:sticky; top:0; z-index:50;">
       {% block topbar_actions %}{% endblock %}
-      <a class="btn primary" href="/export.xlsx">⬇ Exportar Excel</a>
+      {# Export no formato da Metalogalva 2 (tabela plana CPIS) — é este que
+         os sistemas a jusante consomem. O dropdown dá o filtro de período. #}
+      <details style="position:relative;">
+        <summary class="btn primary" style="list-style:none; cursor:pointer;">⬇ Exportar CPIS</summary>
+        <form method="get" action="/export/cpis"
+              style="position:absolute; right:0; top:calc(100% + 6px); z-index:60;
+                     background:var(--surface); border:1px solid var(--rule-2);
+                     border-radius:10px; padding:14px; display:grid; gap:8px;
+                     min-width:230px; box-shadow:0 8px 24px rgba(0,0,0,.12);">
+          <label class="tiny muted">De
+            <input type="date" name="de" class="kv-select" style="width:100%;"></label>
+          <label class="tiny muted">Até
+            <input type="date" name="ate" class="kv-select" style="width:100%;"></label>
+          <label class="tiny muted" style="display:flex; gap:6px; align-items:center;">
+            <input type="checkbox" name="validadas" value="1"> Apenas validadas</label>
+          <button type="submit" class="btn primary">Descarregar</button>
+        </form>
+      </details>
+      <a class="btn ghost" href="/export.xlsx" title="Dump técnico do Postgres">Excel técnico</a>
     </div>
     {% block content %}{% endblock %}
   </main>

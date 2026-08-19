@@ -30,6 +30,7 @@ from ..matching.scorer import Scorer
 from ..ocr.provider import OcrError, empty_extraction, get_provider
 from ..templates_spec import TEMPLATES, field_value, get_template, is_marked
 from . import estado as estado_data
+from . import export as cpis_export
 from . import pdf as pdf_gen
 
 class NoCacheStaticFiles(StaticFiles):
@@ -72,6 +73,9 @@ templates.env.globals["css_version"] = hashlib.sha1(
 ).hexdigest()[:10]
 # a folha decide o que é uma marca; o template não repete a regra
 templates.env.globals["is_marked"] = is_marked
+# OF/OV apresentam-se como números puros (convenção do planeamento)
+from ..matching import similarity as _sim  # noqa: E402
+templates.env.globals["strip_ref"] = _sim.strip_ref_prefix
 # lê a célula pelo nome atual e pelo antigo (folhas lidas antes do rename)
 templates.env.globals["field_value"] = field_value
 
@@ -242,7 +246,8 @@ def run_cross_check(conn, uid: str) -> None:
     scorer = make_scorer(base["template_name"])
     data = base["sheet_data"]
     rows = data.get("rows") or []
-    cross = check_sheet(rows, scorer, db.human_fields_by_row(conn, uid))
+    cross = check_sheet(rows, scorer, db.human_fields_by_row(conn, uid),
+                        footer=data.get("footer"))
     expected = base["revision"]
 
     # escrita automática (política de perda esperada), auditada como 'system';
@@ -696,6 +701,58 @@ def sheet_csv(uid: str):
     return Response(buf.getvalue(), media_type="text/csv; charset=utf-8", headers={
         "Content-Disposition": f'attachment; filename="kanban_{uid[:8]}.csv"',
     })
+
+
+@app.get("/export/cpis")
+def export_cpis(de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
+    """A tabela plana da Metalogalva 2 («MigracaoNikufraCPIS_….xlsx»).
+
+    Fonte: o staging local (todas as folhas de produção com data) — funciona
+    com o Postgres em baixo e cobre também o que ainda está em revisão;
+    `?validadas=1` restringe ao que já foi validado. Filtros `de`/`ate` em
+    ISO (aaaa-mm-dd) e `operador` por nome.
+    """
+    conn = _conn()
+    try:
+        sheets = db.list_sheets(conn, status="validated" if validadas else None)
+        cpis_rows: list[dict] = []
+        for meta in sheets:
+            if "paragens" in meta["template_name"]:
+                continue
+            sheet = db.get_sheet(conn, meta["uid"])
+            if not sheet or not sheet.get("sheet_data"):
+                continue
+            header = sheet["sheet_data"].get("header") or {}
+            if operador and str(header.get("operador") or "").strip() != operador:
+                continue
+            try:
+                iso = pg_store.normalize_sheet_date(header.get("data"))
+            except pg_store.InvalidSheetDate:
+                iso = None
+            if de and (not iso or iso < de):
+                continue
+            if ate and (not iso or iso > ate):
+                continue
+            cross = sheet.get("cross_check") or {}
+            cross_rows = {r["row_index"]: r for r in cross.get("rows", [])}
+            op = cross.get("operator")
+            for i, row in enumerate(sheet["sheet_data"].get("rows") or []):
+                if not any(v is not None and str(v).strip() for v in row.values()):
+                    continue
+                cpis_rows.append(
+                    (iso or "9999", str(header.get("operador") or ""), meta["uid"], i,
+                     cpis_export.cpis_row_for(sheet, row, cross_rows.get(i), op)))
+    finally:
+        conn.close()
+    # ordenação do original: data, operador, folha, linha
+    cpis_rows.sort(key=lambda t: t[:4])
+    content = cpis_export.build_cpis_workbook([t[4] for t in cpis_rows])
+    filename = cpis_export.cpis_filename_for(de or None, ate or None, bool(validadas))
+    return Response(
+        content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/export.xlsx")

@@ -45,7 +45,8 @@ _BOOLEAN_COLUMNS = {"full_profile"}
 # do código e a aplicação do SQL deixa de importar. Sem cache de propósito —
 # a sonda é um SELECT ao information_schema por validação (raras), e a cache
 # fixava para sempre o schema visto na primeira validação do processo.
-_OPTIONAL_COLUMNS = ("profile_type", "full_profile", "plan_quantity")
+_OPTIONAL_COLUMNS = ("profile_type", "full_profile", "plan_quantity",
+                     "plan_length_mm", "line_meters", "meters_produced")
 
 
 def _dsn() -> str:
@@ -272,6 +273,17 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 qtd_cell = cells.get("qtd") or {}
                 if qtd_cell.get("plan_limit") is not None:
                     cols["plan_quantity"] = qtd_cell["plan_limit"]
+                # Metros teóricos (qtd × comprimento do plano) e o total
+                # manuscrito do rodapé — a base do controlo de desperdício.
+                cols["plan_length_mm"] = cr.get("plan_length_mm")
+                cols["line_meters"] = cr.get("line_meters")
+                cols["meters_produced"] = sim.parse_number(
+                    footer.get("metros_produzidos"))
+                # OF/OV como números puros, a convenção do planeamento —
+                # mesmo quando o valor veio do plano (com prefixo)
+                for ref_col in ("production_order", "sales_order"):
+                    if cols.get(ref_col):
+                        cols[ref_col] = sim.strip_ref_prefix(cols[ref_col])
 
                 machine = row.get("maquina") or header.get("setor_maquina")
                 cur.execute(
