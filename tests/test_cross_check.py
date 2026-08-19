@@ -111,8 +111,9 @@ def test_auto_write_nao_usa_probabilidade_de_outro_valor():
 
 
 def test_aspas_de_idem_cruzam_como_heranca():
-    """Linha com «"» em cliente/OV/OF: cruza com a identidade herdada, mostra
-    a herança, e nunca propõe escrever por cima da aspa."""
+    """Linha com «"» em cliente/OV/OF: cruza com a identidade herdada e mostra
+    a herança. Com a substituição total (default), a linha forte materializa o
+    valor do plano na célula; com a política desligada, a aspa fica intocada."""
     s = make_scorer()
     rows = [
         {"of": "OF259999", "ov": "OV2409999", "cliente": "SILVA & VINHA SA",
@@ -125,8 +126,16 @@ def test_aspas_de_idem_cruzam_como_heranca():
     assert linha["matched_plan_key"] == "B0", "a herança liga a linha ao plano"
     assert by_field["of"]["inherited"] == "OF259999"
     assert by_field["of"]["written"] is None, "a aspa não é um valor escrito"
-    assert not by_field["of"]["auto_write"], "herdado nunca se auto-escreve"
+    if linha["mode"] == "strong":
+        assert by_field["of"]["auto_write"], \
+            "substituição total materializa o herdado (folha auto-contida)"
     assert result["summary"]["cells_inherited"] >= 3
+
+    # política desligada: o regime antigo — herdado nunca se auto-escreve
+    s.params.policy.replace_with_plan = False
+    result2 = check_sheet(rows, s)
+    by_field2 = {c["field"]: c for c in result2["rows"][1]["cells"]}
+    assert not by_field2["of"]["auto_write"]
 
 
 def _cantoneiras_scorer(entries):
@@ -328,12 +337,22 @@ def test_metros_por_linha_e_desperdicio():
     su = result["summary"]
     assert su["metros_teoricos"] == 23.0
     assert su["metros_produzidos"] == 25.0
+    assert not su["metros_parciais"]
     assert su["desperdicio_m"] == 2.0, "produzido acima do teórico = excedente"
 
     # sem rodapé preenchido não há diferença para mostrar
     sem = check_sheet(rows, s)["summary"]
     assert sem["metros_teoricos"] == 23.0
     assert sem["desperdicio_m"] is None
+
+    # linha de perfil completo sem metros → total parcial, desperdício
+    # desonesto não se mostra (caso real: 200 m de «desperdício» que era só
+    # produção não contada)
+    rows_parcial = rows + [{"of": "262796", "perfil": "60 x 4",
+                            "perf_comp": "x", "qtd": "50"}]
+    par = check_sheet(rows_parcial, s, footer={"metros_produzidos": "25"})["summary"]
+    assert par["metros_parciais"]
+    assert par["desperdicio_m"] is None
 
 
 def test_linha_perf_comp_nao_tem_metros():

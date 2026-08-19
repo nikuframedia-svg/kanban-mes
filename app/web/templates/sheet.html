@@ -371,7 +371,7 @@ setTimeout(function () {
         {% set alerta = desp is not none and (desp | abs) > summary.metros_teoricos * 0.05 %}
         <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); margin-top:14px;">
           <div class="kpi">
-            <div class="kpi-l" title="Σ qtd × comprimento da peça no plano">metros do plano</div>
+            <div class="kpi-l" title="Σ qtd × comprimento da peça no plano">metros do plano{% if summary.metros_parciais %} (parcial){% endif %}</div>
             <div class="kpi-v">{{ '%.2f' | format(summary.metros_teoricos) }}<span class="kpi-u">m</span></div>
           </div>
           <div class="kpi">
@@ -386,6 +386,11 @@ setTimeout(function () {
         {% if summary.metros_produzidos is none %}
         <div class="muted tiny" style="margin-top:6px;">
           Preenche «Metros produzidos» no rodapé para calcular o desperdício.
+        </div>
+        {% elif summary.metros_parciais %}
+        <div class="muted tiny" style="margin-top:6px;">
+          Há linhas sem comprimento do plano (perfil completo ou sem ligação) —
+          o total teórico é parcial e o desperdício não se calcula.
         </div>
         {% endif %}
         {% endif %}

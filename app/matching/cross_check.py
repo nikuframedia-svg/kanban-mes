@@ -350,7 +350,10 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
                         and p_field >= threshold)
 
         if efectivo and similarity >= 1.0:
-            status, auto = "confirmed", False
+            # Certo — mas se o valor só existe por herança/aspas (nada escrito
+            # na célula), a substituição total materializa-o: a folha fica
+            # auto-contida, sem células vazias «a valer» por outras.
+            status, auto = "confirmed", bool(replace_all and writable and not written_s)
         elif similarity >= params.score.sim_near or not efectivo:
             # correção suave ou preenchimento de célula vazia
             status, auto = "snapped", writable
@@ -462,11 +465,23 @@ def check_sheet(rows: list[dict], scorer: Scorer,
     metros_teoricos = round(
         sum(c.line_meters for c in checks if c.line_meters is not None), 2)
     metros_produzidos = sim.parse_number((footer or {}).get("metros_produzidos"))
+    # Linhas de produção sem metros (perfil completo, sem match): o total
+    # teórico é PARCIAL e a diferença deixa de ser um desperdício honesto —
+    # numa folha real, 2 linhas de perfil completo faziam «desperdício» de
+    # 200 m que era só produção não contada.
+    parcial = any(
+        c.line_meters is None
+        and i < len(rows)
+        and any(v is not None and str(v).strip() for v in rows[i].values())
+        for i, c in enumerate(checks)
+    )
     summary["metros_teoricos"] = metros_teoricos if metros_teoricos else None
     summary["metros_produzidos"] = metros_produzidos
+    summary["metros_parciais"] = parcial
     summary["desperdicio_m"] = (
         round(metros_produzidos - metros_teoricos, 2)
-        if metros_produzidos is not None and metros_teoricos else None
+        if metros_produzidos is not None and metros_teoricos and not parcial
+        else None
     )
     review_order = sorted(
         (c.row_index for c in checks if c.review_priority > 0),
