@@ -5,6 +5,9 @@ Estados de célula:
 - confirmed      — o escrito coincide com o plano (verde);
 - snapped        — correção/atribuição automática com confiança acima do limiar (amarelo);
 - very_different — o motor propõe algo distante do escrito; propõe mas exige olho humano (vermelho);
+- alias          — só no cliente: o escrito difere do nome do plano, mas isso é
+                   esperado (cliente final vs. cliente interno da Metalogalva) —
+                   mostra-se a proposta em tom neutro, sem entrar na revisão;
 - unmatched      — sem vencedor credível no plano (H₀ venceu ou não há candidatos);
 - na             — campo sem referência para cruzar.
 
@@ -31,7 +34,7 @@ class CellCheck:
     field: str
     written: str | None
     proposal: str | None
-    status: str            # confirmed | snapped | very_different | unmatched | na
+    status: str            # confirmed | snapped | very_different | alias | unmatched | na
     similarity: float
     auto_write: bool
     p_correct: float
@@ -85,6 +88,35 @@ def plan_quantity_for(index: PlanIndex, of: str, modelo: str) -> float | None:
     return total if seen else None
 
 
+def plan_customer_for(index: PlanIndex, of: str) -> str | None:
+    """Cliente da obra, quando é inequívoco.
+
+    A OF determina o cliente por construção (cada ordem de fabrico pertence a
+    uma ordem de venda de um cliente). Mas o agregado do plano usa min() quando
+    as linhas cruas trazem nomes diferentes — e nesses casos (`n_clientes` > 1)
+    o nome guardado é um artefacto: no snapshot real aparecem datas e
+    designações de material na coluna do cliente. Só se devolve o nome quando
+    todas as linhas da OF apontam para exactamente um.
+    """
+    if not of:
+        return None
+    hits = index.exact_matches("of", of)
+    if not hits:
+        return None
+    nomes: set[str] = set()
+    for idx in hits:
+        entry = index.entries[idx]
+        n_clientes = sim.parse_number(entry.get("n_clientes"))
+        if n_clientes is not None and n_clientes > 1:
+            return None
+        nome = str(entry.get("cliente_nome") or "").strip()
+        if nome:
+            nomes.add(nome)
+    if len(nomes) != 1:
+        return None
+    return next(iter(nomes))
+
+
 def _looks_numeric(text: str) -> bool:
     """`2x` ou `1+1` não são quantidades — parse_number daria 2 e 11."""
     return bool(text) and all(ch.isdigit() or ch in " .,-" for ch in text)
@@ -98,6 +130,46 @@ def _threshold_for(field_name: str, params: CrossParams) -> float:
     if crit >= 3:
         return pol.write_threshold_identity
     return pol.write_threshold_default
+
+
+def _cliente_check(row: dict, scored_row: dict, index: PlanIndex,
+                   params: CrossParams, inherited_values: dict,
+                   inherited_from: dict, human_fields: set[str],
+                   p: float, permitir_escrita: bool) -> CellCheck | None:
+    """Célula do cliente, fora do scorer.
+
+    O cliente não entra na identificação da linha (o plano guarda o cliente
+    interno da Metalogalva, o operador escreve o final — discordar é o caso
+    normal, não um erro de OCR). Mas resolvida a OF, o plano sabe de quem é a
+    obra: célula vazia recebe proposta; escrita e parecida confirma; escrita e
+    diferente fica `alias` — proposta visível, nunca sobrescrita, sem revisão.
+    """
+    nome = plan_customer_for(index, str(scored_row.get("of") or ""))
+    if not nome:
+        return None
+    written = row.get("cliente")
+    if carryover.is_ditto(written):
+        written = None
+    written_s = str(written).strip() if written is not None else ""
+    efectivo = written_s or str(inherited_values.get("cliente") or "").strip()
+    if not efectivo:
+        writable = (permitir_escrita
+                    and "cliente" not in human_fields
+                    and "cliente" not in inherited_from
+                    and p >= _threshold_for("cliente", params))
+        status, proposal, similarity, auto = "snapped", nome, 0.0, writable
+    else:
+        similarity = sim.text_similarity(efectivo, nome)
+        if similarity >= params.score.sim_near:
+            status, proposal, auto = "confirmed", None, False
+        else:
+            status, proposal, auto = "alias", nome, False
+    return CellCheck(
+        field="cliente", written=written_s or None, proposal=proposal,
+        status=status, similarity=similarity, auto_write=auto, p_correct=p,
+        inherited=inherited_values.get("cliente"),
+        inherited_from=inherited_from.get("cliente"),
+    )
 
 
 def check_row(row: dict, row_index: int, scorer: Scorer,
@@ -159,9 +231,22 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
                 inherited=inherited_values.get(f.name),
                 inherited_from=inherited_from.get(f.name),
             ))
+        # Mesmo sem linha vencedora, uma OF exata identifica a obra — e a obra
+        # tem dono. Sem escrita automática (invariante do ramo: nada se grava
+        # quando a linha não tem correspondência credível); o p é o da célula
+        # OF, porque o cliente é função dela.
+        of_cell = next((c for c in cells if c.field == "of"), None)
+        if of_cell is not None and of_cell.status == "confirmed":
+            cliente_cell = _cliente_check(
+                row, scored_row, index, params, inherited_values,
+                inherited_from, human_fields,
+                p=of_cell.p_correct, permitir_escrita=False,
+            )
+            if cliente_cell is not None:
+                cells.append(cliente_cell)
         priority = max(
             (params.policy.criticality.get(c.field, params.policy.criticality_default)
-             for c in cells if c.status not in ("confirmed", "na")), default=1,
+             for c in cells if c.status not in ("confirmed", "alias", "na")), default=1,
         ) * (1.0 - confidence)
         return RowCheck(
             row_index=row_index, matched_plan_key=None,
@@ -272,9 +357,18 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
                 plan_limit=limite,
             ))
 
+    # Cliente: também fora dos campos cruzados — não é «parecido com o plano?»
+    # mas «de quem é esta obra?», e a resposta vem da OF (ver _cliente_check).
+    cliente_cell = _cliente_check(
+        row, scored_row, index, params, inherited_values,
+        inherited_from, human_fields, p=p, permitir_escrita=True,
+    )
+    if cliente_cell is not None:
+        cells.append(cliente_cell)
+
     priority = max(
         (params.policy.criticality.get(c.field, params.policy.criticality_default) * (1.0 - p)
-         for c in cells if c.status not in ("confirmed", "na")),
+         for c in cells if c.status not in ("confirmed", "alias", "na")),
         default=0.0,
     )
     return RowCheck(

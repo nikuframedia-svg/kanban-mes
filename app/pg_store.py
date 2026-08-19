@@ -156,9 +156,10 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
     ]
 
     # Identidade herdada resolvida aqui, não lida das células do cross: o
-    # `cliente` das cantoneiras não cruza com o plano (fora do IndexSpec),
-    # logo não tem célula — e as linhas herdadas iam para o Postgres com
-    # customer_name NULL. O carryover é a fonte de verdade da herança.
+    # `cliente` das cantoneiras fica fora do IndexSpec (tem célula própria via
+    # `_cliente_check`, mas só quando a OF resolve) — e as linhas herdadas iam
+    # para o Postgres com customer_name NULL. O carryover é a fonte de verdade
+    # da herança.
     identities = carryover.resolve(
         rows, tuple(f for f in template.row_fields if f not in carryover.CARRY_FIELDS),
     ) if template.name != "cantoneiras_paragens" else []

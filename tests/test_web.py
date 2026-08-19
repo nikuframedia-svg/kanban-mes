@@ -321,3 +321,47 @@ def test_sheet_pdf_downloads(client):
 def test_sheet_photo_404_without_image(client):
     uid = create_sheet(client)
     assert client.get(f"/sheet/{uid}/photo").status_code == 404
+
+
+def _linhas_plano_fake():
+    return [
+        {"component_ref": "QS120", "length_mm": 1500.0, "quantity_planned": 100.0,
+         "quantity_made": 60.0, "remaining_quantity": 40.0, "cutting_machine": "M1",
+         "planning_week": "W30", "closed_x": False},
+        {"component_ref": "QS121", "length_mm": 1500.0, "quantity_planned": 50.0,
+         "quantity_made": 50.0, "remaining_quantity": 0.0, "cutting_machine": "M1",
+         "planning_week": "W30", "closed_x": False},
+    ]
+
+
+def test_plano_popup_totais_so_quando_vem_do_perf_comp(client, monkeypatch):
+    """O mesmo pop-up serve dois cliques: da célula do perfil (lista simples)
+    e da marca PERF. COMP. (que afirma «fiz tudo» — leva totais e, se o plano
+    ainda mostra falta, um aviso)."""
+    monkeypatch.setattr(main.loaders, "plan_snapshot_info", lambda: {"age_hours": 5.0})
+    monkeypatch.setattr(main.loaders, "fetch_profile_lines",
+                        lambda of, perfil: _linhas_plano_fake())
+    monkeypatch.setattr(main.loaders, "fetch_profiles_in_of", lambda of: [])
+    uid = create_sheet(client)
+    edit(client, uid, "rows[0].of", "250001")
+    edit(client, uid, "rows[0].perfil", "50 x 5")
+
+    r = client.get(f"/sheet/{uid}/plano/0", params={"origem": "perf_comp"})
+    assert r.status_code == 200
+    assert "QS120" in r.text
+    assert "Totais" in r.text
+    assert "por fazer neste perfil" in r.text, "falta agregada (40) devia gerar aviso"
+
+    r2 = client.get(f"/sheet/{uid}/plano/0")
+    assert r2.status_code == 200
+    assert "QS120" in r2.text
+    assert "Totais" not in r2.text
+    assert "por fazer neste perfil" not in r2.text
+
+
+def test_perf_comp_marcado_mostra_seta_para_o_popup(client):
+    uid = create_sheet(client)
+    edit(client, uid, "rows[0].perf_comp", "x")
+    r = client.get(f"/sheet/{uid}")
+    assert r.status_code == 200
+    assert "origem=perf_comp" in r.text, "a seta da coluna PERF. COMP. abre o pop-up"

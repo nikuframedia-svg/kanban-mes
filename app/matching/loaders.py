@@ -55,6 +55,9 @@ def _plan_age_days(snapshot_like: str) -> float:
 # Metalogalva ("c.m.e.-const. e") e o operador escreve o cliente final ("CMF")
 # ou uma nota. Como discorda sempre, era evidência negativa uniforme — não
 # ajudava a escolher candidato nenhum e mantinha a célula vermelha para sempre.
+# A validação do cliente existe, mas à parte do scorer: `plan_customer_for`
+# em cross_check.py resolve-o pela OF (que o determina por construção) e as
+# entries levam `cliente_nome`/`n_clientes` só para esse check.
 CANTONEIRAS_SPEC = IndexSpec(
     identity_fields=(
         FieldSpec("of", "code", "of", code_prefix="OF", max_candidate_entries=None),
@@ -103,6 +106,8 @@ def load_cantoneiras_index() -> PlanIndex:
                l.production_order_no       AS of,
                o.sales_order_no            AS ov,
                o.customer_key              AS cliente,
+               o.distinct_customers        AS n_clientes,
+               c.customer_name             AS cliente_nome,
                l.component_ref             AS modelo,
                l.profile_type              AS perfil,
                l.length_mm                 AS comp_mm,
@@ -115,6 +120,9 @@ def load_cantoneiras_index() -> PlanIndex:
         JOIN core_mtg.production_orders o
           ON o.snapshot_id = l.snapshot_id
          AND o.production_order_no = l.production_order_no
+        LEFT JOIN core_mtg.customers c
+          ON c.snapshot_id = o.snapshot_id
+         AND c.customer_key = o.customer_key
         WHERE l.snapshot_id = (
             SELECT snapshot_id FROM audit_mtg.snapshots
             WHERE snapshot_id LIKE 'mtg\\_%'

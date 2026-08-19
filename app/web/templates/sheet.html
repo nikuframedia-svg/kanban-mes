@@ -179,7 +179,7 @@ setTimeout(function () {
       {% if readonly %}
         <div>{{ value if value is not none else '' }}{{ snap_mark(field_path) }}</div>
         {% if herdado %}<div class="inherited" title="Vem da linha {{ cell.inherited_from + 1 }}">{{ herdado }}</div>{% endif %}
-        {% if cell and cell.proposal and cell.status in ('snapped', 'very_different') %}
+        {% if cell and cell.proposal and cell.status in ('snapped', 'very_different', 'alias') %}
           <div class="proposal">plano: {{ cell.proposal }}</div>
         {% endif %}
       {% else %}
@@ -200,7 +200,7 @@ setTimeout(function () {
           {# Sem link de aceitar: o plano diz o que estava previsto, não o que
              foi produzido — copiar o número do plano falsificaria o registo. #}
           <div class="proposal">plano: {{ '%g' | format(cell.plan_limit) }}</div>
-        {% elif cell and cell.proposal and cell.status in ('snapped', 'very_different') and (cell.written or '') != cell.proposal and not herdado %}
+        {% elif cell and cell.proposal and cell.status in ('snapped', 'very_different', 'alias') and (cell.written or '') != cell.proposal and not herdado %}
           {# O valor vai num data-attribute (autoescape normal e seguro), NUNCA
              interpolado dentro do onclick: o tojson do Jinja não escapa
              aspas duplas e o atributo fechava no primeiro «"» — o clique
@@ -292,12 +292,15 @@ setTimeout(function () {
                 <td class="muted mono">{{ i + 1 }}</td>
                 {% for f in t.row_fields %}
                 {% set cell = (cr.cells_by_field.get(f) if cr else None) %}
-                {# Estados do motor → classes de cor do design system. #}
+                {# Estados do motor → classes de cor do design system.
+                   `alias` (cliente final ≠ cliente interno do plano) é neutro
+                   de propósito: esperado, não é erro. #}
                 <td class="{% if cell %}{{ {'confirmed': 'cc-match',
                                             'snapped': 'cc-warn',
                                             'very_different': 'cc-no-match',
                                             'over_limit': 'cc-over',
                                             'unmatched': 'cc-na-suspended',
+                                            'alias': 'cc-na',
                                             'na': 'cc-na'}.get(cell.status, 'cc-na') }}{% endif %}">
                   {{ edit_cell('rows[' ~ i ~ '].' ~ f, field_value(row, f), cell, numeric=(f in ('esp', 'comp_mm', 'larg_mm', 'qtd', 'repeticoes'))) }}
                   {# Linha de perfil completo: vale por todas as referências
@@ -305,7 +308,8 @@ setTimeout(function () {
                   {% if f == 'perf_comp' and t.index_loader and is_marked(field_value(row, f)) %}
                     <button type="button" class="btn ghost plano-btn"
                             title="Ver as referências deste perfil na obra"
-                            onclick="abrirPlano('/sheet/{{ sheet.uid }}/plano/{{ i }}')">ver refs</button>
+                            aria-label="Ver as referências deste perfil na obra"
+                            onclick="abrirPlano('/sheet/{{ sheet.uid }}/plano/{{ i }}?origem=perf_comp')">→</button>
                   {% endif %}
                   {# E na própria célula do perfil — é aqui que é natural
                      clicar para ver o que a obra tem daquele perfil. #}

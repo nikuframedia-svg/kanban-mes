@@ -129,6 +129,126 @@ def test_aspas_de_idem_cruzam_como_heranca():
     assert result["summary"]["cells_inherited"] >= 3
 
 
+def _cantoneiras_scorer(entries):
+    from app.matching.loaders import CANTONEIRAS_SPEC
+    from app.matching.refs import PlanIndex
+
+    return Scorer(PlanIndex(entries, CANTONEIRAS_SPEC, plan_age_days=1.0), CrossParams())
+
+
+def _entries_obra(nome="PAINHAS, SA", n_clientes=1):
+    return [
+        {"plan_key": f"A{i}", "of": "OF262796", "ov": "OV2603660",
+         "cliente": "painhas, sa", "cliente_nome": nome, "n_clientes": n_clientes,
+         "modelo": f"QS12{i}", "perfil": "L60X60X4"}
+        for i in range(3)
+    ]
+
+
+def test_cliente_vazio_com_of_confiavel_propoe_nome():
+    s = _cantoneiras_scorer(_entries_obra())
+    row = {"of": "262796", "ov": "2603660", "modelo": "QS120", "perfil": "60 x 4"}
+    rc = check_row(row, 0, s)
+    by_field = {c.field: c for c in rc.cells}
+    assert by_field["cliente"].status == "snapped"
+    assert by_field["cliente"].proposal == "PAINHAS, SA"
+    if rc.p_correct >= 0.95:
+        assert by_field["cliente"].auto_write
+
+
+def test_cliente_final_diferente_do_interno_nao_e_erro():
+    """O operador escreve o cliente final («CMF»), o plano guarda o interno
+    («C.M.E.-CONST. E»). Discordar é o caso normal: proposta visível, nunca
+    auto-escrita, e a linha NÃO entra na fila de revisão por causa disto."""
+    s = _cantoneiras_scorer(_entries_obra(nome="C.M.E.-CONST. E"))
+    row = {"of": "262796", "ov": "2603660", "cliente": "CMF",
+           "modelo": "QS120", "perfil": "60 x 4"}
+    rc = check_row(row, 0, s)
+    by_field = {c.field: c for c in rc.cells}
+    assert by_field["cliente"].status == "alias"
+    assert by_field["cliente"].proposal == "C.M.E.-CONST. E"
+    assert not by_field["cliente"].auto_write
+    assert rc.review_priority == 0.0, \
+        "alias não pode mandar a linha para revisão — era o vermelho-para-sempre"
+
+
+def test_cliente_parecido_confirma():
+    s = _cantoneiras_scorer(_entries_obra())
+    row = {"of": "262796", "ov": "2603660", "cliente": "PAINHAS",
+           "modelo": "QS120", "perfil": "60 x 4"}
+    rc = check_row(row, 0, s)
+    by_field = {c.field: c for c in rc.cells}
+    assert by_field["cliente"].status == "confirmed"
+    assert not by_field["cliente"].auto_write
+
+
+def test_cliente_sem_proposta_com_varios_clientes_na_of():
+    """`n_clientes` > 1 = a coluna do cliente no Excel cru trazia lixo
+    (datas, designações de material) — o nome agregado é um artefacto de
+    min() e propô-lo seria espalhar esse lixo."""
+    s = _cantoneiras_scorer(_entries_obra(nome="2026-07-26 00:00:00", n_clientes=2))
+    row = {"of": "262796", "ov": "2603660", "modelo": "QS120", "perfil": "60 x 4"}
+    rc = check_row(row, 0, s)
+    assert "cliente" not in {c.field for c in rc.cells}
+
+
+def test_h0_com_of_exata_resolve_cliente():
+    """Mesmo sem linha vencedora, uma OF exata identifica a obra — e a obra
+    tem dono. Mas no ramo H₀ nunca se escreve nada."""
+    entries = _entries_obra()
+    entries += [
+        {"plan_key": f"B{i}", "of": "OF262797", "ov": "OV2699999",
+         "cliente": "outro", "cliente_nome": "OUTRO, LDA", "n_clientes": 1,
+         "modelo": f"QA4{i}", "perfil": "L80X80X8"}
+        for i in range(3)
+    ]
+    s = _cantoneiras_scorer(entries)
+    # OF de uma obra, OV de outra, modelo/perfil inexistentes → H₀
+    row = {"of": "262796", "ov": "2699999", "modelo": "ZZZ 999", "perfil": "45 x 9"}
+    rc = check_row(row, 0, s)
+    assert rc.p_correct < s.params.policy.propose_threshold, "cenário deve cair no ramo H₀"
+    by_field = {c.field: c for c in rc.cells}
+    assert by_field["of"].status == "confirmed"
+    assert by_field["cliente"].proposal == "PAINHAS, SA"
+    assert not by_field["cliente"].auto_write, "no ramo H₀ nunca se auto-escreve"
+
+    # OF que não existe no plano → sem célula de cliente
+    rc2 = check_row({"of": "990000", "modelo": "ZZZ 999"}, 0, s)
+    assert "cliente" not in {c.field for c in rc2.cells}
+
+
+def test_cliente_herdado_nunca_auto_escrito():
+    s = _cantoneiras_scorer(_entries_obra(nome="C.M.E.-CONST. E"))
+    rows = [
+        {"of": "262796", "ov": "2603660", "cliente": "CMF",
+         "modelo": "QS120", "perfil": "60 x 4"},
+        {"of": '"', "ov": '"', "cliente": '"', "modelo": "QS121", "perfil": "60 x 4"},
+    ]
+    result = check_sheet(rows, s)
+    by_field = {c["field"]: c for c in result["rows"][1]["cells"]}
+    assert by_field["cliente"]["written"] is None, "a aspa não é um valor escrito"
+    assert by_field["cliente"]["inherited"] == "CMF"
+    assert not by_field["cliente"]["auto_write"], "herdado nunca se auto-escreve"
+
+
+def test_plan_customer_for():
+    from app.matching.cross_check import plan_customer_for
+    from app.matching.loaders import CANTONEIRAS_SPEC
+    from app.matching.refs import PlanIndex
+
+    index = PlanIndex(_entries_obra(), CANTONEIRAS_SPEC)
+    assert plan_customer_for(index, "262796") == "PAINHAS, SA", "OF sem prefixo resolve"
+    assert plan_customer_for(index, "OF262796") == "PAINHAS, SA"
+    assert plan_customer_for(index, "999999") is None, "OF desconhecida"
+    assert plan_customer_for(index, "") is None
+
+    ambigua = PlanIndex(_entries_obra(n_clientes=2), CANTONEIRAS_SPEC)
+    assert plan_customer_for(ambigua, "262796") is None, "n_clientes > 1 recusa"
+
+    sem_nome = [dict(e, cliente_nome=None) for e in _entries_obra()]
+    assert plan_customer_for(PlanIndex(sem_nome, CANTONEIRAS_SPEC), "262796") is None
+
+
 def test_check_sheet_summary_and_review_order():
     s = make_scorer()
     rows = [

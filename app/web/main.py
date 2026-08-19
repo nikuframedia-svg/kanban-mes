@@ -850,14 +850,35 @@ def sheet_rotate(uid: str):
     return {"ok": True, "rotation": rotation}
 
 
+def _totais_plano(linhas: list) -> dict:
+    """Somas de planeada/feita/falta das linhas do pop-up.
+
+    Cada soma só existe se houver pelo menos um valor na coluna — somar zeros
+    de colunas vazias mostraria «0» onde a verdade é «não se sabe».
+    """
+    totais: dict = {"planeada": None, "feita": None, "falta": None,
+                    "parcial": len(linhas) >= 500}
+    colunas = {"planeada": "quantity_planned", "feita": "quantity_made",
+               "falta": "remaining_quantity"}
+    for chave, col in colunas.items():
+        valores = [l[col] for l in linhas if l.get(col) is not None]
+        if valores:
+            totais[chave] = float(sum(valores))
+    return totais
+
+
 @app.get("/sheet/{uid}/plano/{row_index}", response_class=HTMLResponse)
-def sheet_plano_perfil(request: Request, uid: str, row_index: int):
+def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str = ""):
     """As referências do plano para a chave OF + Perfil de uma linha.
 
     Recebe a linha e não a chave: é o servidor que resolve a OF (incluindo a
     herdada da linha de cima) e a forma canónica do perfil. Se fosse o template
     a montar `?of=&perfil=`, teria de conhecer as convenções do plano e podia
     perguntar por uma chave diferente daquela com que o motor cruzou.
+
+    `origem=perf_comp` = o clique veio da marca de perfil completo, que afirma
+    «fiz a quantidade toda»: o pop-up junta os totais e avisa se o plano ainda
+    mostra falta.
     """
     conn = _conn()
     try:
@@ -873,7 +894,8 @@ def sheet_plano_perfil(request: Request, uid: str, row_index: int):
         raise HTTPException(404)
 
     ctx: dict = {"row_index": row_index, "of": None, "perfil": None,
-                 "linhas": [], "perfis": [], "erro": None, "plano": {}}
+                 "linhas": [], "perfis": [], "erro": None, "plano": {},
+                 "origem_perf_comp": origem == "perf_comp", "totais": None}
     try:
         index = get_index(template.index_loader) if template.index_loader else None
         if index is None:
@@ -900,7 +922,9 @@ def sheet_plano_perfil(request: Request, uid: str, row_index: int):
             ctx["plano"] = loaders.plan_snapshot_info()
             if perfil:
                 ctx["linhas"] = loaders.fetch_profile_lines(of, perfil)
-            if not ctx["linhas"]:
+            if ctx["linhas"]:
+                ctx["totais"] = _totais_plano(ctx["linhas"])
+            else:
                 # Sem correspondência mostra-se o que a obra tem mesmo: o caso
                 # comum é o perfil estar escrito com uma medida trocada.
                 ctx["perfis"] = loaders.fetch_profiles_in_of(of)

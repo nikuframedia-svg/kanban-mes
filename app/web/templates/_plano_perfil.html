@@ -23,6 +23,16 @@
   <div class="alert warn"><span>{{ erro }}</span></div>
 
 {% elif linhas %}
+  {# A marca PERF. COMP. afirma «fiz a quantidade toda»; se o plano ainda tem
+     falta, ou a marca é prematura ou o plano está velho — em ambos os casos
+     merece um olhar, não uma certeza. #}
+  {% if origem_perf_comp and totais and totais.falta is not none and totais.falta > 0 %}
+    <div class="alert warn" style="margin-bottom:10px;">
+      <span>Linha marcada como PERF. COMP., mas o plano ainda mostra
+        <b>{{ '%g' | format(totais.falta) }}</b> por fazer neste perfil —
+        o plano pode estar desatualizado (idade acima).</span>
+    </div>
+  {% endif %}
   <div class="muted tiny" style="margin-bottom:6px;">
     {{ linhas | length }} referência(s){% if linhas | length >= 500 %} — a mostrar as primeiras 500{% endif %}.
     <input type="text" class="kv-select" placeholder="filtrar…"
@@ -53,6 +63,20 @@
         </tr>
         {% endfor %}
       </tbody>
+      {# tfoot e não uma linha do tbody: o filtro só varre `tbody tr`, e os
+         totais têm de sobreviver ao filtro. #}
+      {% if origem_perf_comp and totais %}
+      <tfoot>
+        <tr>
+          <td><b>Totais{{ ' (parciais)' if totais.parcial else '' }}</b></td>
+          <td></td>
+          <td class="mono tnum"><b>{{ '%g' | format(totais.planeada) if totais.planeada is not none else '—' }}</b></td>
+          <td class="mono tnum"><b>{{ '%g' | format(totais.feita) if totais.feita is not none else '—' }}</b></td>
+          <td class="mono tnum"><b>{{ '%g' | format(totais.falta) if totais.falta is not none else '—' }}</b></td>
+          <td></td><td></td><td></td>
+        </tr>
+      </tfoot>
+      {% endif %}
     </table>
   </div>
 
