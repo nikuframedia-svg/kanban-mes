@@ -121,9 +121,12 @@ def test_aspas_de_idem_herdam_e_nao_cortam_o_bloco():
 
 def test_variantes_de_aspas_e_idem_sao_reconhecidas():
     from app.matching.carryover import is_ditto
-    for mark in ('"', "”", "“", "„", "''", "=", "idem", "IDEM", " Idem "):
+    # «,,» é a aspa escrita rente à linha (folha real 6c9c634e: 5 linhas
+    # boas caíram para weak porque a vírgula dupla contava como valor)
+    for mark in ('"', "”", "“", "„", "''", "=", ",", ",,", ", ,",
+                 "idem", "IDEM", " Idem "):
         assert is_ditto(mark), mark
-    for value in ("263323", "", None, "x", "C.M.E."):
+    for value in ("263323", "", None, "x", "C.M.E.", "1,5"):
         assert not is_ditto(value), value
 
 

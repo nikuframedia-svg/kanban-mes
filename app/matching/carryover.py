@@ -25,11 +25,12 @@ from . import similarity as sim
 CARRY_FIELDS = ("of", "ov", "cliente", "perfil")
 
 # Marcas de «idem» que os operadores usam em vez de deixar em branco: aspas
-# (nas várias grafias que o OCR devolve), o sinal de igual, a palavra escrita.
-# Sem isto, uma célula com «"» contava como valor — não batia com a OF do
-# bloco, CORTAVA a herança, e as linhas seguintes herdavam aspas literais
-# (folha real fd88081e: 5 linhas boas perdidas).
-_DITTO_MARKS = frozenset({'"', "''", "”", "“", "„", "〃", "="})
+# (nas várias grafias que o OCR devolve), vírgulas duplas (aspas rentes à
+# linha — folha real 6c9c634e, transcritas «,,»), o sinal de igual, a palavra
+# escrita. Sem isto, uma célula com «"» contava como valor — não batia com a
+# OF do bloco, CORTAVA a herança, e as linhas seguintes herdavam aspas
+# literais (folha real fd88081e: 5 linhas boas perdidas).
+_DITTO_MARKS = frozenset({'"', "''", "”", "“", "„", "〃", "=", ",", ",,", ", ,"})
 
 
 def is_ditto(value: object) -> bool:
