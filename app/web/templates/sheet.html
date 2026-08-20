@@ -192,7 +192,7 @@ setTimeout(function () {
           <input type="text" class="cell-input{% if herdado %} is-inherited{% endif %}" name="value"
                  value="{{ value if value is not none else '' }}"
                  {% if herdado %}placeholder="{{ herdado }}"
-                 title="Herdado da linha {{ cell.inherited_from + 1 }} — a folha não repete o valor"{% endif %}
+                 title="Herdado da linha {{ cell.inherited_from + 1 }} — já vale para o cruzamento; só escreves se quiseres OUTRO valor"{% endif %}
                  {% if numeric %}inputmode="decimal"{% endif %}
                  onchange="this.form.submit()">
         </form>{{ snap_mark(field_path) }}

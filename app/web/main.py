@@ -1088,6 +1088,12 @@ def sheet_edit(uid: str, field_path: str = Form(...), value: str = Form(""),
             section, fname = m.group("section"), m.group("sfield")
             old = (data.get(section) or {}).get(fname)
             data.setdefault(section, {})[fname] = value_clean
+        # Edição que não muda nada (ex.: focar a célula e sair) não é uma
+        # decisão humana: gravá-la marcava o campo como inviolável e
+        # desligava a herança sem o revisor querer.
+        old_clean = str(old).strip() or None if old is not None else None
+        if old_clean == value_clean:
+            return RedirectResponse(f"/sheet/{uid}", status_code=303)
         # controlo otimista: a revisão vem do formulário — se a folha mudou
         # desde que a página foi carregada, recusa em vez de sobrescrever
         if not db.save_sheet_data(conn, uid, data, revision):

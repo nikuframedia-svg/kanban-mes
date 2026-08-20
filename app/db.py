@@ -313,8 +313,13 @@ def record_edit(conn: sqlite3.Connection, uid: str, field_path: str,
 def human_fields_by_row(conn: sqlite3.Connection, uid: str) -> dict[int, set[str]]:
     """Campos por linha já corrigidos por humanos — invioláveis para o motor."""
     out: dict[int, set[str]] = {}
+    # `old IS NOT new` exclui edições no-op (ex.: gravar vazio numa célula já
+    # vazia, o clique-e-Enter distraído do revisor): um no-op não é uma
+    # decisão, e contá-lo desligava a herança daquela célula para sempre
+    # (caso real 1fb333b28059, cliente None→None três vezes seguidas).
     for r in conn.execute(
-        "SELECT field_path FROM edits WHERE sheet_uid = ? AND source = 'human'", (uid,)
+        "SELECT field_path FROM edits WHERE sheet_uid = ? AND source = 'human' "
+        "AND old_value IS NOT new_value", (uid,)
     ).fetchall():
         path = r["field_path"]
         if path.startswith("rows["):
