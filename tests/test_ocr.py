@@ -209,6 +209,10 @@ def test_get_provider_encadeia_pelas_chaves(monkeypatch):
     from app.ocr import provider as mod
 
     class S:
+        qwen_url = ""
+        qwen_model = "qwen3.5:9b"
+        qwen_timeout_s = 600.0
+        qwen_no_think = True
         gemini_api_key = "g"
         ocr_model = "m"
         anthropic_api_key = "a"
@@ -228,3 +232,17 @@ def test_get_provider_encadeia_pelas_chaves(monkeypatch):
 
     S.anthropic_api_key = ""
     assert mod.get_provider().name == "manual"
+
+    # Qwen local definido → primário, com a cadeia cloud atrás
+    S.qwen_url = "http://localhost:11434"
+    S.gemini_api_key = "g"
+    S.anthropic_api_key = "a"
+    p = mod.get_provider()
+    assert p.name == "qwen"
+    assert p.fallback.name == "gemini" and p.fallback.fallback.name == "claude"
+
+    # Qwen sem nenhuma chave cloud: primário sem rede, sem fallback
+    S.gemini_api_key = ""
+    S.anthropic_api_key = ""
+    p = mod.get_provider()
+    assert p.name == "qwen" and p.fallback is None

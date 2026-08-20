@@ -57,8 +57,26 @@
       {% block topbar_actions %}{% endblock %}
       {# Export no formato da Metalogalva 2 (tabela plana CPIS) — é este que
          os sistemas a jusante consomem. O dropdown dá o filtro de período. #}
+      {# Export BaseDados (11 colunas, Modelo_BaseDados_PerfisCantoneiras) —
+         o formato comum aos dois setores kanban. #}
       <details style="position:relative;">
-        <summary class="btn primary" style="list-style:none; cursor:pointer;">⬇ Exportar CPIS</summary>
+        <summary class="btn primary" style="list-style:none; cursor:pointer;">⬇ Exportar BaseDados</summary>
+        <form method="get" action="/export/basedados"
+              style="position:absolute; right:0; top:calc(100% + 6px); z-index:60;
+                     background:var(--surface); border:1px solid var(--rule-2);
+                     border-radius:10px; padding:14px; display:grid; gap:8px;
+                     min-width:230px; box-shadow:0 8px 24px rgba(0,0,0,.12);">
+          <label class="tiny muted">De
+            <input type="date" name="de" class="kv-select" style="width:100%;"></label>
+          <label class="tiny muted">Até
+            <input type="date" name="ate" class="kv-select" style="width:100%;"></label>
+          <label class="tiny muted" style="display:flex; gap:6px; align-items:center;">
+            <input type="checkbox" name="validadas" value="1"> Apenas validadas</label>
+          <button type="submit" class="btn primary">Descarregar</button>
+        </form>
+      </details>
+      <details style="position:relative;">
+        <summary class="btn" style="list-style:none; cursor:pointer;">⬇ Exportar CPIS</summary>
         <form method="get" action="/export/cpis"
               style="position:absolute; right:0; top:calc(100% + 6px); z-index:60;
                      background:var(--surface); border:1px solid var(--rule-2);

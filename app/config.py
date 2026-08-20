@@ -28,8 +28,21 @@ class Settings:
     # Staging local — trabalho em curso nunca toca no Postgres
     data_dir: Path = field(default_factory=lambda: Path(_env("MES_DATA_DIR", str(BASE_DIR / "data"))))
 
+    # OCR local — Ollama a servir um Qwen de visão na GPU do PC da fábrica.
+    # Com MES_QWEN_URL definido passa a ser o motor PRINCIPAL (sem quotas,
+    # imagens nunca saem da infraestrutura); vazio = inativo. Ativa-se na
+    # migração para o PC da empresa: MES_QWEN_URL=http://localhost:11434.
+    qwen_url: str = field(default_factory=lambda: _env("MES_QWEN_URL"))
+    qwen_model: str = field(default_factory=lambda: _env("MES_QWEN_MODEL", "qwen3.5:9b"))
+    # 600 s: uma GPU fria a carregar o modelo demora; o keep_alive=-1 do
+    # provider mantém-no residente a partir da primeira folha.
+    qwen_timeout_s: float = field(
+        default_factory=lambda: float(_env("MES_QWEN_TIMEOUT_S", "600")))
+    qwen_no_think: bool = field(
+        default_factory=lambda: _env("MES_QWEN_NO_THINK", "1").lower() in ("1", "true", "yes"))
+
     # OCR — Gemini (free tier UE: dados não usados para treino). Sem chave, modo manual.
-    # Primário com quota free decente; o provider tem fallbacks se esgotar.
+    # Fallback cloud quando o Qwen local está inativo ou em baixo.
     gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY"))
     ocr_model: str = field(default_factory=lambda: _env("MES_OCR_MODEL", "gemini-3-flash-preview"))
 
@@ -48,6 +61,15 @@ class Settings:
     # o POST /ingest/drive vai lá buscá-los sozinho.
     drive_dir: Path = field(default_factory=lambda: Path(
         _env("MES_DRIVE_DIR", str(Path.home() / "projects" / "DATARESEARCHMTG"))))
+
+    # Que PDFs do Drive são deste setor. Desde 14-08 o scanner deixou de pôr a
+    # máquina no nome («18-08-2026.PDF») e o padrão antigo (…rapid…) deixou de
+    # apanhar os lotes novos — o default aceita qualquer PDF datado que NÃO
+    # esteja marcado como do setor de perfis (serrote/vanguard/mtg2, que são da
+    # app kanban-mes-mtg2 na porta 8101).
+    kanban_pdf_re: str = field(default_factory=lambda: _env(
+        "MES_KANBAN_PDF_RE",
+        r"^\d{2}-\d{2}-\d{4}(?!.*(serrote|vanguard|mtg2)).*\.pdf$"))
 
     host: str = field(default_factory=lambda: _env("MES_HOST", "127.0.0.1"))
     # 8000 é da bridge do PP1 neste servidor — o MES vive na 8100

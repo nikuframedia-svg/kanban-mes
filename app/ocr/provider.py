@@ -1,11 +1,15 @@
 """OCR das folhas kanban.
 
-Três providers:
+Quatro providers:
+- QwenOcrProvider — motor LOCAL (Ollama a servir qwen3.5:9b na GPU do PC da
+  fábrica). Ativa-se com MES_QWEN_URL e passa a ser o principal: sem quotas e
+  as imagens nunca saem da infraestrutura. Transporte e truques portados do
+  sistema OCR da Metalogalva (ocr6.py), comprovado em produção.
 - GeminiOcrProvider — lê a foto com a Gemini API e devolve {header, rows, footer}
   em JSON forçado por schema. Transcreve fielmente: o OCR NÃO corrige nada;
   correções são trabalho do motor de cruzamento + revisão humana.
 - ClaudeOcrProvider — último recurso PAGO (API Claude), usado apenas quando a
-  cadeia Gemini inteira falhou. Só existe se houver ANTHROPIC_API_KEY no
+  cadeia anterior inteira falhou. Só existe se houver ANTHROPIC_API_KEY no
   ambiente; sem chave, o comportamento é exatamente o de sempre.
 - ManualEntryProvider — sem chave configurada (ou sem foto), folha vazia para
   preenchimento manual. O resto da app funciona exatamente da mesma forma.
@@ -170,6 +174,216 @@ def _union_fields(templates: dict[str, KanbanTemplate], getter) -> tuple[str, ..
     for t in templates.values():
         out.extend(f for f in getter(t) if f not in out)
     return tuple(out)
+
+
+# ── Qwen local (Ollama) ──────────────────────────────────────────────────────
+# Transporte e parse portados do sistema OCR original da Metalogalva
+# (nikuframedia-svg/ocr, ocr6.py) — lições pagas em fábrica que não vale a
+# pena reaprender:
+# - endpoint NATIVO /api/generate (a camada OpenAI-compat e o json mode do
+#   Ollama crashavam o runner com estes modelos): JSON só por prompt + parse
+#   tolerante;
+# - o Qwen2.5/3.5-VL agrupa patches 14x14 em blocos 2x2 → AMBAS as dimensões
+#   da imagem têm de ser múltiplas de 28, senão o GGML dá assert e mata o
+#   runner; e como o assert dispara de forma intermitente perto de 1288,
+#   há uma escada de tamanhos 1288→1120→1008;
+# - "think": false nem sempre é honrado por builds custom → reforça-se com
+#   a convenção Qwen «/no_think» no fim do prompt (cinto e suspensórios).
+
+_QWEN_STRIDE = 28
+_QWEN_EDGES = (1288, 1120, 1008)   # 46/40/36 × 28
+_QWEN_NUM_PREDICT = 8192
+
+
+def _round_to_stride(value: int) -> int:
+    rounded = ((value + _QWEN_STRIDE // 2) // _QWEN_STRIDE) * _QWEN_STRIDE
+    return max(_QWEN_STRIDE, rounded)
+
+
+def _qwen_image_b64(image_path: Path, max_edge: int) -> str:
+    """Imagem → JPEG base64 com ambas as dimensões múltiplas de 28."""
+    import io
+
+    from PIL import Image
+
+    with Image.open(image_path) as raw:
+        rgb = raw.convert("RGB")
+    scale = min(1.0, max_edge / max(rgb.size))
+    target = (_round_to_stride(round(rgb.size[0] * scale)),
+              _round_to_stride(round(rgb.size[1] * scale)))
+    if target != rgb.size:
+        rgb = rgb.resize(target, Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    rgb.save(buf, format="JPEG", quality=90)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _salvage_truncated_json(snippet: str) -> dict | None:
+    """Recupera um JSON cortado a meio (modelo bateu no teto de tokens a meio
+    das linhas). Fecha os containers ainda abertos e tenta parsar; se falhar,
+    recua até ao `}` anterior (descarta a linha incompleta) e repete. Devolve
+    o JSON com o máximo de linhas completas, ou None."""
+    best = snippet
+    while best:
+        stack: list[str] = []
+        in_str = esc = False
+        balanced = True
+        for ch in best:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = not in_str
+            elif not in_str:
+                if ch in "{[":
+                    stack.append("}" if ch == "{" else "]")
+                elif ch in "}]":
+                    if not stack:
+                        balanced = False
+                        break
+                    stack.pop()
+        if balanced and not in_str:
+            candidate = best.rstrip().rstrip(",") + "".join(reversed(stack))
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+        cut = best.rfind("}")
+        if cut == -1:
+            return None
+        best = best[:cut]
+    return None
+
+
+def _qwen_json(raw: str) -> dict:
+    """Remove <think>…</think> e fences de markdown, e extrai o JSON.
+    Levanta ValueError se não houver JSON recuperável."""
+    import re
+
+    text = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    # bloco <think> SEM fecho (o modelo divagou até ao teto sem o fechar):
+    # o regex acima não o apanha; salta o prefixo até ao primeiro '{'
+    if "<think>" in text and "{" in text:
+        text = text[text.index("{"):]
+    if "```" in text:
+        for part in text.split("```"):
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:].strip()
+            if part.startswith("{"):
+                text = part
+                break
+    s, e = text.find("{"), text.rfind("}") + 1
+    if s == -1 or e <= s:
+        raise ValueError("resposta sem delimitadores JSON")
+    try:
+        return json.loads(text[s:e])
+    except json.JSONDecodeError:
+        salvaged = _salvage_truncated_json(text[s:])
+        if salvaged is not None:
+            return salvaged
+        raise ValueError("JSON irrecuperável na resposta") from None
+
+
+class QwenOcrProvider:
+    """Motor local: Ollama a servir um modelo de visão Qwen na GPU da fábrica.
+
+    Sem schema no transporte — a resposta é texto que se limpa com
+    `_qwen_json` e depois passa pelo mesmo `_clean_extraction` dos outros
+    motores (campos a mais caem, campos em falta ficam None, `kind` inválido
+    resolve para a primeira face).
+    """
+
+    name = "qwen"
+
+    def __init__(self, url: str, model: str, timeout_s: float = 600.0,
+                 no_think: bool = True, fallback: "OcrProvider | None" = None):
+        self.url = url.rstrip("/")
+        self.model = model
+        self.timeout_s = timeout_s
+        self.no_think = no_think
+        self.fallback = fallback
+
+    def _with_fallback(self, method: str, fn, *args):
+        try:
+            return fn(*args)
+        except OcrError as exc:
+            if self.fallback is None:
+                raise
+            try:
+                return getattr(self.fallback, method)(*args)
+            except OcrError as exc2:
+                raise OcrError(f"{exc}; fallback: {exc2}") from exc2
+
+    def _call(self, image_b64: str, prompt: str) -> str:
+        prompt_text = f"{prompt}\n/no_think" if self.no_think else prompt
+        payload: dict = {
+            "model": self.model,
+            "prompt": prompt_text,
+            "images": [image_b64],
+            "stream": False,
+            "keep_alive": -1,      # modelo residente na GPU entre folhas
+            "options": {"temperature": 0, "num_predict": _QWEN_NUM_PREDICT},
+        }
+        if self.no_think:
+            payload["think"] = False
+        req = urllib.request.Request(
+            f"{self.url}/api/generate",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "ignore")[:300]
+            raise OcrError(f"Qwen [{self.model}] HTTP {exc.code}: {detail}") from exc
+        except (urllib.error.URLError, OSError, http.client.HTTPException,
+                TimeoutError, json.JSONDecodeError) as exc:
+            raise OcrError(f"Qwen [{self.model}] indisponível: {exc}") from exc
+        text = data.get("response")
+        if not text:
+            raise OcrError(f"Qwen [{self.model}]: resposta vazia")
+        return text
+
+    def _request_json(self, image_path: Path, prompt: str) -> dict:
+        """Escada de tamanhos × 2 tentativas cada (máx. 6 chamadas): o retry
+        com a MESMA imagem recupera JSON malformado ocasional (estado de
+        sampling), e o tamanho menor contorna o assert intermitente do GGML."""
+        if not image_path or not image_path.is_file():
+            raise OcrError(f"Imagem não encontrada: {image_path}")
+        last_error: Exception | None = None
+        for edge in _QWEN_EDGES:
+            image_b64 = _qwen_image_b64(image_path, edge)
+            for _attempt in (1, 2):
+                try:
+                    return _qwen_json(self._call(image_b64, prompt))
+                except OcrError as exc:
+                    last_error = exc
+                except ValueError as exc:
+                    last_error = OcrError(f"Qwen [{self.model}]: {exc}")
+                time.sleep(1.0)
+        raise last_error or OcrError("Qwen: erro desconhecido")
+
+    def extract(self, image_path: Path, template: KanbanTemplate) -> dict:
+        return self._with_fallback("extract", self._extract, image_path, template)
+
+    def _extract(self, image_path: Path, template: KanbanTemplate) -> dict:
+        data = self._request_json(image_path, _extraction_prompt(template))
+        return _clean_extraction(data, template)
+
+    def extract_auto(self, image_path: Path,
+                     templates: dict[str, KanbanTemplate]) -> tuple[str, dict]:
+        return self._with_fallback("extract_auto", self._extract_auto,
+                                   image_path, templates)
+
+    def _extract_auto(self, image_path: Path,
+                      templates: dict[str, KanbanTemplate]) -> tuple[str, dict]:
+        data = self._request_json(image_path, _auto_extraction_prompt(templates))
+        kind = _resolve_kind(data, templates)
+        return kind, _clean_extraction(data, templates[kind])
 
 
 class GeminiOcrProvider:
@@ -481,9 +695,17 @@ class ClaudeOcrProvider:
 def get_provider() -> OcrProvider:
     claude = (ClaudeOcrProvider(settings.anthropic_api_key, settings.claude_ocr_model)
               if settings.anthropic_api_key else None)
-    if settings.gemini_api_key:
-        return GeminiOcrProvider(settings.gemini_api_key, settings.ocr_model,
-                                 fallback=claude)
+    gemini = (GeminiOcrProvider(settings.gemini_api_key, settings.ocr_model,
+                                fallback=claude)
+              if settings.gemini_api_key else None)
+    if settings.qwen_url:
+        # motor local primário; se o PC/GPU estiver em baixo, a cadeia cloud
+        # (Gemini→Claude) apanha o trabalho e as folhas nunca ficam por ler
+        return QwenOcrProvider(settings.qwen_url, settings.qwen_model,
+                               settings.qwen_timeout_s, settings.qwen_no_think,
+                               fallback=gemini or claude)
+    if gemini is not None:
+        return gemini
     if claude is not None:
         return claude          # só há chave Claude: passa a ser o motor
     return ManualEntryProvider()

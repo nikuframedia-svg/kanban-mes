@@ -553,8 +553,10 @@ def upload_get_redirect():
 
 
 # PDFs de kanban que o scanner da fábrica põe no Drive: «06-08-2026 - Rapid20T 1.pdf»,
-# «10-08-2026_Rapid 20t 1_2.PDF»… O padrão comum é a data e a máquina.
-_KANBAN_PDF_RE = re.compile(r"^\d{2}-\d{2}-\d{4}.*rapid.*\.pdf$", re.IGNORECASE)
+# «18-08-2026.PDF»… O padrão vem da config (MES_KANBAN_PDF_RE): o scanner
+# mudou a convenção de nomes a 14-08 e o padrão antigo, preso a «rapid»,
+# deixava os lotes novos por ingerir.
+_KANBAN_PDF_RE = re.compile(settings.kanban_pdf_re, re.IGNORECASE)
 
 # caminhos de célula aceites no /edit; nomes de campo só minúsculas/underscore
 _FIELD_PATH_RE = re.compile(
@@ -748,6 +750,52 @@ def export_cpis(de: str = "", ate: str = "", operador: str = "", validadas: int 
     cpis_rows.sort(key=lambda t: t[:4])
     content = cpis_export.build_cpis_workbook([t[4] for t in cpis_rows])
     filename = cpis_export.cpis_filename_for(de or None, ate or None, bool(validadas))
+    return Response(
+        content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/export/basedados")
+def export_basedados(de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
+    """A tabela plana no formato Modelo_BaseDados_PerfisCantoneiras.xlsx
+    (11 colunas), comum aos dois setores kanban. Mesmos filtros do CPIS."""
+    conn = _conn()
+    try:
+        sheets = db.list_sheets(conn, status="validated" if validadas else None)
+        bd_rows: list[tuple] = []
+        for meta in sheets:
+            if "paragens" in meta["template_name"]:
+                continue
+            sheet = db.get_sheet(conn, meta["uid"])
+            if not sheet or not sheet.get("sheet_data"):
+                continue
+            header = sheet["sheet_data"].get("header") or {}
+            if operador and str(header.get("operador") or "").strip() != operador:
+                continue
+            try:
+                iso = pg_store.normalize_sheet_date(header.get("data"))
+            except pg_store.InvalidSheetDate:
+                iso = None
+            if de and (not iso or iso < de):
+                continue
+            if ate and (not iso or iso > ate):
+                continue
+            cross = sheet.get("cross_check") or {}
+            cross_rows = {r["row_index"]: r for r in cross.get("rows", [])}
+            op = cross.get("operator")
+            for i, row in enumerate(sheet["sheet_data"].get("rows") or []):
+                if not any(v is not None and str(v).strip() for v in row.values()):
+                    continue
+                bd_rows.append(
+                    (iso or "9999", str(header.get("operador") or ""), meta["uid"], i,
+                     cpis_export.basedados_row_for(sheet, row, cross_rows.get(i), op)))
+    finally:
+        conn.close()
+    bd_rows.sort(key=lambda t: t[:4])
+    content = cpis_export.build_basedados_workbook([t[4] for t in bd_rows])
+    filename = cpis_export.basedados_filename_for(de or None, ate or None, bool(validadas))
     return Response(
         content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

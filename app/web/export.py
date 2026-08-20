@@ -180,3 +180,110 @@ def cpis_filename_for(de: str | None, ate: str | None, validadas: bool) -> str:
         periodo = "sempre"
     sufixo = "_validadas" if validadas else ""
     return f"MigracaoNikufraCPIS_{periodo}{sufixo}.xlsx"
+
+
+# ---------------------------------------------------------------------------
+# Export «BaseDados» — o formato Modelo_BaseDados_PerfisCantoneiras.xlsx
+# pedido pelo Luís (19/08): folha única «Folha1», 11 colunas, igual nos dois
+# setores (cantoneiras MTG3 e perfis MTG2). Cod. Maquina segue vazio até
+# existir a tabela oficial de códigos SAP das máquinas.
+# ---------------------------------------------------------------------------
+
+# (chave, cabeçalho) — ordem e grafia EXATAS do ficheiro modelo
+BASEDADOS_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("data", "Data"),
+    ("operador_id", "OperadorID"),
+    ("nome_operador", "Nome Operador"),
+    ("cod_maquina", "Cod. Maquina"),
+    ("maquina", "Maquina"),
+    ("ov", "OV"),
+    ("of", "OF"),
+    ("perfil", "Perfil"),
+    ("modelo", "Modelo"),
+    ("qtd_un", "Qtd [un.]"),
+    ("qtd_m", "Qtd [m]"),
+)
+
+_BASEDADOS_WIDTHS = (12, 12, 24, 12, 18, 12, 12, 16, 18, 10, 10)
+
+
+def _efetivo(row: dict, cells: dict, field: str) -> str:
+    """Valor efetivo de uma célula: o escrito, senão o herdado, senão a
+    proposta do cross — o mesmo critério do export CPIS."""
+    value = str(row.get(field) or "").strip()
+    cell = cells.get(field) or {}
+    if not value:
+        value = str(cell.get("inherited") or "").strip()
+    if not value:
+        value = str(cell.get("proposal") or "").strip()
+    return value
+
+
+def basedados_row_for(sheet: dict, row: dict, cr: dict | None,
+                      operator: dict | None) -> dict:
+    """Uma linha de kanban → uma linha BaseDados (11 colunas)."""
+    header = (sheet.get("sheet_data") or {}).get("header") or {}
+    cells = {c["field"]: c for c in (cr or {}).get("cells", [])}
+
+    try:
+        data = dt.date.fromisoformat(normalize_sheet_date(header.get("data")))
+    except (InvalidSheetDate, ValueError):
+        data = str(header.get("data") or "").strip() or None
+
+    op = operator or {}
+    return {
+        "data": data,
+        "operador_id": op.get("cod") or str(header.get("n_operador") or "").strip() or None,
+        "nome_operador": op.get("name") or str(header.get("operador") or "").strip() or None,
+        "cod_maquina": None,
+        "maquina": str(header.get("setor_maquina") or "").strip() or None,
+        "ov": sim.strip_ref_prefix(_efetivo(row, cells, "ov")) or None,
+        "of": sim.strip_ref_prefix(_efetivo(row, cells, "of")) or None,
+        "perfil": _efetivo(row, cells, "perfil") or None,
+        "modelo": _efetivo(row, cells, "modelo") or None,
+        "qtd_un": _num(row.get("qtd") or row.get("repeticoes")),
+        "qtd_m": (cr or {}).get("line_meters"),
+    }
+
+
+def build_basedados_workbook(rows: list[dict]) -> bytes:
+    """A folha «Folha1» com o cabeçalho exato do ficheiro modelo."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Folha1"
+
+    for ci, (_, label) in enumerate(BASEDADOS_COLUMNS, start=1):
+        cell = ws.cell(row=1, column=ci, value=label)
+        cell.font = _FONT_HEADER
+        cell.fill = _FILL_HEADER
+        cell.border = _BORDER
+
+    for ri, bd in enumerate(rows, start=2):
+        for ci, (key, _) in enumerate(BASEDADOS_COLUMNS, start=1):
+            value = neutralize_xlsx(bd.get(key))
+            cell = ws.cell(row=ri, column=ci, value=value)
+            cell.font = _FONT_BASE
+            cell.border = _BORDER
+            if key == "data" and isinstance(value, dt.date):
+                cell.number_format = "DD-MM-YYYY"
+            elif key == "qtd_m":
+                cell.number_format = "0.00"
+
+    for ci, width in enumerate(_BASEDADOS_WIDTHS, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=ci).column_letter].width = width
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def basedados_filename_for(de: str | None, ate: str | None, validadas: bool) -> str:
+    if de and ate and de == ate:
+        periodo = f"1-dia_{de}"
+    elif de or ate:
+        periodo = f"{de or 'inicio'}_{ate or 'hoje'}"
+    else:
+        periodo = "sempre"
+    sufixo = "_validadas" if validadas else ""
+    return f"BaseDados_{periodo}{sufixo}.xlsx"

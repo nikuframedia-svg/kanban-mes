@@ -36,7 +36,18 @@ systemctl --user stop kanban-tunnel     # desligar o acesso público
 Além de `GEMINI_API_KEY` / `MES_OCR_MODEL`:
 
 ```bash
-# Último recurso PAGO quando toda a cadeia Gemini falha (quota, 503, outage).
+# OCR LOCAL (Qwen na GPU do PC da fábrica, via Ollama). Ativar SÓ na
+# migração para o PC da empresa: com MES_QWEN_URL definido, o Qwen passa a
+# motor PRINCIPAL (sem quotas, imagens nunca saem da infraestrutura) e a
+# cadeia Gemini→Claude fica como fallback quando o PC/GPU estiver em baixo.
+# Antes de confiar no primário local, correr o benchmark das 7 folhas do
+# teste verídico de 19/08 (ground truth visual) Qwen vs Gemini.
+#MES_QWEN_URL=http://localhost:11434
+#MES_QWEN_MODEL=qwen3.5:9b
+#MES_QWEN_TIMEOUT_S=600
+#MES_QWEN_NO_THINK=1
+
+# Último recurso PAGO quando toda a cadeia anterior falha (quota, 503, outage).
 # Sem chave, este elo não existe e o comportamento é o de sempre.
 # Custo ≈ 0,6 cêntimos por folha, só nas falhas.
 #ANTHROPIC_API_KEY=
