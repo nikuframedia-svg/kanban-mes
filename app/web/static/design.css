@@ -781,6 +781,32 @@ label.inline {
   border: 1px solid var(--rule);
 }
 
+/* Proveniência é auditoria do scan. O aviso explícito impede que uma data no
+   nome do PDF seja confundida com a data manuscrita da produção. */
+.source-document {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.source-document-label {
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--ink-4);
+}
+.source-document-note {
+  flex-basis: 100%;
+  color: var(--ink-4);
+}
+
 /* Transcrição crua do OCR — tabela mais apertada que a .tbl normal. */
 .raw-table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .raw-table th, .raw-table td {
@@ -837,6 +863,65 @@ input.cell-input.is-inherited::placeholder {
   font-size: 13px;
 }
 .field input.cell-input:focus { background: var(--surface-2); }
+
+/* Cabeçalho disposto como a folha: identidade na primeira faixa, máquina e
+   turno na segunda, data na terceira. Cada campo recebe o mesmo léxico de
+   cor do cruzamento das linhas. */
+.header-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(130px, 1fr);
+  grid-template-areas:
+    "operador numero"
+    "maquina turno"
+    "data turno";
+  gap: 10px;
+}
+.header-field {
+  min-width: 0;
+  padding: 12px 12px 10px 18px;
+  border-radius: 6px;
+}
+.header-field-operador { grid-area: operador; }
+.header-field-n_operador { grid-area: numero; }
+.header-field-setor_maquina { grid-area: maquina; }
+.header-field-data { grid-area: data; }
+.header-field-turno { grid-area: turno; align-self: stretch; }
+.header-field > .lbl {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.header-field input.cell-input { background: rgba(255, 255, 255, .62); }
+.header-check-message {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.header-proposal,
+.header-applied,
+.header-protected,
+.header-sources {
+  margin-top: 3px;
+  font-size: 10px;
+}
+.header-proposal { color: var(--crit); }
+.header-proposal a { color: var(--crit); font-weight: 600; text-decoration: underline; }
+.header-applied { color: var(--ok); font-weight: 600; }
+.header-protected { color: var(--info); font-weight: 600; }
+.header-sources { color: var(--ink-4); font-family: var(--font-mono); }
+
+@media (max-width: 640px) {
+  .header-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas: "operador" "numero" "maquina" "data" "turno";
+  }
+}
 
 /* Estado vazio dentro de um cartão. */
 .empty { padding: 40px 20px; text-align: center; color: var(--ink-4); }

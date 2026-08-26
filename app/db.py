@@ -155,26 +155,41 @@ def mark_pending(conn: sqlite3.Connection, uid: str) -> bool:
     return cur.rowcount == 1
 
 
-def set_template(conn: sqlite3.Connection, uid: str, template_name: str) -> None:
-    """Reclassificação (frente/verso) pelo worker de OCR — só antes de validada."""
-    conn.execute(
-        "UPDATE sheets SET template_name = ? WHERE uid = ? AND status != 'validated'",
+def set_template(conn: sqlite3.Connection, uid: str, template_name: str) -> bool:
+    """Reclassificação isolada, apenas enquanto a folha continua pendente."""
+    cur = conn.execute(
+        "UPDATE sheets SET template_name = ? WHERE uid = ? AND status = 'pending'",
         (template_name, uid),
     )
     conn.commit()
+    return cur.rowcount == 1
 
 
-def set_extraction(conn: sqlite3.Connection, uid: str, extraction: dict) -> bool:
+def set_extraction(conn: sqlite3.Connection, uid: str, extraction: dict,
+                   template_name: str | None = None) -> bool:
     """Grava a transcrição — SÓ em folhas ainda pendentes.
+
+    ``template_name`` cobre a reclassificação frente/verso do extract_auto:
+    escolher o template e gravar a transcrição na MESMA escrita impede uma
+    folha reclassificada de ficar com a transcrição da face errada se o
+    processo cair entre as duas operações.
 
     Se o revisor começou a editar enquanto o OCR corria (status já saiu de
     'pending'), gravar por cima apagava o trabalho dele. Devolve False nesse
     caso: o worker desiste e a folha fica como o humano a tem.
     """
+    if template_name is None:
+        row = conn.execute(
+            "SELECT template_name FROM sheets WHERE uid = ?", (uid,)
+        ).fetchone()
+        if row is None:
+            return False
+        template_name = row["template_name"]
     cur = conn.execute(
-        "UPDATE sheets SET raw_extraction = ?, sheet_data = ?, status = 'extracted', "
+        "UPDATE sheets SET template_name = ?, raw_extraction = ?, sheet_data = ?, "
+        "status = 'extracted', "
         "extracted_at = ?, revision = revision + 1 WHERE uid = ? AND status = 'pending'",
-        (json.dumps(extraction, ensure_ascii=False, default=str),
+        (template_name, json.dumps(extraction, ensure_ascii=False, default=str),
          json.dumps(extraction, ensure_ascii=False, default=str), now_iso(), uid),
     )
     conn.commit()
@@ -270,6 +285,85 @@ def save_sheet_data(conn: sqlite3.Connection, uid: str, sheet_data: dict,
     return cur.rowcount == 1
 
 
+def save_sheet_data_with_edits(
+    conn: sqlite3.Connection,
+    uid: str,
+    sheet_data: dict,
+    expected_revision: int,
+    edits: list[tuple[str, object, object, str, str]],
+    *,
+    cross_check: dict | None = None,
+    write_cross: bool = False,
+) -> bool:
+    """Grava dados, auditoria e opcionalmente o cross no mesmo commit CAS.
+
+    Serve tanto decisões humanas (a proteção não pode ficar separada do valor)
+    como correções do cross (o resultado final não pode ficar separado dos
+    valores que descreve).
+    """
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        data_json = json.dumps(sheet_data, ensure_ascii=False, default=str)
+        if write_cross:
+            cur = conn.execute(
+                "UPDATE sheets SET sheet_data = ?, cross_check = ?, "
+                "status = 'in_review', revision = revision + 1 "
+                "WHERE uid = ? AND revision = ? AND status != 'validated'",
+                (data_json,
+                 json.dumps(cross_check, ensure_ascii=False, default=str),
+                 uid, expected_revision),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE sheets SET sheet_data = ?, status = 'in_review', "
+                "revision = revision + 1 "
+                "WHERE uid = ? AND revision = ? AND status != 'validated'",
+                (data_json, uid, expected_revision),
+            )
+        if cur.rowcount != 1:
+            conn.rollback()
+            return False
+        edited_at = now_iso()
+        conn.executemany(
+            "INSERT INTO edits (sheet_uid, field_path, old_value, new_value, "
+            "source, actor, edited_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    uid,
+                    path,
+                    None if old is None else str(old),
+                    None if new is None else str(new),
+                    source,
+                    actor,
+                    edited_at,
+                )
+                for path, old, new, source, actor in edits
+            ],
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def apply_cross_corrections(
+    conn: sqlite3.Connection,
+    uid: str,
+    sheet_data: dict,
+    cross_check: dict,
+    expected_revision: int,
+    edits: list[tuple[str, object, object, str]],
+) -> bool:
+    """Wrapper tipado para o commit atómico das correções do cross."""
+    return save_sheet_data_with_edits(
+        conn, uid, sheet_data, expected_revision,
+        [(path, old, new, "system", actor) for path, old, new, actor in edits],
+        cross_check=cross_check,
+        write_cross=True,
+    )
+
+
 def set_image_rotation(conn: sqlite3.Connection, uid: str, rotation: int) -> int:
     """Rotação manual pedida pelo humano, em quartos de volta no sentido horário.
 
@@ -346,12 +440,17 @@ def human_header_fields(conn: sqlite3.Connection, uid: str) -> set[str]:
     }
 
 
-def mark_validated(conn: sqlite3.Connection, uid: str, actor: str) -> bool:
-    cur = conn.execute(
+def mark_validated(conn: sqlite3.Connection, uid: str, actor: str,
+                   expected_revision: int | None = None) -> bool:
+    sql = (
         "UPDATE sheets SET status = 'validated', validated_at = ?, validated_by = ? "
-        "WHERE uid = ? AND status != 'validated'",
-        (now_iso(), actor, uid),
+        "WHERE uid = ? AND status != 'validated'"
     )
+    args: list[object] = [now_iso(), actor, uid]
+    if expected_revision is not None:
+        sql += " AND revision = ?"
+        args.append(expected_revision)
+    cur = conn.execute(sql, args)
     conn.commit()
     return cur.rowcount == 1
 

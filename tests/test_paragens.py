@@ -41,9 +41,17 @@ def test_paragens_sheet_sem_cruzamento(client):
     assert "Ligação ao plano" not in r.text        # sem coluna de match
     conn = db.connect()
     try:
-        assert db.get_sheet(conn, uid)["cross_check"] is None
+        cross = db.get_sheet(conn, uid)["cross_check"]
     finally:
         conn.close()
+    # O verso não cruza com o plano, mas o cabeçalho (operador, máquina,
+    # data, turno) verifica-se na mesma — sem tocar no índice do plano
+    # (a fixture rebenta se ele for pedido).
+    assert cross["rows"] == []
+    assert cross["plan_reference"]["status"] == "not_applicable"
+    assert set(cross["header"]["cells"]) == {
+        "operador", "n_operador", "setor_maquina", "data", "turno",
+    }
 
 
 def test_paragens_edit_e_validar(client):

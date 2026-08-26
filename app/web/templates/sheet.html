@@ -103,6 +103,13 @@ setTimeout(function () {
 </div>
 {% endif %}
 
+{% if plan_reference.status == 'no_reference' and not is_raw %}
+<div class="alert warn" style="margin-bottom:14px;">
+  <span><strong>Plano indisponível.</strong> As linhas foram mantidas sem
+  cruzamento; o cabeçalho continua verificado pelas restantes fontes.</span>
+</div>
+{% endif %}
+
 {% if summary and not readonly %}
 <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); margin-bottom:18px;">
   <div class="kpi">
@@ -139,6 +146,15 @@ setTimeout(function () {
         {% endif %}
       </div>
       <div class="card-b">
+        {% if source_document %}
+        <div class="source-document" aria-label="Proveniência da digitalização">
+          <span class="source-document-label">Ficheiro de origem</span>
+          <strong>{{ source_document.filename }}</strong>
+          {% if source_document.page %}<span>· página {{ source_document.page }}</span>{% endif %}
+          {% if source_document.inferred %}<span class="pill neutral">inferido</span>{% endif %}
+          <span class="source-document-note">Só identifica a digitalização; não define a data da folha.</span>
+        </div>
+        {% endif %}
         {% if sheet.image_path %}
         <a href="/sheet/{{ sheet.uid }}/photo" target="_blank" title="Abrir em tamanho real">
           <img class="review-photo" id="folha-img" src="/sheet/{{ sheet.uid }}/photo"
@@ -248,11 +264,57 @@ setTimeout(function () {
           </span>
         </div>
         {% endif %}
-        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px;">
+        <div class="header-grid">
           {% for f in t.header_fields %}
-          <div class="field">
-            <span class="lbl">{{ f.replace('_', ' ') }}{% if f in ('operador', 'data') %} *{% endif %}</span>
+          {% set hc = header_cells.get(f) if (header_cells and not is_raw) else none %}
+          {% set state_class = {'confirmed': 'cc-match',
+                                'corrected': 'cc-warn',
+                                'review': 'cc-no-match',
+                                'ambiguous': 'cc-no-match',
+                                'missing': 'cc-na',
+                                'no_reference': 'cc-na'}.get(hc.status, 'cc-na') if hc else '' %}
+          <div class="field header-field header-field-{{ f }} {{ state_class }}">
+            <span class="lbl">{{ header_labels.get(f, (t.field_labels or {}).get(f, f)) }}{% if f in ('operador', 'data') %} *{% endif %}</span>
             {{ edit_cell('header.' ~ f, header.get(f)) }}
+            {% if hc %}
+            <div class="header-check-message">
+              <span class="pill {{ 'ok' if hc.status == 'confirmed' else ('warn' if hc.status == 'corrected' else ('crit' if hc.status in ('review', 'ambiguous') else 'neutral')) }}">
+                {{ {'confirmed': 'confere', 'corrected': 'corrigido',
+                    'review': 'rever', 'ambiguous': 'ambíguo',
+                    'missing': 'em falta', 'no_reference': 'sem referência'}.get(hc.status, hc.status) }}
+              </span>
+              <span>{{ hc.message }}</span>
+            </div>
+            {% if hc.applied %}
+              <div class="header-applied">✓ substituído automaticamente</div>
+            {% endif %}
+            {% if hc.human_protected %}
+              <div class="header-protected">Edição humana preservada</div>
+            {% endif %}
+            {% if hc.proposal and (header.get(f) or '') != hc.proposal %}
+              <div class="header-proposal">
+                Devia ser:
+                {% if readonly %}
+                  <strong>{{ hc.proposal }}</strong>
+                {% else %}
+                  <a href="#" data-proposal="{{ hc.proposal }}"
+                     onclick="return acceptProposal(this)">{{ hc.proposal }}</a>
+                {% endif %}
+              </div>
+            {% elif hc.candidates %}
+              <div class="header-proposal">Possíveis: {{ hc.candidates | join(', ') }}</div>
+            {% endif %}
+            {% if hc.sources %}
+              <div class="header-sources">
+                Fontes:
+                {% for src in hc.sources %}
+                  {{ {'employees': 'colaboradores', 'template': 'template',
+                      'plan': 'plano', 'machine_catalog': 'máquinas',
+                      'written_date': 'data escrita'}.get(src.kind, src.kind) }}{% if src.value %} · {{ src.value }}{% endif %}{{ ';' if not loop.last }}
+                {% endfor %}
+              </div>
+            {% endif %}
+            {% endif %}
           </div>
           {% endfor %}
         </div>

@@ -178,6 +178,40 @@ def load_nesting_index() -> PlanIndex:
     return PlanIndex(entries, NESTING_SPEC, plan_age_days=_plan_age_days("chapa\\_%"))
 
 
+def load_machines() -> list[dict]:
+    """Catálogo canónico de máquinas do mesmo snapshot Met3 usado no cross."""
+    return _fetch(
+        """
+        SELECT machine_code, display_name
+        FROM core_mtg.machines
+        WHERE snapshot_id = (
+            SELECT snapshot_id FROM audit_mtg.snapshots
+            WHERE snapshot_id LIKE %s
+            ORDER BY loaded_at DESC LIMIT 1
+        )
+        ORDER BY display_name
+        """,
+        (_CANTONEIRAS_LIKE,),
+    )
+
+
+def employees_snapshot_id() -> str | None:
+    """Fingerprint independente da carga de colaboradores.
+
+    A cache dos colaboradores era invalidada pelo snapshot do PLANO: uma carga
+    nova de colaboradores sem plano novo ficava invisível até ao restart.
+    """
+    try:
+        rows = _fetch(
+            "SELECT snapshot_id FROM audit_mtg.snapshots "
+            "WHERE dataset_id = 'ds-colaboradores' "
+            "ORDER BY loaded_at DESC LIMIT 1"
+        )
+    except psycopg.Error:
+        return None
+    return str(rows[0]["snapshot_id"]) if rows else None
+
+
 def load_active_ofs(days: int = 14) -> set[str]:
     """OFs com atividade recente nos registos validados do MES (contexto D1).
     Enquanto mes_kanban não existir/estiver vazio, devolve vazio — sem contexto."""

@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 
 from .. import db, imaging, pg_store
 from ..config import settings
-from ..matching import carryover, loaders, operador
+from ..matching import carryover, header_cross, loaders, operador
 from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
@@ -145,7 +145,7 @@ def get_index(loader_name: str):
         checked_at, index, snapshot = hit
         if now - checked_at < _FRESHNESS_PROBE_SECONDS:
             return index
-        current = _current_snapshot_id()
+        current = _current_index_snapshot(loader_name)
         if current is None or current == snapshot:
             # sonda falhou (Postgres em baixo) ou nada mudou: continuar com o
             # que temos, e voltar a sondar daqui a pouco
@@ -154,7 +154,9 @@ def get_index(loader_name: str):
             return index
     index = getattr(loaders, loader_name)()
     with _index_lock:
-        _index_cache[loader_name] = (time.monotonic(), index, _current_snapshot_id())
+        _index_cache[loader_name] = (
+            time.monotonic(), index, _current_index_snapshot(loader_name)
+        )
     return index
 
 
@@ -165,8 +167,19 @@ def _current_snapshot_id() -> str | None:
         return None
 
 
+def _current_index_snapshot(loader_name: str) -> str | None:
+    """Cada índice invalida-se pela SUA carga: os colaboradores chegam num
+    snapshot próprio e ficavam presos ao snapshot do plano."""
+    if loader_name == "load_employees":
+        try:
+            return loaders.employees_snapshot_id()
+        except Exception:
+            return None
+    return _current_snapshot_id()
+
+
 def get_employees():
-    """Colaboradores com a mesma cache do índice do plano."""
+    """Colaboradores em cache, invalidada pela sua própria carga."""
     return get_index("load_employees")
 
 
@@ -175,6 +188,62 @@ def make_scorer(template_name: str) -> Scorer:
     index = get_index(template.index_loader)
     active = loaders.load_active_ofs() if template.family == "cantoneiras" else set()
     return Scorer(index, CrossParams.load(), active_primary=active)
+
+
+_header_machine_cache: tuple[float, list] | None = None
+
+
+def _load_header_machines() -> list:
+    """Catálogo pequeno de máquinas, isolado do índice pesado do plano.
+
+    Uma fonte em baixo devolve vazio: o checker marca ``no_reference`` e nunca
+    inventa.
+    """
+    global _header_machine_cache
+    now = time.monotonic()
+    if _header_machine_cache and now - _header_machine_cache[0] < 60:
+        return _header_machine_cache[1]
+    try:
+        values = list(loaders.load_machines())
+    except Exception:
+        values = []
+    _header_machine_cache = (now, values)
+    return values
+
+
+def _source_document(sheet: dict) -> dict:
+    """Proveniência do ficheiro, nunca uma referência para a data da folha."""
+    filename, page = pg_store.source_from_image_path(sheet.get("image_path"))
+    if not filename:
+        return {}
+    return {
+        "filename": filename,
+        "page": page,
+        # derivado do nome do render, não guardado à parte — por isso marcado
+        "inferred": True,
+        "date_is_provenance_only": True,
+    }
+
+
+def _plan_header_machines(cross: dict, scorer: Scorer | None) -> list[str]:
+    """Máquinas não vazias das linhas que ligaram fortemente ao plano."""
+    if scorer is None:
+        return []
+    key_name = scorer.index.spec.key_field
+    by_key = {
+        str(entry.get(key_name)): entry
+        for entry in scorer.index.entries
+        if entry.get(key_name) is not None
+    }
+    out: list[str] = []
+    for row in cross.get("rows", []):
+        if row.get("mode") != "strong" or not row.get("matched_plan_key"):
+            continue
+        entry = by_key.get(str(row["matched_plan_key"])) or {}
+        value = str(entry.get("maquina") or "").strip()
+        if value and value not in out:
+            out.append(value)
+    return out
 
 
 def resolve_operator(conn, uid: str, sheet: dict) -> dict | None:
@@ -228,49 +297,129 @@ def run_cross_check(conn, uid: str) -> None:
     sheet = db.get_sheet(conn, uid)
     if not sheet or not sheet["sheet_data"]:
         return
-    # O cabeçalho resolve-se sempre, antes de qualquer saída antecipada.
+    # O operador resolve-se primeiro e escreve como sempre escreveu (nome/nº
+    # canónicos do SAP). O checker do cabeçalho corre DEPOIS, sobre o estado
+    # já canónico: as células dele descrevem e propõem, nunca disputam a
+    # decisão do resolve_operator.
     operator_match = resolve_operator(conn, uid, sheet)
-    if get_template(sheet["template_name"]).index_loader is None:
-        # ex.: paragens — não há plano contra que cruzar, mas o operador já foi
-        # resolvido e vale a pena guardar como.
-        if operator_match:
-            db.save_cross_check(conn, uid, {"summary": {}, "review_order": [],
-                                            "rows": [], "operator": operator_match})
-        return
     # Reler DEPOIS do resolve_operator (que pode ter escrito): o cruzamento é
     # calculado sobre uma revisão conhecida e só se grava se a folha ainda for
-    # essa — um cross calculado sobre linhas velhas não pode pintar as novas.
+    # essa — um cross calculado sobre valores velhos não pode pintar os novos.
     base = db.get_sheet(conn, uid)
     if not base or not base["sheet_data"]:
         return
-    scorer = make_scorer(base["template_name"])
+    template = get_template(base["template_name"])
     data = base["sheet_data"]
     rows = data.get("rows") or []
-    cross = check_sheet(rows, scorer, db.human_fields_by_row(conn, uid),
-                        footer=data.get("footer"))
+    header = data.get("header") or {}
+    human_header = db.human_header_fields(conn, uid)
     expected = base["revision"]
 
+    scorer: Scorer | None = None
+    if template.index_loader is None:
+        # ex.: paragens — não há plano contra que cruzar, mas o cabeçalho
+        # (operador, máquina, data, turno) verifica-se na mesma.
+        plan_reference = {"status": "not_applicable"}
+    else:
+        try:
+            scorer = make_scorer(base["template_name"])
+            plan_reference = {"status": "available"}
+        except Exception:
+            # O plano é uma fonte independente. Uma indisponibilidade não pode
+            # impedir data/turno, colaboradores ou máquina de serem cruzados
+            # e persistidos.
+            plan_reference = {
+                "status": "no_reference",
+                "message": "Plano indisponível; linhas mantidas sem cruzamento.",
+            }
+    if scorer is not None:
+        cross = check_sheet(rows, scorer, db.human_fields_by_row(conn, uid),
+                            footer=data.get("footer"))
+    else:
+        cross = {"summary": {}, "review_order": [], "rows": []}
+
+    # Cabeçalho determinístico: cada fonte só entra se puder ser precisa —
+    # falhas viram ``no_reference``, nunca palpites.
+    employees = None
+    if any(str(header.get(f) or "").strip() for f in ("operador", "n_operador")):
+        try:
+            employees = get_employees()
+        except Exception:
+            employees = None
+    plan_machines = _plan_header_machines(cross, scorer)
+    machine_catalog: list = []
+    if (str(header.get("setor_maquina") or "").strip() or plan_machines
+            or header_cross.template_machine(template)):
+        machine_catalog = _load_header_machines()
+    source_document = _source_document(base)
+
+    def check_current_header() -> dict:
+        return header_cross.check_header(
+            header, template,
+            human_fields=human_header,
+            employees=employees,
+            machines=machine_catalog,
+            plan_machines=plan_machines,
+            source_document=source_document,
+        )
+
+    header_result = check_current_header()
+
     # escrita automática (política de perda esperada), auditada como 'system';
-    # a auditoria só se grava depois de a escrita ter mesmo acontecido
-    edits: list[tuple[str, object, str]] = []
+    # valores, auditoria e cross final vão num único commit CAS
+    edits: list[tuple[str, object, object, str]] = []
+    applied_header: dict[str, dict] = {}
+    for field_name, cell in header_result["cells"].items():
+        proposal = cell.get("proposal")
+        if not cell.get("auto_write") or proposal is None:
+            continue
+        old = header.get(field_name)
+        if str(old or "").strip() == str(proposal).strip():
+            continue
+        edits.append((f"header.{field_name}", old, str(proposal),
+                      cell.get("actor") or "header:cross"))
+        header[field_name] = str(proposal)
+        applied_header[field_name] = cell
+    data["header"] = header
+    if applied_header:
+        # Recalcular sobre o estado final: as células têm de descrever o valor
+        # que fica gravado, não o que existia antes da substituição.
+        header_result = check_current_header()
+        for field_name, original in applied_header.items():
+            final_cell = header_result["cells"].get(field_name)
+            if final_cell is None:
+                continue
+            final_cell["applied"] = True
+            final_cell["actor"] = original.get("actor")
+            final_cell["message"] = (
+                "Substituído automaticamente. " + final_cell["message"]
+            )
+
     for rc in cross["rows"]:
         for cell in rc["cells"]:
             if cell["auto_write"] and cell["proposal"] is not None:
                 i, f = rc["row_index"], cell["field"]
                 if i < len(rows) and str(rows[i].get(f) or "").strip() != cell["proposal"]:
-                    edits.append((f"rows[{i}].{f}", rows[i].get(f), cell["proposal"]))
+                    edits.append((f"rows[{i}].{f}", rows[i].get(f),
+                                  cell["proposal"], "cross"))
                     rows[i][f] = cell["proposal"]
-    if edits:
-        if not db.save_sheet_data(conn, uid, data, expected):
-            # o humano editou entre o cálculo e a gravação: desistir — a
-            # edição dele dispara um run_cross_check novo com os dados certos
-            return
-        for path, old, new in edits:
-            db.record_edit(conn, uid, path, old, new, "system", "cross")
-        expected += 1
+
+    cross["header"] = {
+        "cells": header_result["cells"],
+        "source_document": header_result["source_document"],
+    }
+    cross["plan_reference"] = plan_reference
     if operator_match:
+        # Precedência: a identidade aceite continua a ser a do resolve_operator
+        # — as células do cabeçalho descrevem-na, não a substituem.
         cross["operator"] = operator_match
-    db.save_cross_check(conn, uid, cross, expected_revision=expected)
+
+    if edits:
+        # Se o humano editou entre o cálculo e a gravação, o CAS recusa e
+        # desiste-se — a edição dele dispara um run_cross_check novo.
+        db.apply_cross_corrections(conn, uid, data, cross, expected, edits)
+    else:
+        db.save_cross_check(conn, uid, cross, expected_revision=expected)
 
 
 # ---------- páginas ----------
@@ -419,9 +568,10 @@ def _process_sheet(uid: str, force_ocr: bool = False) -> None:
                          "paragens": get_template("cantoneiras_paragens")}
                 kind, extraction = provider.extract_auto(image_path, kinds)
                 if kinds[kind].name != template_name:
+                    # a reclassificação grava-se junto com a transcrição, na
+                    # mesma escrita atómica (ver db.set_extraction)
                     template_name = kinds[kind].name
                     template = kinds[kind]
-                    db.set_template(conn, uid, template_name)
             else:
                 extraction = provider.extract(image_path, template)
         except OcrError as exc:
@@ -429,7 +579,7 @@ def _process_sheet(uid: str, force_ocr: bool = False) -> None:
             # preenchimento manual; o erro fica no trilho de auditoria
             extraction = empty_extraction(template)
             extraction["_ocr_error"] = str(exc)
-        if not db.set_extraction(conn, uid, extraction):
+        if not db.set_extraction(conn, uid, extraction, template_name=template_name):
             return  # o revisor começou a editar entretanto: o trabalho dele manda
         run_cross_check(conn, uid)
     except Exception as exc:  # nunca matar o worker do lote por causa de uma folha
@@ -906,13 +1056,23 @@ def sheet_view(request: Request, uid: str, back: str | None = None,
             for r in sheet["cross_check"]["rows"]
         }
     diverged = _diverged_map(sheet) if view_mode == "final" else {}
+    cross = sheet["cross_check"] or {}
+    header_cross_data = cross.get("header") or {}
+    header_cells = header_cross_data.get("cells") or {}
+    source_document = (
+        header_cross_data.get("source_document") or _source_document(sheet)
+    )
     return templates.TemplateResponse(request, "sheet.html", {
         "sheet": sheet, "t": template, "cross_rows": cross_rows,
-        "summary": (sheet["cross_check"] or {}).get("summary"),
-        "review_order": (sheet["cross_check"] or {}).get("review_order", []),
+        "summary": cross.get("summary"),
+        "review_order": cross.get("review_order", []),
+        "plan_reference": cross.get("plan_reference") or {},
         "stored": request.query_params.get("stored"),
         "has_ocr": has_ocr, "view_mode": view_mode,
-        "operator": (sheet["cross_check"] or {}).get("operator"),
+        "operator": cross.get("operator"),
+        "header_cells": header_cells,
+        "header_labels": header_cross.HEADER_LABELS,
+        "source_document": source_document,
         "diverged": diverged, "n_diverged": len(diverged),
         "back_url": _safe_back(back),
     })

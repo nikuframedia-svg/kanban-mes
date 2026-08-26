@@ -10,6 +10,7 @@ import json
 import os
 import re
 from datetime import date
+from pathlib import PurePath
 
 import psycopg
 
@@ -88,12 +89,36 @@ def normalize_sheet_date(raw: object) -> str:
         raise InvalidSheetDate(text) from exc
 
 
-def _columns_present(cur) -> set[str]:
+def _columns_present(cur, table: str = "production_records") -> set[str]:
     cur.execute(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = 'mes_kanban' AND table_name = 'production_records'"
+        "WHERE table_schema = 'mes_kanban' AND table_name = %s",
+        (table,),
     )
     return {r[0] for r in cur.fetchall()}
+
+
+# Como o upload/ingest gravam as páginas de PDF: {sha16}_{stem-do-pdf}_pNN.png
+# (ver _save_image e _pdf_to_images em app/web/main.py). Fotos têm nomes
+# livres e ficam de fora — inventar-lhes um "PDF de origem" seria falsificar
+# a auditoria.
+_SOURCE_RENDER_RE = re.compile(
+    r"^[0-9a-f]{16}_(?P<stem>.+)_p(?P<page>\d{1,4})\.[A-Za-z0-9]{1,5}$"
+)
+
+
+def source_from_image_path(image_path: object) -> tuple[str | None, int | None]:
+    """Proveniência (PDF de origem, página 1-based) derivada do nome do render.
+
+    O staging não guarda o nome do PDF à parte, mas o render preserva-o no
+    próprio nome de ficheiro. Sem match (foto, folha manual), fica NULL — a
+    proveniência é auditoria de origem, nunca uma referência para a data.
+    """
+    name = PurePath(str(image_path or "")).name
+    match = _SOURCE_RENDER_RE.match(name)
+    if not match:
+        return None, None
+    return f"{match.group('stem')}.pdf", int(match.group("page"))
 
 
 def _store_stoppages(cur, sheet: dict, header: dict, filled: list,
@@ -188,28 +213,42 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                     (sheet["uid"],),
                 )
                 return cur.fetchone()[0]
+            # Proveniência sondada como as outras colunas opcionais: a ordem
+            # entre deploy do código e aplicação do sql/016 não pode importar.
+            validated_present = _columns_present(cur, "validated_sheets")
+            source_columns = [
+                name for name in ("source_filename", "source_page")
+                if name in validated_present
+            ]
+            source_filename, source_page = source_from_image_path(
+                sheet.get("image_path"))
+            source_values = {"source_filename": source_filename,
+                            "source_page": source_page}
+            validated_columns = (
+                "sheet_uid, sheet_date, template_name, family, operator_name, "
+                "operator_no, sector_machine, shift, image_sha256, "
+                "raw_extraction, sheet_data, cross_check, edit_count, "
+                "validated_by, app_version, operator_pernr, operator_match_rule"
+                + "".join(f", {name}" for name in source_columns)
+            )
+            validated_values = (
+                sheet["uid"], sheet_date, template.name, template.family,
+                operator or "(desconhecido)",
+                str(header.get("n_operador") or "") or None,
+                str(header.get("setor_maquina") or "") or None,
+                str(header.get("turno") or "") or None,
+                sheet.get("image_sha256") or "",
+                json.dumps(sheet.get("raw_extraction") or {}, ensure_ascii=False, default=str),
+                json.dumps(data, ensure_ascii=False, default=str),
+                json.dumps(cross, ensure_ascii=False, default=str),
+                edit_count, actor, APP_VERSION,
+                operator_pernr, operator_rule,
+                *[source_values[name] for name in source_columns],
+            )
             cur.execute(
-                """
-                INSERT INTO mes_kanban.validated_sheets
-                    (sheet_uid, sheet_date, template_name, family, operator_name,
-                     operator_no, sector_machine, shift, image_sha256,
-                     raw_extraction, sheet_data, cross_check, edit_count,
-                     validated_by, app_version, operator_pernr, operator_match_rule)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    sheet["uid"], sheet_date, template.name, template.family,
-                    operator or "(desconhecido)",
-                    str(header.get("n_operador") or "") or None,
-                    str(header.get("setor_maquina") or "") or None,
-                    str(header.get("turno") or "") or None,
-                    sheet.get("image_sha256") or "",
-                    json.dumps(sheet.get("raw_extraction") or {}, ensure_ascii=False, default=str),
-                    json.dumps(data, ensure_ascii=False, default=str),
-                    json.dumps(cross, ensure_ascii=False, default=str),
-                    edit_count, actor, APP_VERSION,
-                    operator_pernr, operator_rule,
-                ),
+                f"INSERT INTO mes_kanban.validated_sheets ({validated_columns}) "
+                f"VALUES ({', '.join(['%s'] * len(validated_values))})",
+                validated_values,
             )
             if template.name == "cantoneiras_paragens":
                 n = _store_stoppages(cur, sheet, header, filled, sheet_date, operator,

@@ -179,6 +179,108 @@ def test_upload_creates_sheet_and_review_screen_renders(client):
     assert "Validar folha" in r.text
 
 
+def test_header_cross_is_nested_and_renders_exact_labels(client):
+    uid = create_sheet(client)
+    conn = db.connect()
+    try:
+        cross = db.get_sheet(conn, uid)["cross_check"]
+    finally:
+        conn.close()
+
+    assert set(cross["header"]["cells"]) == {
+        "operador", "n_operador", "setor_maquina", "data", "turno",
+    }
+    r = client.get(f"/sheet/{uid}")
+    assert r.status_code == 200
+    for label in ("Operador", "N.º operador", "Setor/Máquina", "Data", "Turno"):
+        assert label in r.text
+    assert "header-field-operador cc-na" in r.text
+
+
+def test_header_corrige_campos_seguros_e_mantem_precedencia_do_operador(
+        client, monkeypatch):
+    """Data/turno/máquina canonizam-se sozinhos; a identidade do operador
+    continua a ser escrita pelo resolve_operator (o checker descreve-a)."""
+    from app.matching.operador import Employee
+
+    monkeypatch.setattr(main, "get_employees", lambda: {
+        3480: Employee(3480, "10003480", "GURPINDER SINGH"),
+    })
+    monkeypatch.setattr(main, "_load_header_machines", lambda: [
+        {"display_name": "Ficep Rapid 20T -1"},
+        {"display_name": "Ficep Rapid 20T -2"},
+        {"display_name": "Ficep XP T4"},
+    ])
+    raw = {
+        "header": {
+            "operador": "Gurpinder", "n_operador": "3480",
+            "setor_maquina": "Rapid 20T - 2", "data": "15-08-26", "turno": "m",
+        },
+        "rows": [], "footer": {"metros_produzidos": None, "horas_trabalhadas": None},
+    }
+    conn = db.connect()
+    try:
+        uid = db.create_sheet(
+            conn, "cantoneiras_kanban",
+            image_path="data/images/0123456789abcdef_18-08-2026_p2.png",
+            image_sha256="teste-header",
+        )
+        assert db.set_extraction(conn, uid, raw)
+        main.run_cross_check(conn, uid)
+        sheet = db.get_sheet(conn, uid)
+    finally:
+        conn.close()
+
+    assert sheet["sheet_data"]["header"] == {
+        "operador": "GURPINDER SINGH", "n_operador": "3480",
+        "setor_maquina": "Ficep Rapid 20T -2", "data": "15/08/2026", "turno": "M",
+    }
+    header_cross = sheet["cross_check"]["header"]
+    assert header_cross["source_document"]["filename"] == "18-08-2026.pdf"
+    assert header_cross["source_document"]["page"] == 2
+    assert header_cross["cells"]["operador"]["status"] == "confirmed"
+    assert header_cross["cells"]["data"]["applied"] is True
+    assert header_cross["cells"]["setor_maquina"]["applied"] is True
+    # precedência: a identidade aceite é a do resolve_operator
+    assert sheet["cross_check"]["operator"]["rule"] == "token"
+    assert sheet["cross_check"]["operator"]["pernr"] == "10003480"
+
+    r = client.get(f"/sheet/{uid}")
+    assert "header-field-data cc-match" in r.text
+    assert "substituído automaticamente" in r.text
+    assert "18-08-2026.pdf" in r.text
+    assert "não define a data da folha" in r.text
+
+
+def test_plan_failure_does_not_block_header_cross(client, monkeypatch):
+    monkeypatch.setattr(main, "make_scorer", lambda _name: (_ for _ in ()).throw(
+        RuntimeError("plano offline")
+    ))
+    raw = {
+        "header": {
+            "operador": None, "n_operador": None, "setor_maquina": None,
+            "data": "15-08-26", "turno": "m",
+        },
+        "rows": [], "footer": {"metros_produzidos": None, "horas_trabalhadas": None},
+    }
+    conn = db.connect()
+    try:
+        uid = db.create_sheet(conn, "cantoneiras_kanban")
+        assert db.set_extraction(conn, uid, raw)
+        main.run_cross_check(conn, uid)
+        sheet = db.get_sheet(conn, uid)
+    finally:
+        conn.close()
+
+    cross = sheet["cross_check"]
+    assert cross["plan_reference"]["status"] == "no_reference"
+    assert cross["rows"] == []
+    assert sheet["sheet_data"]["header"]["data"] == "15/08/2026"
+    assert sheet["sheet_data"]["header"]["turno"] == "M"
+    assert cross["header"]["cells"]["data"]["status"] == "confirmed"
+    assert "Plano indisponível" in client.get(f"/sheet/{uid}").text
+
+
 def test_edit_row_triggers_cross_check_with_colours(client):
     uid = create_sheet(client)
     assert edit(client, uid, "rows[0].of", "OF250001").status_code == 303
