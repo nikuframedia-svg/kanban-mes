@@ -1135,6 +1135,7 @@ def sheet_view(request: Request, uid: str, back: str | None = None,
         "review_order": cross.get("review_order", []),
         "plan_reference": cross.get("plan_reference") or {},
         "stored": request.query_params.get("stored"),
+        "erro": request.query_params.get("erro"),
         "has_ocr": has_ocr, "view_mode": view_mode,
         "operator": cross.get("operator"),
         "header_cells": header_cells,
@@ -1371,6 +1372,9 @@ def recheck(uid: str):
 @app.post("/sheet/{uid}/validate")
 def validate(uid: str, actor: str = Form("operador")):
     """A única porta para o Postgres: valida → INSERT em mes_kanban → imutável."""
+    # «Quem valida» deixou de existir no form: valida-se sem entidade e o
+    # registo interno fica «operador».
+    actor = actor.strip() or "operador"
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -1391,6 +1395,16 @@ def validate(uid: str, actor: str = Form("operador")):
             raise HTTPException(
                 422, f"Data «{exc}» não é interpretável — escreve dd/mm/aaaa.")
         db.mark_validated(conn, uid, actor)
+    except HTTPException as exc:
+        # Os portões da validação (422/409) voltam à folha como banner: o
+        # form navega para o POST, e a resposta JSON crua lê-se como crash.
+        # 404 e 5xx continuam a subir — aí não há folha para onde voltar, ou
+        # é um erro a sério e queremos o traceback.
+        if exc.status_code == 404 or exc.status_code >= 500:
+            raise
+        from urllib.parse import quote
+        return RedirectResponse(f"/sheet/{uid}?erro={quote(str(exc.detail))}",
+                                status_code=303)
     finally:
         conn.close()
     return RedirectResponse(f"/sheet/{uid}?stored={n}", status_code=303)

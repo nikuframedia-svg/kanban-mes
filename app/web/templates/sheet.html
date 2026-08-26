@@ -34,7 +34,8 @@
     {% if is_raw %}
       <span class="pill info">OCR original · só leitura</span>
     {% elif validated %}
-      <span class="pill ok">✓ validada · {{ sheet.validated_by }}</span>
+      {# «operador» é o registo interno por omissão, não uma entidade — não se exibe #}
+      <span class="pill ok">✓ validada{% if sheet.validated_by and sheet.validated_by != 'operador' %} · {{ sheet.validated_by }}{% endif %}</span>
     {% else %}
       <span class="pill warn">em revisão</span>
     {% endif %}
@@ -49,6 +50,12 @@
 {% if stored %}
 <div class="alert ok" style="margin-bottom:14px;">
   <span><strong>Folha validada.</strong> {{ stored }} linha(s) gravadas no Postgres — a partir de agora é definitiva.</span>
+</div>
+{% endif %}
+
+{% if erro %}
+<div class="alert crit" style="margin-bottom:14px;">
+  <span><strong>Não foi possível validar.</strong> {{ erro }}</span>
 </div>
 {% endif %}
 
@@ -482,7 +489,6 @@ setTimeout(function () {
           <form method="post" action="/sheet/{{ sheet.uid }}/validate"
                 style="display:flex; gap:8px; align-items:center; margin-left:auto;"
                 onsubmit="return confirm('Validar a folha? Depois de validada fica imutável.')">
-            <input type="text" name="actor" placeholder="Quem valida" required style="width:11rem;">
             <button type="submit" class="btn primary">Validar folha</button>
           </form>
         </div>

@@ -85,8 +85,12 @@ def sheet_pdf(sheet: dict, template: KanbanTemplate, edit_count: int) -> bytes:
 
     pdf, family = _make_pdf("portrait")
     pdf.add_page()
+    # «operador» é o registo interno por omissão, não uma entidade — não se
+    # imprime; um nome escrito de propósito (dados antigos) continua a sair.
+    quem = sheet.get("validated_by")
+    quem_s = f" · {quem}" if quem and quem != "operador" else ""
     estado = (
-        f"VALIDADA · {sheet.get('validated_by')} · {sheet.get('validated_at')}"
+        f"VALIDADA{quem_s} · {sheet.get('validated_at')}"
         if validated else "RASCUNHO — ainda não validada"
     )
     _brand_header(pdf, family, template.label, f"Folha {sheet.get('uid', '')[:8]} · {estado}")

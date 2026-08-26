@@ -358,8 +358,13 @@ def test_validate_requires_header_then_stores_and_freezes(client):
     uid = create_sheet(client)
     edit(client, uid, "rows[0].of", "OF250001")
 
-    # sem operador/data → recusa
-    assert client.post(f"/sheet/{uid}/validate", data={"actor": "luis"}).status_code == 422
+    # sem operador/data → recusa, mas como redirect com banner na folha (uma
+    # resposta JSON crua ao POST do form lê-se como crash no browser)
+    r = client.post(f"/sheet/{uid}/validate", data={"actor": "luis"})
+    assert r.status_code == 303
+    assert "erro=" in r.headers["location"]
+    r = client.get(r.headers["location"])
+    assert "Não foi possível validar" in r.text
 
     edit(client, uid, "header.operador", "João")
     edit(client, uid, "header.data", "2026-08-06")
@@ -369,12 +374,31 @@ def test_validate_requires_header_then_stores_and_freezes(client):
     assert len(client.stored_calls) == 1
     assert client.stored_calls[0]["actor"] == "luis"
 
-    # imutável depois de validada
-    assert client.post(f"/sheet/{uid}/validate", data={"actor": "luis"}).status_code == 409
+    # imutável depois de validada — o portão volta à folha como banner
+    r = client.post(f"/sheet/{uid}/validate", data={"actor": "luis"})
+    assert r.status_code == 303
+    assert "erro=" in r.headers["location"]
+    assert len(client.stored_calls) == 1
     assert edit(client, uid, "rows[0].of", "OF999999").status_code == 409
     r = client.get(f"/sheet/{uid}")
     assert r.status_code == 200
     assert "validada" in r.text
+
+
+def test_validate_sem_quem_valida(client):
+    """O form já não tem caixa de entidade: valida sem actor e regista
+    «operador»."""
+    uid = create_sheet(client)
+    edit(client, uid, "header.operador", "João")
+    edit(client, uid, "header.data", "2026-08-06")
+    r = client.post(f"/sheet/{uid}/validate")
+    assert r.status_code == 303
+    assert "stored=" in r.headers["location"]
+    assert client.stored_calls[-1]["actor"] == "operador"
+    # a pill não exibe a entidade-fantasma «operador»
+    page = client.get(f"/sheet/{uid}").text
+    assert "✓ validada" in page
+    assert "validada · operador" not in page
 
 
 def test_upload_multiple_images_creates_multiple_sheets(client):
