@@ -1,6 +1,13 @@
 """Contrato do cruzamento determinístico do cabeçalho (setor de cantoneiras)."""
 
-from app.matching.header_cross import canonical_date, check_header, template_machine
+from datetime import date
+
+from app.matching.header_cross import (
+    canonical_date,
+    check_header,
+    previous_business_day,
+    template_machine,
+)
 from app.matching.operador import Employee
 from app.templates_spec import get_template
 
@@ -105,6 +112,44 @@ def test_data_so_usa_o_valor_escrito_e_normaliza_formato():
     normalized = _check(_header(data="15-08-26"))["cells"]["data"]
     assert normalized["proposal"] == "15/08/2026"
     assert normalized["auto_write"] is True
+
+
+def test_dia_util_anterior_salta_fim_de_semana_mas_nao_feriados():
+    assert previous_business_day(date(2026, 8, 18)) == date(2026, 8, 17), "terça → segunda"
+    assert previous_business_day(date(2026, 8, 17)) == date(2026, 8, 14), "segunda → sexta"
+    assert previous_business_day(date(2026, 8, 16)) == date(2026, 8, 14), "domingo → sexta"
+    assert previous_business_day(date(2026, 8, 15)) == date(2026, 8, 14), "sábado → sexta"
+    # feriados não se saltam: 15/08/2025 (feriado nacional) caiu numa sexta
+    # e continua a contar como dia útil — não há calendário fiável aqui
+    assert previous_business_day(date(2025, 8, 16)) == date(2025, 8, 15)
+
+
+def test_data_assumida_manda_sobre_o_escrito():
+    """Regra da fábrica: a folha digitalizada é sempre do dia útil anterior.
+    A data assumida substitui o que o OCR leu; só a edição humana a trava."""
+    # vazio → assumida, com escrita automática
+    cell = _check(_header(data=None), assumed_date="17/08/2026")["cells"]["data"]
+    assert cell["proposal"] == "17/08/2026"
+    assert cell["auto_write"] is True
+    assert cell["reason"] == "assumed_prev_business_day"
+    assert "dia útil anterior" in cell["message"]
+
+    # escrito diferente → substitui-se na mesma
+    cell = _check(_header(data="15/08/2026"), assumed_date="17/08/2026")["cells"]["data"]
+    assert cell["proposal"] == "17/08/2026"
+    assert cell["auto_write"] is True
+
+    # escrito igual ao assumido → confirmado, sem escrita
+    cell = _check(_header(data="17/08/2026"), assumed_date="17/08/2026")["cells"]["data"]
+    assert cell["status"] == "confirmed"
+    assert cell["auto_write"] is False
+
+    # edição humana da data manda: sem escrita, regime normal de validação
+    cell = _check(_header(data="15/08/2026"), assumed_date="17/08/2026",
+                  human_fields={"data"})["cells"]["data"]
+    assert cell["auto_write"] is False
+    assert cell["human_protected"] is True
+    assert cell["status"] == "confirmed", "a data humana valida-se como sempre"
 
 
 def test_template_unico_nao_fixa_maquina_nenhuma():

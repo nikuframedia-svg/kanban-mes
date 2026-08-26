@@ -70,8 +70,8 @@
             <input type="date" name="de" class="kv-select" style="width:100%;"></label>
           <label class="tiny muted">Até
             <input type="date" name="ate" class="kv-select" style="width:100%;"></label>
-          <label class="tiny muted" style="display:flex; gap:6px; align-items:center;">
-            <input type="checkbox" name="validadas" value="1"> Apenas validadas</label>
+          {# Sem checkbox: a BaseDados exporta sempre e só folhas validadas. #}
+          <span class="tiny muted">Só folhas validadas.</span>
           <button type="submit" class="btn primary">Descarregar</button>
         </form>
       </details>

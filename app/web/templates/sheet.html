@@ -39,7 +39,7 @@
       <span class="pill warn">em revisão</span>
     {% endif %}
     {% if n_diverged and not is_raw %}
-      <span class="pill neutral" title="Células alteradas depois da leitura da máquina">{{ n_diverged }} com * </span>
+      <span class="pill neutral" title="Células alteradas depois da leitura da máquina — o original aparece por baixo de cada uma">{{ n_diverged }} ≠ OCR</span>
     {% endif %}
   </div>
 </div>
@@ -179,14 +179,14 @@ setTimeout(function () {
   <!-- ============ coluna direita: o teu trabalho ============ -->
   <div>
 
-    {# `*` = o valor já não é o que a máquina leu (motor ou humano mudou-o).
-       Nunca muda a cor da célula — a cor diz se bate com o plano, o `*` diz de
-       onde veio. #}
+    {# O valor já não é o que a máquina leu (motor ou humano mudou-o): o
+       original do OCR mostra-se SEMPRE por baixo da célula — com a
+       substituição automática total, é a única memória visível do que estava
+       no papel segundo a leitura. Nunca muda a cor da célula. #}
     {% macro snap_mark(field_path) %}
       {%- set orig = diverged.get(field_path) if diverged else none -%}
       {%- if orig is not none -%}
-        <span class="cc-snapped-mark"
-              title="OCR leu: {{ orig if orig else '(vazio)' }}">*</span>
+        <div class="ocr-original">OCR: {{ orig if orig else '(vazio)' }}</div>
       {%- endif -%}
     {% endmacro %}
 
@@ -310,7 +310,8 @@ setTimeout(function () {
                 {% for src in hc.sources %}
                   {{ {'employees': 'colaboradores', 'template': 'template',
                       'plan': 'plano', 'machine_catalog': 'máquinas',
-                      'written_date': 'data escrita'}.get(src.kind, src.kind) }}{% if src.value %} · {{ src.value }}{% endif %}{{ ';' if not loop.last }}
+                      'written_date': 'data escrita',
+                      'assumed_date': 'dia útil anterior'}.get(src.kind, src.kind) }}{% if src.value %} · {{ src.value }}{% endif %}{{ ';' if not loop.last }}
                 {% endfor %}
               </div>
             {% endif %}

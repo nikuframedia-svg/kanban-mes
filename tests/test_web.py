@@ -199,8 +199,10 @@ def test_header_cross_is_nested_and_renders_exact_labels(client):
 
 def test_header_corrige_campos_seguros_e_mantem_precedencia_do_operador(
         client, monkeypatch):
-    """Data/turno/máquina canonizam-se sozinhos; a identidade do operador
-    continua a ser escrita pelo resolve_operator (o checker descreve-a)."""
+    """Turno/máquina canonizam-se sozinhos; a DATA é assumida como o dia útil
+    anterior ao PDF de origem (18-08-2026, terça → 17/08/2026, segunda),
+    por cima do que o OCR leu; a identidade do operador continua a ser escrita
+    pelo resolve_operator (o checker descreve-a)."""
     from app.matching.operador import Employee
 
     monkeypatch.setattr(main, "get_employees", lambda: {
@@ -233,13 +235,14 @@ def test_header_corrige_campos_seguros_e_mantem_precedencia_do_operador(
 
     assert sheet["sheet_data"]["header"] == {
         "operador": "GURPINDER SINGH", "n_operador": "3480",
-        "setor_maquina": "Ficep Rapid 20T -2", "data": "15/08/2026", "turno": "M",
+        "setor_maquina": "Ficep Rapid 20T -2", "data": "17/08/2026", "turno": "M",
     }
     header_cross = sheet["cross_check"]["header"]
     assert header_cross["source_document"]["filename"] == "18-08-2026.pdf"
     assert header_cross["source_document"]["page"] == 2
     assert header_cross["cells"]["operador"]["status"] == "confirmed"
     assert header_cross["cells"]["data"]["applied"] is True
+    assert header_cross["cells"]["data"]["reason"] == "assumed_prev_business_day"
     assert header_cross["cells"]["setor_maquina"]["applied"] is True
     # precedência: a identidade aceite é a do resolve_operator
     assert sheet["cross_check"]["operator"]["rule"] == "token"
@@ -275,7 +278,11 @@ def test_plan_failure_does_not_block_header_cross(client, monkeypatch):
     cross = sheet["cross_check"]
     assert cross["plan_reference"]["status"] == "no_reference"
     assert cross["rows"] == []
-    assert sheet["sheet_data"]["header"]["data"] == "15/08/2026"
+    # folha sem PDF de origem: a data assumida parte do created_at (UTC)
+    import datetime as dt
+    esperado = main.header_cross.previous_business_day(
+        dt.datetime.now(dt.timezone.utc).date()).strftime("%d/%m/%Y")
+    assert sheet["sheet_data"]["header"]["data"] == esperado
     assert sheet["sheet_data"]["header"]["turno"] == "M"
     assert cross["header"]["cells"]["data"]["status"] == "confirmed"
     assert "Plano indisponível" in client.get(f"/sheet/{uid}").text
@@ -297,6 +304,29 @@ def test_edit_row_triggers_cross_check_with_colours(client):
         conn.close()
     cross = sheet["cross_check"]
     assert cross["rows"][0]["matched_plan_key"] == "P1"
+
+
+def test_substituicao_marca_applied_e_mostra_o_original_do_ocr(client):
+    """Depois de o motor aplicar uma proposta, a célula recalculada descreve o
+    valor GRAVADO (applied + mensagem), e a revisão mostra o que o OCR leu
+    numa linha própria por baixo da célula — nunca escondido num tooltip."""
+    uid = create_sheet(client)
+    # linha ligada ao P1: a OV vazia é âncora da obra e é auto-preenchida
+    edit(client, uid, "rows[0].of", "OF250001")
+    conn = db.connect()
+    try:
+        sheet = db.get_sheet(conn, uid)
+    finally:
+        conn.close()
+    assert sheet["sheet_data"]["rows"][0]["ov"] == "2400001"
+    cells = {c["field"]: c for c in sheet["cross_check"]["rows"][0]["cells"]}
+    ov = cells["ov"]
+    assert ov["applied"] is True
+    assert ov["status"] == "confirmed", "a célula final descreve o valor gravado"
+    assert ov["message"].startswith("Substituído automaticamente.")
+
+    r = client.get(f"/sheet/{uid}")
+    assert 'class="ocr-original"' in r.text, "o original do OCR aparece por baixo"
 
 
 def test_edit_with_stale_revision_conflicts(client):

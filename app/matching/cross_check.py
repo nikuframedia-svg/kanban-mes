@@ -11,9 +11,12 @@ Estados de célula:
 - unmatched      — sem vencedor credível no plano (H₀ venceu ou não há candidatos);
 - na             — campo sem referência para cruzar.
 
-A escrita automática segue perda esperada: só substitui quando
-P(certo) > limiar do campo. Edições humanas nunca são sobrescritas (imposto na
-camada web, que marca células com origem humana antes de chamar isto).
+Escrita automática (política de 26/08): uma célula ESCRITA cuja proposta
+difere aplica-se sempre — o valor lido fica no raw e visível na revisão.
+Células sem valor escrito (vazias/herdadas) mantêm a perda esperada: só se
+preenchem quando P(certo) > limiar do campo (ou of/ov em linha forte).
+Edições humanas nunca são sobrescritas (imposto na camada web, que marca
+células com origem humana antes de chamar isto); a Qtd nunca se reescreve.
 """
 
 from __future__ import annotations
@@ -47,6 +50,9 @@ class CellCheck:
     # com ela como limite superior, não como valor esperado: produzir menos do
     # que o previsto é normal, produzir mais é que merece um olhar.
     plan_limit: float | None = None
+    # A proposta foi mesmo gravada na folha (loop de aplicação da camada web).
+    # Depois de aplicar, a célula recalculada descreve o valor final.
+    applied: bool = False
 
 
 @dataclass
@@ -148,11 +154,10 @@ def _cliente_check(row: dict, scored_row: dict, index: PlanIndex,
     interno da Metalogalva, o operador escreve o final — discordar é o caso
     normal, não um erro de OCR). Mas resolvida a OF, o plano sabe de quem é a
     obra: célula vazia recebe proposta; escrita e parecida confirma; escrita e
-    diferente fica `alias` — proposta visível, sem revisão. Com
-    `replace_all` (linha com match forte e política de substituição total), o
-    nome do plano é ESCRITO por cima do que difere: o cliente da folha passa a
-    ser sempre o do planeamento; o que o operador escreveu fica no raw e no
-    trilho de auditoria.
+    diferente é substituída pelo nome do plano (política de 26/08: o cliente da
+    folha é sempre o do planeamento, mesmo em linha incerta); `alias` fica só
+    para quando a substituição está desligada ou o ramo não permite escrita.
+    O que o operador escreveu fica no raw e no trilho de auditoria.
     """
     nome = plan_customer_for(index, str(scored_row.get("of") or ""))
     if not nome:
@@ -171,16 +176,20 @@ def _cliente_check(row: dict, scored_row: dict, index: PlanIndex,
         status, proposal, similarity, auto = "snapped", nome, 0.0, writable
     else:
         similarity = sim.text_similarity(efectivo, nome)
+        # Substituição total (26/08): um cliente ESCRITO que difere do plano
+        # substitui-se sempre que a linha tem ligação credível — mesmo em
+        # linha incerta. O que o operador escreveu fica no raw e visível por
+        # baixo da célula na revisão.
+        substituir = (params.policy.replace_with_plan and permitir_escrita
+                      and "cliente" not in human_fields)
         if similarity >= params.score.sim_near:
             # mesmo cliente. Se o texto difere só na forma (restos antigos da
             # customer_key: «tecpoles gmbh» vs «TECPOLES GMBH»), a
             # substituição escreve a forma legível do plano.
-            canonizar = (replace_all and permitir_escrita
-                         and "cliente" not in human_fields
-                         and written_s and written_s != nome
+            canonizar = (substituir and written_s and written_s != nome
                          and sim.compact(written_s) == sim.compact(nome))
             status, proposal, auto = "confirmed", (nome if canonizar else None), canonizar
-        elif replace_all and permitir_escrita and "cliente" not in human_fields:
+        elif substituir:
             status, proposal, auto = "snapped", nome, True
         else:
             status, proposal, auto = "alias", nome, False
@@ -283,10 +292,12 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     # `field_value` e não `.get`: folhas lidas antes do rename guardaram o
     # visto em `comp_mm`, e ignorá-las punha o motor a propor modelos nelas.
     linha_marcada = is_marked(field_value(scored_row, "perf_comp"))
-    # Política de substituição total (decisão do Luís, 19/08): linha com match
-    # FORTE fica com os valores do plano — very_different e herdadas
-    # incluídas. Só as edições humanas continuam invioláveis; linhas incertas
-    # (weak) mantêm o regime de propostas.
+    # Política de substituição total (19/08, alargada a 26/08): uma célula
+    # ESCRITA que difere do plano substitui-se SEMPRE que a linha tem ligação
+    # credível — mesmo weak, mesmo com confiança baixa; o valor lido fica no
+    # raw e visível por baixo da célula na revisão. `replace_all` (match
+    # forte) continua a mandar só nas células SEM valor escrito
+    # (materialização de herdadas e preenchimento de vazias).
     replace_all = params.policy.replace_with_plan and match.mode == "strong"
 
     for f in spec_fields:
@@ -347,13 +358,19 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             similarity = sim.text_similarity(efectivo, proposal_plan)
 
         threshold = _threshold_for(f.name, params)
-        # A lição AT1T515: «strong» responde «é desta OF», nunca «é esta
-        # irmã». of/ov são função da OF e a substituição total pode confiar
-        # neles; modelo/perfil escolhem a linha ENTRE irmãs e continuam a
-        # exigir o marginal do campo — sem isto gravou-se um modelo com
-        # p_field=0.013, escolhido por ordem alfabética entre 8 empatadas.
+        # A lição AT1T515 (agora só para células SEM valor escrito): «strong»
+        # responde «é desta OF», nunca «é esta irmã». of/ov são função da OF
+        # e a substituição total pode confiar neles; modelo/perfil escolhem a
+        # linha ENTRE irmãs e continuam a exigir o marginal do campo — sem
+        # isto gravou-se um valor com p_field=0.013 numa célula em branco,
+        # escolhido por ordem alfabética entre 8 irmãs empatadas.
         anchored = f.name in ("of", "ov")
-        if replace_all:
+        if params.policy.replace_with_plan and written_s:
+            # Substituição total (26/08): o ESCRITO que difere do plano
+            # substitui-se sempre, mesmo com confiança baixa — só a edição
+            # humana trava. O valor lido fica no raw e visível na revisão.
+            writable = f.name not in human_fields
+        elif replace_all:
             writable = (f.name not in human_fields
                         and (anchored or p_field >= threshold))
         else:

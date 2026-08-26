@@ -841,6 +841,18 @@ input.cell-input:focus {
 .proposal { margin-top: 3px; font-size: 10px; color: var(--ink-4); }
 .proposal a { color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
 
+/* Valor lido pelo OCR quando a célula já mostra outro (substituição do motor
+   ou correção humana). Fica sempre visível por baixo da célula — com a
+   substituição automática, é a memória do que a máquina leu no papel. Usa os
+   mesmos tokens do resto do ficheiro, por isso segue o tema. */
+.ocr-original {
+  margin-top: 2px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--ink-5);
+  pointer-events: none;
+}
+
 /* Valor herdado da linha de cima («idem»). Itálico e apagado para se ler à
    primeira que não foi escrito ali — é uma leitura nossa, não o que está no
    papel. Como é placeholder, nunca chega a ser gravado. */

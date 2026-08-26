@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import asdict, dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Iterable
 
 from . import operador
@@ -72,6 +72,19 @@ def canonical_date(value: object) -> str | None:
     except ValueError:
         return None
     return parsed.strftime("%d/%m/%Y")
+
+
+def previous_business_day(base: date) -> date:
+    """Dia útil anterior a `base`: salta sábados e domingos.
+
+    Feriados não se saltam de propósito: não existe aqui um calendário de
+    feriados fiável (nacionais + municipais + pontes da fábrica), e a fábrica
+    trabalha em vários — assumir o dia é menos errado do que inventar folgas.
+    """
+    day = base - timedelta(days=1)
+    while day.weekday() >= 5:          # 5 = sábado, 6 = domingo
+        day -= timedelta(days=1)
+    return day
 
 
 def _compact(value: object) -> str:
@@ -448,10 +461,30 @@ def _machine_cell(header: dict, template, protected: set[str],
     )
 
 
-def _date_cell(header: dict, protected: set[str]) -> HeaderCellCheck:
+def _date_cell(header: dict, protected: set[str],
+               assumed_date: str | None = None) -> HeaderCellCheck:
     field_name = "data"
     written = _written(header.get(field_name))
     is_protected = field_name in protected
+    # Regra da fábrica (26/08): a folha entregue à digitalização é SEMPRE do
+    # dia útil anterior — a data assumida manda sobre o que o OCR leu ou o
+    # operador escreveu no papel. Só a edição humana no sistema a desativa
+    # (cai para a validação normal, lá em baixo).
+    if assumed_date and not is_protected:
+        sources = [{"kind": "assumed_date", "value": assumed_date}]
+        if written == assumed_date:
+            return _cell(
+                field_name, written, status="confirmed",
+                reason="assumed_prev_business_day",
+                message="Data assumida: dia útil anterior à digitalização.",
+                sources=sources,
+            )
+        return _cell(
+            field_name, written, proposal=assumed_date, status="corrected",
+            reason="assumed_prev_business_day",
+            message="Data assumida: dia útil anterior à digitalização.",
+            sources=sources, auto_write=True, actor="header:date",
+        )
     if not written:
         return _cell(
             field_name, written, status="missing", reason="empty_date",
@@ -537,13 +570,18 @@ def check_header(header: dict, template, *, human_fields: set[str] | None = None
                  employees: dict | None = None,
                  machines: Iterable[object] | None = None,
                  plan_machines: Iterable[object] | None = None,
-                 source_document: dict | None = None) -> dict:
-    """Cruza os cinco campos e devolve apenas estruturas JSON-serializáveis."""
+                 source_document: dict | None = None,
+                 assumed_date: str | None = None) -> dict:
+    """Cruza os cinco campos e devolve apenas estruturas JSON-serializáveis.
+
+    `assumed_date` (dd/mm/aaaa) é a data assumida da folha — o dia útil
+    anterior à data-base calculada pelo chamador; ver `_date_cell`.
+    """
     human_fields = human_fields or set()
     operator_cells, operator_result = _operator_cells(header, employees, human_fields)
     cells = operator_cells + [
         _machine_cell(header, template, human_fields, machines, plan_machines),
-        _date_cell(header, human_fields),
+        _date_cell(header, human_fields, assumed_date),
         _shift_cell(header, template, human_fields),
     ]
     return {

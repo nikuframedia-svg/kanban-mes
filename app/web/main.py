@@ -7,6 +7,7 @@ com células coloridas → /validate = única porta para o Postgres.
 from __future__ import annotations
 
 import csv
+import datetime
 import hashlib
 import io
 import re
@@ -27,7 +28,7 @@ from ..matching import carryover, header_cross, loaders, operador
 from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
-from ..ocr.provider import OcrError, empty_extraction, get_provider
+from ..ocr.provider import OcrError, empty_extraction, get_provider, rescue_header
 from ..templates_spec import TEMPLATES, field_value, get_template, is_marked
 from . import estado as estado_data
 from . import export as cpis_export
@@ -225,6 +226,37 @@ def _source_document(sheet: dict) -> dict:
     }
 
 
+# Prefixo dd-mm-aaaa que o scanner da fábrica põe no nome dos PDFs
+# («06-08-2026 - Rapid20T 2.pdf»).
+_SOURCE_DATE_RE = re.compile(r"^(\d{2})-(\d{2})-(\d{4})")
+
+
+def _assumed_sheet_date(sheet: dict) -> str | None:
+    """Data assumida da folha (dd/mm/aaaa): dia útil anterior à data-base.
+
+    Regra da fábrica (26/08): as folhas entregues à digitalização são sempre
+    do dia útil anterior. A data-base é o prefixo dd-mm-aaaa do nome do PDF de
+    origem; sem PDF (foto, folha manual), vale o `created_at` da folha.
+    """
+    filename, _page = pg_store.source_from_image_path(sheet.get("image_path"))
+    base: datetime.date | None = None
+    if filename:
+        m = _SOURCE_DATE_RE.match(filename)
+        if m:
+            try:
+                base = datetime.date(int(m.group(3)), int(m.group(2)),
+                                     int(m.group(1)))
+            except ValueError:
+                base = None
+    if base is None:
+        try:
+            base = datetime.datetime.fromisoformat(
+                str(sheet.get("created_at") or "")).date()
+        except ValueError:
+            return None
+    return header_cross.previous_business_day(base).strftime("%d/%m/%Y")
+
+
 def _plan_header_machines(cross: dict, scorer: Scorer | None) -> list[str]:
     """Máquinas não vazias das linhas que ligaram fortemente ao plano."""
     if scorer is None:
@@ -332,9 +364,9 @@ def run_cross_check(conn, uid: str) -> None:
                 "status": "no_reference",
                 "message": "Plano indisponível; linhas mantidas sem cruzamento.",
             }
+    human_rows = db.human_fields_by_row(conn, uid)
     if scorer is not None:
-        cross = check_sheet(rows, scorer, db.human_fields_by_row(conn, uid),
-                            footer=data.get("footer"))
+        cross = check_sheet(rows, scorer, human_rows, footer=data.get("footer"))
     else:
         cross = {"summary": {}, "review_order": [], "rows": []}
 
@@ -352,6 +384,9 @@ def run_cross_check(conn, uid: str) -> None:
             or header_cross.template_machine(template)):
         machine_catalog = _load_header_machines()
     source_document = _source_document(base)
+    # A data assumida também vale para o verso (paragens): é a mesma folha
+    # física, digitalizada no mesmo dia.
+    assumed_date = _assumed_sheet_date(base)
 
     def check_current_header() -> dict:
         return header_cross.check_header(
@@ -361,6 +396,7 @@ def run_cross_check(conn, uid: str) -> None:
             machines=machine_catalog,
             plan_machines=plan_machines,
             source_document=source_document,
+            assumed_date=assumed_date,
         )
 
     header_result = check_current_header()
@@ -395,6 +431,7 @@ def run_cross_check(conn, uid: str) -> None:
                 "Substituído automaticamente. " + final_cell["message"]
             )
 
+    applied_cells: list[tuple[int, str]] = []
     for rc in cross["rows"]:
         for cell in rc["cells"]:
             if cell["auto_write"] and cell["proposal"] is not None:
@@ -403,6 +440,25 @@ def run_cross_check(conn, uid: str) -> None:
                     edits.append((f"rows[{i}].{f}", rows[i].get(f),
                                   cell["proposal"], "cross"))
                     rows[i][f] = cell["proposal"]
+                    applied_cells.append((i, f))
+    if applied_cells and scorer is not None:
+        # Como no cabeçalho: recalcular sobre o estado final, para cada célula
+        # descrever o valor que ficou gravado (não o que existia antes da
+        # substituição), com a marca `applied` a dizer que foi o motor.
+        cross_final = check_sheet(rows, scorer, human_rows,
+                                  footer=data.get("footer"))
+        final_by_row = {r["row_index"]: r for r in cross_final["rows"]}
+        for i, f in applied_cells:
+            final_cell = next(
+                (c for c in final_by_row.get(i, {}).get("cells", [])
+                 if c["field"] == f), None)
+            if final_cell is not None:
+                final_cell["applied"] = True
+                final_cell["message"] = ("Substituído automaticamente. "
+                                         "O valor lido pelo OCR fica visível na célula.")
+        cross["rows"] = cross_final["rows"]
+        cross["summary"] = cross_final["summary"]
+        cross["review_order"] = cross_final["review_order"]
 
     cross["header"] = {
         "cells": header_result["cells"],
@@ -574,6 +630,10 @@ def _process_sheet(uid: str, force_ocr: bool = False) -> None:
                     template = kinds[kind]
             else:
                 extraction = provider.extract(image_path, template)
+            # Ponto comum da cadeia (Qwen/Gemini/Claude): se a leitura veio
+            # sem identificação no cabeçalho, uma segunda chamada focada na
+            # faixa superior tenta recuperá-la. Nunca pisa o que foi lido.
+            extraction = rescue_header(provider, image_path, template, extraction)
         except OcrError as exc:
             # OCR falhou (rede, quota, chave): a folha abre vazia para
             # preenchimento manual; o erro fica no trilho de auditoria
@@ -614,8 +674,11 @@ def _transient_failures(uids: list[str]) -> list[str]:
     try:
         for uid in uids:
             sheet = db.get_sheet(conn, uid)
-            if not sheet or sheet["status"] != "extracted":
-                continue                      # em revisão/validada: não mexer
+            # `in_review` também conta: as escritas do próprio motor (ex.: a
+            # data assumida) mudam o estado sem nenhum humano ter tocado — o
+            # guarda contra pisar trabalho humano é o edit_count, logo abaixo.
+            if not sheet or sheet["status"] not in ("extracted", "in_review"):
+                continue                      # pendente/validada/erro: não mexer
             if db.edit_count(conn, uid):
                 continue                      # já há trabalho humano em cima
             err = (sheet.get("raw_extraction") or {}).get("_ocr_error") or ""
@@ -910,10 +973,14 @@ def export_cpis(de: str = "", ate: str = "", operador: str = "", validadas: int 
 @app.get("/export/basedados")
 def export_basedados(de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
     """A tabela plana no formato Modelo_BaseDados_PerfisCantoneiras.xlsx
-    (11 colunas), comum aos dois setores kanban. Mesmos filtros do CPIS."""
+    (11 colunas), comum aos dois setores kanban. Filtros de período/operador
+    como no CPIS, mas SÓ folhas validadas: a BaseDados é o registo oficial e
+    uma folha por rever ainda pode mudar. O query param `validadas` continua a
+    ser aceite (links/bookmarks antigos), mas é ignorado."""
+    del validadas
     conn = _conn()
     try:
-        sheets = db.list_sheets(conn, status="validated" if validadas else None)
+        sheets = db.list_sheets(conn, status="validated")
         bd_rows: list[tuple] = []
         for meta in sheets:
             if "paragens" in meta["template_name"]:
@@ -945,7 +1012,7 @@ def export_basedados(de: str = "", ate: str = "", operador: str = "", validadas:
         conn.close()
     bd_rows.sort(key=lambda t: t[:4])
     content = cpis_export.build_basedados_workbook([t[4] for t in bd_rows])
-    filename = cpis_export.basedados_filename_for(de or None, ate or None, bool(validadas))
+    filename = cpis_export.basedados_filename_for(de or None, ate or None)
     return Response(
         content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

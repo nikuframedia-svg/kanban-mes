@@ -306,20 +306,22 @@ def test_substituicao_total_em_linha_forte():
         assert by_field["ov"].proposal == "2603660", "proposta sem prefixo OV"
         assert by_field["ov"].auto_write, "OV é função da obra — substitui-se"
         modelo = by_field["modelo"]
-        limiar = s.params.policy.write_threshold_identity
-        assert modelo.auto_write == (modelo.p_correct >= limiar), \
-            "modelo só se substitui com o marginal a autorizá-lo"
+        assert modelo.auto_write, \
+            "política 26/08: o escrito que difere substitui-se sempre"
+        assert modelo.written == "QS128", "o manuscrito fica visível na célula"
     # humano continua inviolável
     rc2 = check_row(row, 0, s, human_fields={"modelo"})
     by_field2 = {c.field: c for c in rc2.cells}
     assert not by_field2["modelo"].auto_write
 
 
-def test_caso_at1t515_nao_e_substituido():
-    """Reprodução do caso real: modelo manuscrito inexistente com MUITAS irmãs
-    plausíveis na mesma obra. O motor não pode gravar um palpite escolhido por
-    ordem alfabética — p_field baixo trava a escrita; a proposta fica visível
-    mas fraca; e o perfil herdado do bloco desempata para a irmã certa."""
+def test_caso_at1t515_substitui_mas_preserva_o_original():
+    """Reprodução do caso real, revista pela política de 26/08: o modelo
+    manuscrito inexistente É substituído pelo valor do plano (o original fica
+    no `written`/raw e visível por baixo da célula na revisão). O que NÃO pode
+    regredir do fix «palpites entre linhas irmãs»: o palpite apresentado tem
+    de vir da família do perfil herdado do bloco, e uma célula EM BRANCO
+    continua sem escrita — nunca se materializa um palpite fraco num vazio."""
     entries = []
     # obra grande com famílias AT1Txxx (40x5) e AT2T5xx (50x5)
     for i in range(100, 200):
@@ -334,23 +336,34 @@ def test_caso_at1t515_nao_e_substituido():
     rows = [
         {"of": "263322", "ov": "2504634", "perfil": "50x5", "modelo": "AEH46", "qtd": "4"},
         {"modelo": "AT1T515", "qtd": "2"},   # manuscrito; não existe no plano
+        {"qtd": "3"},                        # tudo herdado; modelo EM BRANCO
     ]
     result = check_sheet(rows, s)
     linha = result["rows"][1]
     by_field = {c["field"]: c for c in linha["cells"]}
     modelo = by_field["modelo"]
-    assert not modelo["auto_write"], \
-        "palpite entre irmãs NUNCA substitui o manuscrito"
     if modelo["proposal"]:
         # com o perfil 50x5 herdado do bloco e o indel mais caro, o palpite
         # apresentado tem de ser da família do perfil certo
         assert modelo["proposal"].startswith("AT2T5"), \
             f"o perfil do bloco devia desempatar (veio {modelo['proposal']})"
+        assert modelo["auto_write"], \
+            "política 26/08: o escrito que difere substitui-se sempre"
+        assert modelo["written"] == "AT1T515", \
+            "o manuscrito nunca desaparece — fica no written/raw"
+    # a célula em branco é outra história: um palpite entre irmãs empatadas
+    # (p_field ínfimo) nunca se materializa num vazio
+    branco = {c["field"]: c for c in result["rows"][2]["cells"]}["modelo"]
+    if branco["proposal"]:
+        assert not branco["auto_write"], \
+            "palpite entre irmãs NUNCA preenche uma célula em branco"
 
 
-def test_linha_incerta_nao_substitui():
-    """weak_guess mantém o regime de propostas — substituir com base num
-    palpite propagava matches errados em massa."""
+def test_linha_incerta_nao_preenche_vazios_com_palpites():
+    """Política de 26/08: mesmo numa linha incerta, o ESCRITO que difere do
+    plano substitui-se (o original fica visível). As células VAZIAS é que
+    mantêm o regime de propostas — preencher um vazio com um palpite a ~50%
+    continuaria a propagar matches errados em massa."""
     entries = _entries_obra() + [
         {"plan_key": f"B{i}", "of": "OF262797", "ov": "OV2699999",
          "cliente": "outro", "cliente_nome": "OUTRO, LDA", "n_clientes": 1,
@@ -361,8 +374,54 @@ def test_linha_incerta_nao_substitui():
     # sem OF: modelo QS120 existe nas duas obras → incerto
     rc = check_row({"modelo": "QS120", "perfil": "60 x 4"}, 0, s)
     if rc.mode != "strong":
-        assert all(not c.auto_write for c in rc.cells if c.status == "very_different"), \
-            "linha incerta nunca substitui o que difere"
+        limiar = s.params.policy.write_threshold_identity
+        for c in rc.cells:
+            if c.written is None and c.proposal and c.p_correct < limiar:
+                assert not c.auto_write, \
+                    f"vazio de «{c.field}» preenchido com palpite a {c.p_correct:.2f}"
+
+
+def test_escrito_divergente_substitui_mesmo_com_confianca_baixa():
+    """Política de 26/08: uma célula ESCRITA cuja proposta difere aplica-se
+    sempre, mesmo com p_field ínfimo — o original fica no written/raw e
+    visível na revisão. Só a edição humana trava; a Qtd nunca se reescreve;
+    e desligar a política devolve o regime antigo."""
+    s = _cantoneiras_scorer(_entries_obra())
+    row = {"of": "262796", "ov": "2603660", "perfil": "60 x 4",
+           "modelo": "ZZZ999", "qtd": "999999"}
+    rc = check_row(row, 0, s)
+    by_field = {c.field: c for c in rc.cells}
+    modelo = by_field["modelo"]
+    assert modelo.status == "very_different"
+    assert modelo.auto_write, "escrito que difere substitui-se SEMPRE"
+    assert modelo.written == "ZZZ999"
+    # a Qtd é produção: mesmo acima do limite do plano, nunca há proposta
+    if "qtd" in by_field:
+        assert by_field["qtd"].proposal is None
+        assert not by_field["qtd"].auto_write
+
+    # edição humana continua inviolável
+    rc2 = check_row(row, 0, s, human_fields={"modelo"})
+    assert not {c.field: c for c in rc2.cells}["modelo"].auto_write
+
+    # kill switch: sem a política volta o regime de propostas
+    s.params.policy.replace_with_plan = False
+    rc3 = check_row(row, 0, s)
+    modelo3 = {c.field: c for c in rc3.cells}["modelo"]
+    assert modelo3.auto_write == (modelo3.p_correct
+                                  >= s.params.policy.write_threshold_identity)
+    s.params.policy.replace_with_plan = True
+
+
+def test_h0_continua_sem_propostas_nem_escrita():
+    """O ramo H₀ não muda com a substituição total: sem linha credível não há
+    proposta nenhuma nos campos, e nada se escreve."""
+    s = make_scorer()
+    rc = check_row({"of": "OF990000", "ov": "OV9900000", "cliente": "FANTASMA",
+                    "comp_mm": 77777}, 0, s)
+    assert rc.matched_plan_key is None
+    assert all(c.proposal is None for c in rc.cells)
+    assert all(not c.auto_write for c in rc.cells)
 
 
 def test_metros_por_linha_e_desperdicio():

@@ -205,6 +205,117 @@ def test_claude_schema_e_json_schema_valido():
     assert schema["properties"]["kind"]["enum"] == ["producao", "paragens"]
 
 
+# ---- resgate do cabeçalho ----
+
+def _folha_img(tmp_path):
+    from PIL import Image
+    img = tmp_path / "folha.png"
+    Image.new("RGB", (400, 600), "white").save(img)
+    return img
+
+
+def _extraction(**header):
+    base = {"operador": None, "n_operador": None, "setor_maquina": None,
+            "data": None, "turno": None} | header
+    return {"header": base, "rows": [{"of": "263323", "qtd": "4"}], "footer": {}}
+
+
+class _RescueProvider:
+    """Motor falso: só o método de resgate, com registo do que recebeu."""
+
+    name = "fake"
+
+    def __init__(self, answer=None, fail=False):
+        self.answer = answer or {}
+        self.fail = fail
+        self.calls: list = []
+
+    def extract_header(self, image_path, template):
+        from app.ocr.provider import OcrError
+        self.calls.append(image_path)
+        if self.fail:
+            raise OcrError("resgate rebentou")
+        return self.answer
+
+
+def test_resgate_dispara_com_cabecalho_vazio_e_funde(tmp_path):
+    from app.ocr.provider import rescue_header
+
+    p = _RescueProvider(answer={"operador": "Zé Manel", "n_operador": "47",
+                                "setor_maquina": "Rapid 20T - 2", "turno": "M"})
+    out = rescue_header(p, _folha_img(tmp_path), CANTONEIRAS_KANBAN, _extraction())
+    assert len(p.calls) == 1, "≥2 campos vazios + imagem → UMA segunda chamada"
+    assert p.calls[0] != _folha_img(tmp_path), "a chamada leva o recorte, não a folha"
+    assert out["header"]["operador"] == "Zé Manel"
+    assert out["header"]["setor_maquina"] == "Rapid 20T - 2"
+    assert out["header"]["turno"] == "M"
+    assert out["_header_rescue"] is True
+    assert out["rows"] == [{"of": "263323", "qtd": "4"}], "as linhas nunca se tocam"
+    assert not p.calls[0].exists(), "o recorte temporário é apagado"
+
+
+def test_resgate_nao_dispara_com_cabecalho_preenchido(tmp_path):
+    from app.ocr.provider import rescue_header
+
+    p = _RescueProvider(answer={"operador": "OUTRO"})
+    cheio = _extraction(operador="Zé", n_operador="47", setor_maquina="Rapid 20T - 2")
+    out = rescue_header(p, _folha_img(tmp_path), CANTONEIRAS_KANBAN, cheio)
+    assert p.calls == [], "só 1 campo vazio (turno) → sem segunda chamada"
+    assert "_header_rescue" not in out
+
+    # sem imagem também não há resgate possível
+    out2 = rescue_header(p, None, CANTONEIRAS_KANBAN, _extraction())
+    assert p.calls == [] and "_header_rescue" not in out2
+
+
+def test_resgate_nunca_pisa_valores_lidos(tmp_path):
+    from app.ocr.provider import rescue_header
+
+    p = _RescueProvider(answer={"operador": "IMPOSTOR", "n_operador": "99",
+                                "setor_maquina": "Rapid 20T - 2", "turno": "M"})
+    out = rescue_header(p, _folha_img(tmp_path), CANTONEIRAS_KANBAN,
+                        _extraction(operador="Zé Manel"))
+    assert out["header"]["operador"] == "Zé Manel", "o lido no extract manda"
+    assert out["header"]["n_operador"] == "99", "os vazios preenchem-se"
+    assert out["_header_rescue"] is True
+
+
+def test_resgate_falhado_deixa_o_extract_intacto(tmp_path):
+    import copy
+
+    from app.ocr.provider import rescue_header
+
+    p = _RescueProvider(fail=True)
+    original = _extraction()
+    antes = copy.deepcopy(original)
+    out = rescue_header(p, _folha_img(tmp_path), CANTONEIRAS_KANBAN, original)
+    assert out == antes, "falha no resgate não pode mudar nada"
+    assert "_header_rescue" not in out
+
+    # motor sem método de resgate (ex.: manual) → simplesmente não corre
+    out2 = rescue_header(ManualEntryProvider(), _folha_img(tmp_path),
+                         CANTONEIRAS_KANBAN, _extraction())
+    assert "_header_rescue" not in out2
+
+
+def test_recorte_do_cabecalho_multiplo_de_28(tmp_path):
+    """O Qwen exige AMBAS as dimensões múltiplas de 28 (assert do GGML)."""
+    from PIL import Image
+
+    from app.ocr.provider import _crop_header_band
+
+    img = tmp_path / "f.png"
+    Image.new("RGB", (413, 601), "white").save(img)
+    band = _crop_header_band(img)
+    try:
+        with Image.open(band) as b:
+            w, h = b.size
+        assert w % 28 == 0 and h % 28 == 0
+        assert h <= 601 * 0.30 + 28, "só a faixa superior, não a folha inteira"
+    finally:
+        band.unlink()
+
+
 def test_get_provider_encadeia_pelas_chaves(monkeypatch):
     from app.ocr import provider as mod
 

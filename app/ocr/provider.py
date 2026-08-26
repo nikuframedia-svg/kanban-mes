@@ -91,8 +91,11 @@ def _extraction_prompt(template: KanbanTemplate) -> str:
         "ignora linhas totalmente vazias.\n"
         "4. Números: transcreve os dígitos tal como escritos (sem unidades). "
         "Um visto/cruz numa célula transcreve-se como «x».\n"
-        "5. No cabeçalho, `turno` é a opção assinalada com cruz (M, R ou XM), se alguma; "
-        "`n_operador` é o campo «N.º».\n"
+        "5. Cabeçalho impresso no topo da folha — transcreve TODOS os campos: "
+        "`operador` = o nome manuscrito no campo «Operador»; `n_operador` = os "
+        "dígitos do campo «N.º» (ao lado do nome); `setor_maquina` = o campo "
+        "«Setor/Máquina» (ex.: «Rapid 20T - 2»); `data` = o campo «Data»; "
+        "`turno` = a caixa assinalada com cruz entre «M», «R» e «XM», se alguma.\n"
         "6. Valores repetidos por linhas seguidas (ex.: cliente escrito uma vez para "
         "várias linhas) transcrevem-se só na linha onde estão escritos.\n"
         "7. Atenção às DUAS ÚLTIMAS colunas, que se confundem facilmente: o que "
@@ -128,8 +131,12 @@ def _auto_extraction_prompt(templates: dict[str, KanbanTemplate]) -> str:
         "ignora linhas totalmente vazias. Página sem nada manuscrito → `rows` vazio.\n"
         "4. Números: transcreve os dígitos tal como escritos (sem unidades). "
         "Um visto/cruz numa célula transcreve-se como «x».\n"
-        "5. No cabeçalho, `turno` é a opção assinalada com cruz (M, R ou XM), se alguma; "
-        "`n_operador` é o campo «N.º».\n"
+        "5. Cabeçalho impresso no topo (igual nas duas faces) — transcreve TODOS "
+        "os campos: `operador` = o nome manuscrito no campo «Operador»; "
+        "`n_operador` = os dígitos do campo «N.º» (ao lado do nome); "
+        "`setor_maquina` = o campo «Setor/Máquina» (ex.: «Rapid 20T - 2»); "
+        "`data` = o campo «Data»; `turno` = a caixa assinalada com cruz entre "
+        "«M», «R» e «XM», se alguma.\n"
         "6. Valores repetidos por linhas seguidas (ex.: cliente escrito uma vez para "
         "várias linhas) transcrevem-se só na linha onde estão escritos.\n"
         "7. Na face de produção, atenção às DUAS ÚLTIMAS colunas, que se confundem "
@@ -138,6 +145,113 @@ def _auto_extraction_prompt(templates: dict[str, KanbanTemplate]) -> str:
         "deixa-a a null — não desloques valores de uma coluna para a outra.\n"
         "Devolve apenas o JSON pedido."
     )
+
+
+# ---- resgate do cabeçalho (segunda chamada focada) ----
+
+# Os 4 campos de identificação que aparecem vazios no sintoma real (a data
+# fica de fora: é assumida pelo sistema como o dia útil anterior).
+HEADER_RESCUE_FIELDS = ("operador", "n_operador", "setor_maquina", "turno")
+
+
+def _header_rescue_prompt(template: KanbanTemplate) -> str:
+    return (
+        "Estás a ver APENAS a faixa superior (o cabeçalho impresso) de uma "
+        "folha kanban manuscrita de uma fábrica metalomecânica portuguesa "
+        f"({template.label}).\n"
+        "Transcreve SÓ estes campos, pelos nomes impressos na folha:\n"
+        "- `operador` = o nome manuscrito no campo «Operador»;\n"
+        "- `n_operador` = os dígitos do campo «N.º» (ao lado do nome);\n"
+        "- `setor_maquina` = o campo «Setor/Máquina» (ex.: «Rapid 20T - 2»);\n"
+        "- `turno` = a caixa assinalada com cruz entre «M», «R» e «XM», se alguma.\n"
+        "REGRAS ESTRITAS: transcreve EXATAMENTE o que está escrito, sem corrigir "
+        "nem completar; campo vazio ou ilegível → null; nunca inventes valores.\n"
+        'Devolve apenas o JSON {"operador": …, "n_operador": …, '
+        '"setor_maquina": …, "turno": …}.'
+    )
+
+
+def _clean_header_fields(data: object) -> dict:
+    """Resposta do resgate → só os 4 campos, com o mesmo strip do resto."""
+    src = data if isinstance(data, dict) else {}
+    # há modelos que embrulham na mesma em {"header": {...}} — aceita-se
+    if isinstance(src.get("header"), dict):
+        src = src["header"]
+    out = {}
+    for f in HEADER_RESCUE_FIELDS:
+        v = src.get(f)
+        out[f] = str(v).strip() or None if v is not None else None
+    return out
+
+
+# Fração da altura que cobre o cabeçalho da TPL102 com folga.
+_HEADER_BAND_FRACTION = 0.30
+
+
+def _crop_header_band(image_path: Path) -> Path:
+    """Recorta a faixa superior da folha para a chamada de resgate.
+
+    Escreve um JPEG temporário (quem chama apaga-o). As dimensões
+    arredondam-se a múltiplos de 28 com a mesma regra do transporte Qwen
+    (`_round_to_stride`): o modelo local rejeita outras dimensões e para os
+    motores cloud o arredondamento é inócuo.
+    """
+    import tempfile
+
+    from PIL import Image
+
+    with Image.open(image_path) as raw:
+        rgb = raw.convert("RGB")
+    band = rgb.crop((0, 0, rgb.size[0],
+                     max(1, round(rgb.size[1] * _HEADER_BAND_FRACTION))))
+    target = (_round_to_stride(band.size[0]), _round_to_stride(band.size[1]))
+    if target != band.size:
+        band = band.resize(target, Image.Resampling.LANCZOS)
+    tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+    try:
+        band.save(tmp, format="JPEG", quality=90)
+    finally:
+        tmp.close()
+    return Path(tmp.name)
+
+
+def rescue_header(provider: "OcrProvider", image_path: Path | None,
+                  template: KanbanTemplate, extraction: dict) -> dict:
+    """Resgate do cabeçalho — corre DEPOIS do extract, para qualquer motor.
+
+    Sintoma real: kanbans capturados com operador/n_operador/setor_maquina/
+    turno vazios porque o modelo gasta a atenção na tabela. Se ≥2 destes 4
+    campos vierem vazios e houver imagem, recorta-se a faixa superior e
+    faz-se UMA segunda chamada focada só no cabeçalho. A fusão só preenche o
+    que estava vazio — nunca pisa valores lidos, nunca toca nas linhas — e
+    qualquer falha deixa a extração original intacta: o resgate é
+    oportunista, não é caminho crítico.
+    """
+    header = extraction.get("header") or {}
+    fields = [f for f in HEADER_RESCUE_FIELDS if f in template.header_fields]
+    empty = [f for f in fields if not str(header.get(f) or "").strip()]
+    extract_header = getattr(provider, "extract_header", None)
+    if len(empty) < 2 or not image_path or extract_header is None:
+        return extraction
+    band: Path | None = None
+    try:
+        band = _crop_header_band(image_path)
+        rescued = _clean_header_fields(extract_header(band, template))
+    except (OcrError, OSError, ValueError):
+        return extraction
+    finally:
+        if band is not None:
+            try:
+                band.unlink()
+            except OSError:
+                pass
+    for f in fields:
+        value = str(rescued.get(f) or "").strip()
+        if value and not str(header.get(f) or "").strip():
+            header[f] = value
+    extraction["header"] = header
+    extraction["_header_rescue"] = True
+    return extraction
 
 
 def _clean_extraction(data: dict, template: KanbanTemplate) -> dict:
@@ -385,6 +499,15 @@ class QwenOcrProvider:
         kind = _resolve_kind(data, templates)
         return kind, _clean_extraction(data, templates[kind])
 
+    def extract_header(self, image_path: Path, template: KanbanTemplate) -> dict:
+        """Chamada de resgate: só os 4 campos do cabeçalho (ver rescue_header)."""
+        return self._with_fallback("extract_header", self._extract_header,
+                                   image_path, template)
+
+    def _extract_header(self, image_path: Path, template: KanbanTemplate) -> dict:
+        data = self._request_json(image_path, _header_rescue_prompt(template))
+        return _clean_header_fields(data)
+
 
 class GeminiOcrProvider:
     name = "gemini"
@@ -577,6 +700,39 @@ class GeminiOcrProvider:
         kind = _resolve_kind(data, templates)
         return kind, _clean_extraction(data, templates[kind])
 
+    def extract_header(self, image_path: Path, template: KanbanTemplate) -> dict:
+        """Chamada de resgate: só os 4 campos do cabeçalho (ver rescue_header)."""
+        return self._with_fallback("extract_header", self._extract_header,
+                                   image_path, template)
+
+    def _extract_header(self, image_path: Path, template: KanbanTemplate) -> dict:
+        if not image_path or not image_path.is_file():
+            raise OcrError(f"Imagem não encontrada: {image_path}")
+        mime = _MIME_BY_SUFFIX.get(image_path.suffix.lower(), "image/jpeg")
+        body = {
+            "contents": [{
+                "parts": [
+                    {"inline_data": {
+                        "mime_type": mime,
+                        "data": base64.b64encode(image_path.read_bytes()).decode("ascii"),
+                    }},
+                    {"text": _header_rescue_prompt(template)},
+                ],
+            }],
+            "generationConfig": {
+                "temperature": 0,
+                "response_mime_type": "application/json",
+                "response_schema": {
+                    "type": "OBJECT",
+                    "properties": {
+                        f: {"type": "STRING", "nullable": True}
+                        for f in HEADER_RESCUE_FIELDS
+                    },
+                },
+            },
+        }
+        return _clean_header_fields(self._response_json(self._call(body)))
+
 
 class ClaudeOcrProvider:
     """Último recurso pago: a API Claude, só quando toda a cadeia Gemini falhou.
@@ -690,6 +846,18 @@ class ClaudeOcrProvider:
                           self._auto_schema(templates))
         kind = _resolve_kind(data, templates)
         return kind, _clean_extraction(data, templates[kind])
+
+    def extract_header(self, image_path: Path, template: KanbanTemplate) -> dict:
+        """Chamada de resgate: só os 4 campos do cabeçalho (ver rescue_header)."""
+        schema = {
+            "type": "object",
+            "properties": {f: {"type": ["string", "null"]}
+                           for f in HEADER_RESCUE_FIELDS},
+            "required": list(HEADER_RESCUE_FIELDS),
+            "additionalProperties": False,
+        }
+        return _clean_header_fields(
+            self._call(image_path, _header_rescue_prompt(template), schema))
 
 
 def get_provider() -> OcrProvider:

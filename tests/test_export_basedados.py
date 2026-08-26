@@ -71,22 +71,46 @@ def test_workbook_formato():
     assert ws.cell(2, 11).number_format == "0.00"
 
 
+def test_proposta_nao_aplicada_ja_nao_e_exportada():
+    """Com a substituição total, o que o motor aprova está NA folha; uma
+    proposta que ficou por aplicar (ex.: campo protegido por edição humana)
+    não pode entrar no ficheiro oficial como se fosse um valor da folha."""
+    sheet = {"sheet_data": {"header": {"data": "10/08/2026"}}}
+    row = {"of": "", "ov": "", "perfil": "", "modelo": ""}
+    cr = {"cells": [{"field": "of", "proposal": "OF263322"},
+                    {"field": "ov", "inherited": "OV2504634", "proposal": "OV9"}]}
+    bd = basedados_row_for(sheet, row, cr, None)
+    assert bd["of"] is None, "proposta por aplicar fica fora do export"
+    assert bd["ov"] == "2504634", "o herdado continua a valer"
+
+
 def test_nome_do_ficheiro():
-    assert basedados_filename_for(None, None, False) == "BaseDados_sempre.xlsx"
-    assert basedados_filename_for("2026-08-10", "2026-08-10", False) == \
+    # sem sufixo condicional: a BaseDados é sempre e só de folhas validadas
+    assert basedados_filename_for(None, None) == "BaseDados_sempre.xlsx"
+    assert basedados_filename_for("2026-08-10", "2026-08-10") == \
         "BaseDados_1-dia_2026-08-10.xlsx"
-    assert basedados_filename_for("2026-08-01", "2026-08-10", True) == \
-        "BaseDados_2026-08-01_2026-08-10_validadas.xlsx"
+    assert basedados_filename_for("2026-08-01", "2026-08-10") == \
+        "BaseDados_2026-08-01_2026-08-10.xlsx"
 
 
-def test_rota_exporta_folha_real(client):  # noqa: F811
-    """Fluxo completo: folha em staging → /export/basedados com filtros."""
+def test_rota_exporta_so_folhas_validadas(client):  # noqa: F811
+    """Fluxo completo: só a folha VALIDADA entra na BaseDados — é o registo
+    oficial. O query param `validadas` continua aceite, mas é ignorado."""
     r = client.post("/upload", data={"template_name": "cantoneiras_kanban"})
     uid = r.headers["location"].rsplit("/", 1)[1]
     edit(client, uid, "header.operador", "Ze Manel")
     edit(client, uid, "header.data", "10/08/2026")
     edit(client, uid, "rows[0].of", "OF250001")
     edit(client, uid, "rows[0].qtd", "3")
+
+    # por validar → export vazio, mesmo com validadas=0 explícito
+    r = client.get("/export/basedados?de=2026-08-10&ate=2026-08-10&validadas=0")
+    assert r.status_code == 200
+    assert load_workbook(io.BytesIO(r.content)).active.max_row == 1, \
+        "folha em revisão nunca entra na BaseDados"
+
+    assert client.post(f"/sheet/{uid}/validate",
+                       data={"actor": "luis"}).status_code == 303
 
     r = client.get("/export/basedados?de=2026-08-10&ate=2026-08-10")
     assert r.status_code == 200
