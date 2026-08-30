@@ -1,20 +1,99 @@
 """Geração de PDFs (fpdf2) — folha kanban individual e relatório de estado.
 
-Fontes Liberation do sistema (PT-PT completo); fallback helvetica se faltarem.
-Ambas as funções devolvem bytes prontos a servir com Content-Disposition.
+Usa uma fonte TrueType Unicode instalada com a aplicação ou com o sistema.
+Quando a máquina não tem nenhuma fonte compatível, o fallback Helvetica é
+tolerante: preserva PT-PT/Windows-1252 e substitui apenas glifos impossíveis,
+em vez de deixar o endpoint responder 500.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import Iterator
 
 from fpdf import FPDF
 
 from ..templates_spec import KanbanTemplate
 
-_FONT_DIR = Path("/usr/share/fonts/truetype/liberation")
-_FONT = "LiberationSans-Regular.ttf"
-_FONT_BOLD = "LiberationSans-Bold.ttf"
+_LOCAL_FONT_DIR = Path(__file__).resolve().parent / "fonts"
+
+# Pares comuns nos três sistemas suportados. O nome da família registada no
+# fpdf é nosso, por isso não precisamos de inferir os metadados do TTF.
+_FONT_FILE_PAIRS = (
+    ("LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf"),
+    ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"),
+    ("NotoSans-Regular.ttf", "NotoSans-Bold.ttf"),
+    ("FreeSans.ttf", "FreeSansBold.ttf"),
+    ("arial.ttf", "arialbd.ttf"),
+    ("segoeui.ttf", "segoeuib.ttf"),
+    ("calibri.ttf", "calibrib.ttf"),
+    ("aptos.ttf", "aptos-bold.ttf"),
+)
+
+
+class _PortableFPDF(FPDF):
+    """FPDF que nunca falha apenas por não existir um glifo no fallback.
+
+    Fontes TrueType continuam a receber o Unicode original. A substituição
+    só acontece no último recurso, quando se usa uma das fontes base do PDF.
+    """
+
+    def normalize_text(self, text: str) -> str:
+        if self.current_font is not None and not self.is_ttf_font:
+            encoding = self.core_fonts_encoding or "cp1252"
+            return text.encode(encoding, errors="replace").decode("latin-1")
+        return text
+
+
+def _font_directories() -> Iterator[Path]:
+    """Pastas de fontes por prioridade, sem depender do sistema operativo."""
+    configured = os.getenv("MES_PDF_FONT_DIR")
+    windir = os.getenv("WINDIR")
+    local_app_data = os.getenv("LOCALAPPDATA")
+    candidates = [
+        Path(configured).expanduser() if configured else None,
+        _LOCAL_FONT_DIR,
+        Path(windir) / "Fonts" if windir else None,
+        Path(local_app_data) / "Microsoft" / "Windows" / "Fonts"
+        if local_app_data else None,
+        Path("/usr/share/fonts/truetype/liberation"),
+        Path("/usr/share/fonts/truetype/liberation2"),
+        Path("/usr/share/fonts/truetype/dejavu"),
+        Path("/usr/share/fonts/truetype/noto"),
+        Path("/usr/share/fonts/truetype/freefont"),
+        Path("/Library/Fonts"),
+        Path("/System/Library/Fonts"),
+        Path("/System/Library/Fonts/Supplemental"),
+        Path.home() / "Library" / "Fonts",
+    ]
+    seen: set[str] = set()
+    for directory in candidates:
+        if directory is None:
+            continue
+        key = os.path.normcase(os.path.abspath(str(directory)))
+        if key not in seen:
+            seen.add(key)
+            yield directory
+
+
+def _font_candidates() -> Iterator[tuple[Path, Path]]:
+    """Pares regular/negrito existentes, incluindo overrides diretos."""
+    configured_regular = os.getenv("MES_PDF_FONT_REGULAR")
+    configured_bold = os.getenv("MES_PDF_FONT_BOLD")
+    if configured_regular and configured_bold:
+        regular = Path(configured_regular).expanduser()
+        bold = Path(configured_bold).expanduser()
+        if regular.is_file() and bold.is_file():
+            yield regular, bold
+
+    for directory in _font_directories():
+        for regular_name, bold_name in _FONT_FILE_PAIRS:
+            regular = directory / regular_name
+            bold = directory / bold_name
+            if regular.is_file() and bold.is_file():
+                yield regular, bold
+
 
 _INK = (21, 17, 11)
 _MUTED = (107, 99, 87)
@@ -24,13 +103,23 @@ _HEAD_BG = (236, 238, 241)
 
 
 def _make_pdf(orientation: str) -> tuple[FPDF, str]:
-    """Devolve (pdf, family). family é 'Liberation' ou 'helvetica' (fallback)."""
-    pdf = FPDF(orientation=orientation, unit="mm", format="A4")
+    """Devolve ``(pdf, family)`` com a primeira fonte Unicode utilizável."""
+    pdf = _PortableFPDF(orientation=orientation, unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=18)
-    if (_FONT_DIR / _FONT).is_file() and (_FONT_DIR / _FONT_BOLD).is_file():
-        pdf.add_font("Liberation", "", str(_FONT_DIR / _FONT))
-        pdf.add_font("Liberation", "B", str(_FONT_DIR / _FONT_BOLD))
-        return pdf, "Liberation"
+    for index, (regular, bold) in enumerate(_font_candidates()):
+        family = f"KanbanUnicode{index}"
+        try:
+            pdf.add_font(family, "", str(regular))
+            pdf.add_font(family, "B", str(bold))
+        except Exception:
+            # Uma fonte instalada pode estar corrompida ou inacessível. Tenta
+            # a seguinte antes de recorrer à fonte base do PDF.
+            continue
+        return pdf, family
+
+    # O em dash, aspas curvas e o euro existem em cp1252 (não em latin-1,
+    # default do fpdf). _PortableFPDF substitui de forma segura o que exceder.
+    pdf.core_fonts_encoding = "cp1252"
     return pdf, "helvetica"
 
 
