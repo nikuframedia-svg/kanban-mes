@@ -84,6 +84,38 @@ def test_ingest_cria_folhas_dos_pdfs_novos(client):
     assert n_sheets(client) == 5
 
 
+def test_ingest_reporta_pdf_ilegivel_sem_bloquear_os_restantes(client):
+    make_pdf(client.drive / "07-08-2026_Rapid 20t valido.PDF", 1, "valido")
+    estragado = client.drive / "08-08-2026_Rapid 20t estragado.PDF"
+    estragado.write_bytes(b"isto nao e um PDF")
+
+    r = client.post("/ingest/drive")
+
+    assert r.status_code == 422
+    out = r.json()
+    assert out["pdfs_vistos"] == 2
+    assert out["pdfs_novos"] == 1
+    assert out["pdfs_falhados"] == 1
+    assert out["folhas_criadas"] == 1
+    assert out["falhas"] == [{
+        "ficheiro": estragado.name,
+        "tipo": "pdf_ilegivel",
+        "erro": out["falhas"][0]["erro"],
+        "detalhe": out["falhas"][0]["detalhe"],
+    }]
+    assert out["falhas"][0]["erro"]
+    assert out["falhas"][0]["detalhe"]
+    assert n_sheets(client) == 1, "o PDF válido do mesmo lote tem de avançar"
+
+    # O PDF válido fica deduplicado; o ilegível não fica falsamente marcado
+    # como processado e volta a ser sinalizado numa execução posterior.
+    segunda = client.post("/ingest/drive")
+    assert segunda.status_code == 422
+    assert segunda.json()["folhas_criadas"] == 0
+    assert segunda.json()["pdfs_falhados"] == 1
+    assert n_sheets(client) == 1
+
+
 def test_ingest_e_idempotente(client):
     make_pdf(client.drive / "09-08-2026_Rapid 20t 1_2.PDF", 2, "lote9")
     assert client.post("/ingest/drive").json()["folhas_criadas"] == 2

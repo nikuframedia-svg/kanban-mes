@@ -18,7 +18,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -798,22 +804,37 @@ def ingest_drive(request: Request):
 
     pdfs = sorted(p for p in drive.iterdir()
                   if p.is_file() and _KANBAN_PDF_RE.match(p.name))
-    report = {"pdfs_novos": 0, "folhas_criadas": 0, "paginas_repetidas": 0,
-              "pdfs_vistos": len(pdfs)}
+    report = {
+        "pdfs_novos": 0,
+        "folhas_criadas": 0,
+        "paginas_repetidas": 0,
+        "pdfs_vistos": len(pdfs),
+        "pdfs_falhados": 0,
+        "falhas": [],
+    }
     uids: list[str] = []
     conn = _conn()
     try:
         done = db.ingested_shas(conn)
         for pdf in pdfs:
-            content = pdf.read_bytes()
-            pdf_sha = hashlib.sha256(content).hexdigest()
-            if pdf_sha in done:
-                continue
             try:
+                content = pdf.read_bytes()
+                pdf_sha = hashlib.sha256(content).hexdigest()
+                if pdf_sha in done:
+                    continue
                 pages = _pdf_to_images(content, pdf.stem)
+                if not pages:
+                    raise ValueError("PDF sem páginas")
             except Exception as exc:
                 # PDF estragado não pode encravar o ciclo diário inteiro
                 print(f"[ingest] {pdf.name}: PDF ilegível ({exc})", flush=True)
+                report["pdfs_falhados"] += 1
+                report["falhas"].append({
+                    "ficheiro": pdf.name,
+                    "tipo": "pdf_ilegivel",
+                    "erro": type(exc).__name__,
+                    "detalhe": str(exc)[:500],
+                })
                 continue
             report["pdfs_novos"] += 1
             for page_bytes, page_name in pages:
@@ -833,6 +854,10 @@ def ingest_drive(request: Request):
             threading.Thread(target=_process_batch, args=(uids,), daemon=True).start()
         else:  # testes: determinístico
             _process_batch(uids)
+    if report["falhas"]:
+        # Os PDFs válidos foram processados, mas o chamador tem de receber um
+        # estado de falha para não dar o ciclo diário como concluído.
+        return JSONResponse(status_code=422, content=report)
     return report
 
 
