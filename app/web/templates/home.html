@@ -2,28 +2,6 @@
 {% set live = true %}
 {% block title %}Histórico — Kanban MES{% endblock %}
 {% block content %}
-{# Filtros "sticky": abrir uma folha e voltar (back do browser, "← Voltar à
-   lista", menu lateral ou redirect pós-validação) cai em / sem querystring.
-   Guardamos os filtros activos em sessionStorage e repomo-los. FORA do
-   #dash-data, que o HTMX troca a cada 30 s, para não correr a cada poll. #}
-<script>
-(function () {
-  var KEY = 'queue_filters';
-  var FILTER_KEYS = ['status', 'operador', 'setor', 'data', 'data_captura', 'of'];
-  var p = new URLSearchParams(location.search);
-  if (p.get('created') || p.get('deleted')) return;   // veio de uma acção: não mexer
-  var present = FILTER_KEYS.filter(function (k) { return p.get(k); });
-  if (present.length) {                        // URL tem filtros → memoriza-os
-    var qs = new URLSearchParams();
-    present.forEach(function (k) { qs.set(k, p.get(k)); });
-    sessionStorage.setItem(KEY, qs.toString());
-  } else {                                     // sem filtros → repõe o último set
-    var saved = sessionStorage.getItem(KEY);
-    if (saved) { location.replace(location.pathname + '?' + saved); }
-  }
-})();
-</script>
-
 <div class="page-h">
   <div>
     <div class="page-eyebrow">Chão de Fábrica · Histórico</div>
@@ -33,7 +11,7 @@
 </div>
 
 <div id="dash-data" class="page-content"
-     hx-get="{{ request.url }}"
+     hx-get="{{ history_url }}"
      hx-trigger="every 30s"
      hx-select="#dash-data"
      hx-swap="outerHTML">
@@ -50,7 +28,7 @@
   {# Os botões de estado levam consigo todos os outros filtros activos. #}
   <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; align-items:center;">
     {% for value, label in [('', 'Todas'), ('pending', 'Pendentes'), ('validated', 'Validadas'), ('error', 'Erro')] %}
-      <a href="/?status={{ value }}{{ filter_qs }}"
+      <a href="{{ status_urls[value] }}"
          class="btn {% if f.status == value %}primary{% endif %}">{{ label }}</a>
     {% endfor %}
   </div>
@@ -103,20 +81,12 @@
     </label>
 
     {% if f.operador or f.data or f.data_captura or f.setor or f.of %}
-      {# Limpar tem de apagar o sessionStorage, senão o script sticky repõe
-         logo a seguir os filtros que acabámos de limpar. #}
       <a class="btn ghost" style="font-size:12px;"
-         onclick="sessionStorage.removeItem('queue_filters')"
-         href="/{% if f.status %}?status={{ f.status }}{% endif %}">✕ Limpar filtros</a>
+         href="{{ clear_url }}">✕ Limpar filtros</a>
     {% endif %}
   </form>
 
   {% include "_legend.html" %}
-
-  {# URL de origem completa, para o /sheet ter "← Voltar à lista" com filtros. #}
-  {%- set _back_url -%}
-    /{% if f.status or filter_qs %}?status={{ f.status }}{{ filter_qs }}{% endif %}
-  {%- endset -%}
 
   <div class="card">
     <div class="scroll-x">
@@ -159,14 +129,15 @@
               {% endif %}
             </td>
             <td style="text-align:right; white-space:nowrap;">
-              <a href="/sheet/{{ s.uid }}?back={{ _back_url|trim|urlencode }}" class="btn ghost">abrir</a>
+              <a href="/sheet/{{ s.uid }}?back={{ history_url|urlencode }}" class="btn ghost">abrir</a>
               <a href="/sheet/{{ s.uid }}/csv" class="btn ghost">csv</a>
               {% if s.status != 'validated' %}
-              <button class="btn ghost" style="color:var(--crit); border-color:var(--crit-soft);"
-                      onclick="if (confirm('Apagar a folha {{ s.uid[:8] }}? Não há volta.')) {
-                                fetch('/sheet/{{ s.uid }}/delete', {method: 'POST'})
-                                  .then(r => r.ok ? window.location.reload() : alert('Erro: ' + r.status));
-                              }">apagar</button>
+              <form method="post" action="/sheet/{{ s.uid }}/delete" style="display:inline;"
+                    onsubmit="return confirm('Apagar a folha {{ s.uid[:8] }}? Não há volta.');">
+                <input type="hidden" name="back" value="{{ history_url }}">
+                <button class="btn ghost" type="submit"
+                        style="color:var(--crit); border-color:var(--crit-soft);">apagar</button>
+              </form>
               {% endif %}
             </td>
           </tr>
@@ -180,10 +151,29 @@
     </div>
   </div>
 
+  {% if pagination.pages > 1 %}
+  <nav aria-label="Paginação do histórico"
+       style="display:flex; justify-content:center; align-items:center; gap:10px; margin-top:14px;">
+    {% if pagination.prev %}<a class="btn ghost" href="{{ pagination.prev }}">← Anterior</a>{% endif %}
+    <span class="muted tiny">Página {{ pagination.page }} de {{ pagination.pages }} · {{ pagination.total }} folhas</span>
+    {% if pagination.next %}<a class="btn ghost" href="{{ pagination.next }}">Seguinte →</a>{% endif %}
+  </nav>
+  {% endif %}
+
   {% if tunnel_url %}
   <div class="muted tiny" style="margin-top:14px;">
     Endereço público: <span class="mono">{{ tunnel_url }}</span>
   </div>
   {% endif %}
 </div>
+{% if created or deleted %}
+<script>
+  (function () {
+    var url = new URL(window.location.href);
+    url.searchParams.delete('created');
+    url.searchParams.delete('deleted');
+    history.replaceState(null, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams : ''));
+  })();
+</script>
+{% endif %}
 {% endblock %}

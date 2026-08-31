@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Folha {{ sheet.uid[:8] }} — Kanban MES{% endblock %}
 {% block topbar_actions %}
-  {% if back_url %}<a class="btn ghost" href="{{ back_url }}">← Voltar à lista</a>{% endif %}
+  <a class="btn ghost sheet-back" href="{{ back_url }}">← Voltar à lista</a>
   <a class="btn" href="/sheet/{{ sheet.uid }}/csv">CSV</a>
   <a class="btn" href="/sheet/{{ sheet.uid }}/pdf">⬇ PDF</a>
 {% endblock %}
@@ -80,6 +80,7 @@ setTimeout(function () {
     <div class="mono tiny" style="opacity:.8;">{{ (sheet.error_message or '')[:200] }}</div>
   </div>
   <form method="post" action="/sheet/{{ sheet.uid }}/reocr">
+    <input type="hidden" name="back" value="{{ back_url }}">
     <button type="submit" class="btn">Tentar outra vez</button>
   </form>
 </div>
@@ -93,6 +94,7 @@ setTimeout(function () {
   </div>
   <form method="post" action="/sheet/{{ sheet.uid }}/reocr?force=1"
         onsubmit="return confirm('Esta página foi detetada como vazia. Forçar OCR na mesma?');">
+    <input type="hidden" name="back" value="{{ back_url }}">
     <button type="submit" class="btn">Forçar OCR</button>
   </form>
 </div>
@@ -105,6 +107,7 @@ setTimeout(function () {
     <div class="mono tiny" style="opacity:.8;">{{ data['_ocr_error'][:160] }}</div>
   </div>
   <form method="post" action="/sheet/{{ sheet.uid }}/reocr">
+    <input type="hidden" name="back" value="{{ back_url }}">
     <button type="submit" class="btn">Tentar OCR outra vez</button>
   </form>
 </div>
@@ -207,6 +210,7 @@ setTimeout(function () {
         {% endif %}
       {% else %}
         <form method="post" action="/sheet/{{ sheet.uid }}/edit">
+          <input type="hidden" name="back" value="{{ back_url }}">
           <input type="hidden" name="field_path" value="{{ field_path }}">
           <input type="hidden" name="revision" value="{{ sheet.revision }}">
           <input type="hidden" name="actor" value="operador">
@@ -479,16 +483,19 @@ setTimeout(function () {
       <div class="card-b">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
           <form method="post" action="/sheet/{{ sheet.uid }}/add-row">
+            <input type="hidden" name="back" value="{{ back_url }}">
             <button type="submit" class="btn">+ Linha</button>
           </form>
           {% if t.index_loader %}
           <form method="post" action="/sheet/{{ sheet.uid }}/recheck">
+            <input type="hidden" name="back" value="{{ back_url }}">
             <button type="submit" class="btn">Re-verificar contra o plano</button>
           </form>
           {% endif %}
           <form method="post" action="/sheet/{{ sheet.uid }}/validate"
                 style="display:flex; gap:8px; align-items:center; margin-left:auto;"
                 onsubmit="return confirm('Validar a folha? Depois de validada fica imutável.')">
+            <input type="hidden" name="back" value="{{ back_url }}">
             <button type="submit" class="btn primary">Validar folha</button>
           </form>
         </div>

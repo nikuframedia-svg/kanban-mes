@@ -1,10 +1,9 @@
 """Testes da página Estado — Postgres simulado por monkeypatch."""
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app import db
 from app.web import estado, main
+from tests.live_client import LiveTestClient
 
 PLAN = [
     {"cliente": "silva & vinha sa", "ov": "OV2400001", "of": "OF250001",
@@ -59,7 +58,8 @@ def client(tmp_path, monkeypatch):
                       "machine": "Rapid", "model_ref": "L50X50X5",
                       "quantity": 55, "match_confidence": 0.97}],
     })
-    return TestClient(main.app, follow_redirects=False)
+    with LiveTestClient(main.app, follow_redirects=False) as c:
+        yield c
 
 
 def test_estado_renders(client):

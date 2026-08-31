@@ -1,11 +1,10 @@
 """Testes do verso da folha TPL102 (paragens): classificação, fluxo e validação."""
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app import db, pg_store
 from app.ocr import provider as ocr
 from app.web import main
+from tests.live_client import LiveTestClient
 
 
 @pytest.fixture()
@@ -22,9 +21,9 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pg_store, "store_validated_sheet", fake_store)
     monkeypatch.setattr(main, "PROCESS_IN_BACKGROUND", False)  # determinístico
-    c = TestClient(main.app, follow_redirects=False)
-    c.stored = stored
-    return c
+    with LiveTestClient(main.app, follow_redirects=False) as c:
+        c.stored = stored
+        yield c
 
 
 def create_paragens(client) -> str:

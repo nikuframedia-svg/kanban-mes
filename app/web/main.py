@@ -16,6 +16,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import (
@@ -489,26 +490,43 @@ def run_cross_check(conn, uid: str) -> None:
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, status: str = "", operador: str = "", setor: str = "",
          data: str = "", data_captura: str = "", of: str = "",
-         created: str = "", deleted: str = ""):
+         created: str = "", deleted: str = "", page: int = 1):
+    status = status if status in {"", "pending", "validated", "error"} else ""
+    page = max(1, page)
     conn = _conn()
     try:
-        sheets = db.list_sheets(conn, status=status or None, operador=operador or None,
-                                setor=setor or None, data_folha=data or None,
-                                data_captura=data_captura or None, of=of or None)
+        all_sheets = db.list_sheets(
+            conn, status=status or None, operador=operador or None,
+            setor=setor or None, data_folha=data or None,
+            data_captura=data_captura or None, of=of or None,
+        )
         options = db.filter_options(conn)
     finally:
         conn.close()
-    # querystring dos filtros não-status, para os chips preservarem os filtros.
-    # URL-encoded: um operador «SILVA & VINHA» truncava o filtro no «&».
-    from urllib.parse import quote
-    parts = [f"&{k}={quote(v)}" for k, v in (("operador", operador), ("setor", setor),
-                                             ("data", data), ("data_captura", data_captura),
-                                             ("of", of)) if v]
+    page_size = 100
+    total = len(all_sheets)
+    pages = max(1, (total + page_size - 1) // page_size)
+    page = min(page, pages)
+    sheets = all_sheets[(page - 1) * page_size:page * page_size]
+    filters = {
+        "status": status, "operador": operador, "setor": setor,
+        "data": data, "data_captura": data_captura, "of": of,
+    }
+    history_url = _history_location(page=page, **filters)
     return templates.TemplateResponse(request, "home.html", {
         "sheets": sheets, "options": options,
-        "f": {"status": status, "operador": operador, "setor": setor,
-              "data": data, "data_captura": data_captura, "of": of},
-        "filter_qs": "".join(parts),
+        "f": filters,
+        "history_url": history_url,
+        "status_urls": {
+            value: _history_location(page=1, **(filters | {"status": value}))
+            for value in ("", "pending", "validated", "error")
+        },
+        "clear_url": _history_location(status=status),
+        "pagination": {
+            "page": page, "pages": pages, "total": total,
+            "prev": _history_location(page=page - 1, **filters) if page > 1 else None,
+            "next": _history_location(page=page + 1, **filters) if page < pages else None,
+        },
         "created": created, "deleted": deleted,
         "tunnel_url": tunnel_url(),
     })
@@ -529,7 +547,8 @@ def camara(request: Request):
 
 
 @app.get("/estado", response_class=HTMLResponse)
-def estado_page(request: Request, q: str = "", familia: str = "", of: str = ""):
+def estado_page(request: Request, q: str = "", familia: str = "", of: str = "",
+                page: int = 1):
     conn = _conn()
     try:
         sheets = db.list_sheets(conn)
@@ -538,10 +557,26 @@ def estado_page(request: Request, q: str = "", familia: str = "", of: str = ""):
     by_status: dict[str, int] = {}
     for s in sheets:
         by_status[s["status"]] = by_status.get(s["status"], 0) + 1
+    data_estado = estado_data.load_estado(q, familia, of)
+    page_size = 100
+    page = max(1, page)
+    total = len(data_estado["rows"])
+    pages = max(1, (total + page_size - 1) // page_size)
+    page = min(page, pages)
+    data_estado["rows"] = data_estado["rows"][(page - 1) * page_size:page * page_size]
+    estado_back = _estado_location(q=q, familia=familia, of=of, page=page)
     return templates.TemplateResponse(request, "estado.html", {
-        "estado": estado_data.load_estado(q, familia, of),
+        "estado": data_estado,
         "q": q, "familia": familia, "of": of,
         "by_status": by_status, "n_sheets": len(sheets),
+        "estado_back": estado_back,
+        "estado_close_url": _estado_location(q=q, familia=familia, page=page),
+        "estado_pdf_url": _query_location("/estado/pdf", q=q, familia=familia),
+        "pagination": {
+            "page": page, "pages": pages, "total": total,
+            "prev": _estado_location(q=q, familia=familia, page=page - 1) if page > 1 else None,
+            "next": _estado_location(q=q, familia=familia, page=page + 1) if page < pages else None,
+        },
     })
 
 
@@ -862,7 +897,7 @@ def ingest_drive(request: Request):
 
 
 @app.post("/sheet/{uid}/reocr")
-def sheet_reocr(uid: str, force: int = 0):
+def sheet_reocr(uid: str, force: int = 0, back: str = Form("")):
     """Re-ler a foto com OCR (ex.: depois de um 429 de quota).
 
     `?force=1` salta a deteção de página em branco — é o revisor a dizer que a
@@ -889,11 +924,11 @@ def sheet_reocr(uid: str, force: int = 0):
         threading.Thread(target=_process_sheet, args=(uid, bool(force)), daemon=True).start()
     else:
         _process_sheet(uid, bool(force))
-    return RedirectResponse(f"/sheet/{uid}", status_code=303)
+    return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
 @app.post("/sheet/{uid}/delete")
-def sheet_delete(uid: str):
+def sheet_delete(uid: str, back: str = Form("")):
     conn = _conn()
     try:
         try:
@@ -912,7 +947,7 @@ def sheet_delete(uid: str):
         if p.is_relative_to(settings.images_dir.resolve()) and p.is_file():
             imaging.clear_renders(p)   # os .rotN.png derivados vão junto
             p.unlink()
-    return RedirectResponse("/?deleted=1", status_code=303)
+    return RedirectResponse(_with_query(_safe_back(back) or "/", deleted=1), status_code=303)
 
 
 @app.get("/sheet/{uid}/csv")
@@ -1084,9 +1119,49 @@ def _safe_back(back: str | None) -> str | None:
     """Só aceita caminhos internos — impede que um ?back= leve para fora do site.
     O `\\` conta como `//`: os browsers normalizam `/\\evil.com` para
     `//evil.com` e o filtro de prefixo deixava-o passar."""
-    if not back or not back.startswith("/") or back.startswith("//") or "\\" in back:
+    if (not back or not back.startswith("/") or back.startswith("//")
+            or "\\" in back or any(ord(ch) < 32 for ch in back)):
         return None
     return back
+
+
+def _sheet_location(uid: str, back: str | None = None, **query: object) -> str:
+    params = [(key, str(value)) for key, value in query.items() if value is not None]
+    safe_back = _safe_back(back)
+    if safe_back:
+        params.append(("back", safe_back))
+    return f"/sheet/{uid}" + (f"?{urlencode(params)}" if params else "")
+
+
+def _query_location(path: str, **values: object) -> str:
+    params = [(key, str(value)) for key, value in values.items()
+              if value not in (None, "")]
+    return path + (f"?{urlencode(params)}" if params else "")
+
+
+def _history_location(*, status: str = "", operador: str = "", setor: str = "",
+                      data: str = "", data_captura: str = "", of: str = "",
+                      page: int = 1) -> str:
+    return _query_location(
+        "/", status=status, operador=operador, setor=setor, data=data,
+        data_captura=data_captura, of=of, page=page if page > 1 else None,
+    )
+
+
+def _estado_location(*, q: str = "", familia: str = "", of: str = "",
+                     page: int = 1) -> str:
+    return _query_location(
+        "/estado", q=q, familia=familia, of=of,
+        page=page if page > 1 else None,
+    )
+
+
+def _with_query(location: str, **values: object) -> str:
+    parts = urlsplit(location)
+    params = dict(parse_qsl(parts.query, keep_blank_values=True))
+    params.update({key: str(value) for key, value in values.items()
+                   if value is not None})
+    return urlunsplit(("", "", parts.path, urlencode(params), parts.fragment))
 
 
 def _diverged_map(sheet: dict) -> dict[str, str]:
@@ -1167,7 +1242,7 @@ def sheet_view(request: Request, uid: str, back: str | None = None,
         "header_labels": header_cross.HEADER_LABELS,
         "source_document": source_document,
         "diverged": diverged, "n_diverged": len(diverged),
-        "back_url": _safe_back(back),
+        "back_url": _safe_back(back) or "/",
     })
 
 
@@ -1310,7 +1385,8 @@ def sheet_pdf(uid: str):
 
 @app.post("/sheet/{uid}/edit")
 def sheet_edit(uid: str, field_path: str = Form(...), value: str = Form(""),
-               revision: int = Form(...), actor: str = Form("operador")):
+               revision: int = Form(...), actor: str = Form("operador"),
+               back: str = Form("")):
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -1346,7 +1422,7 @@ def sheet_edit(uid: str, field_path: str = Form(...), value: str = Form(""),
         # desligava a herança sem o revisor querer.
         old_clean = str(old).strip() or None if old is not None else None
         if old_clean == value_clean:
-            return RedirectResponse(f"/sheet/{uid}", status_code=303)
+            return RedirectResponse(_sheet_location(uid, back), status_code=303)
         # controlo otimista: a revisão vem do formulário — se a folha mudou
         # desde que a página foi carregada, recusa em vez de sobrescrever
         if not db.save_sheet_data(conn, uid, data, revision):
@@ -1355,11 +1431,11 @@ def sheet_edit(uid: str, field_path: str = Form(...), value: str = Form(""),
         run_cross_check(conn, uid)
     finally:
         conn.close()
-    return RedirectResponse(f"/sheet/{uid}", status_code=303)
+    return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
 @app.post("/sheet/{uid}/add-row")
-def add_row(uid: str):
+def add_row(uid: str, back: str = Form("")):
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -1376,11 +1452,11 @@ def add_row(uid: str):
             raise HTTPException(409, "A folha mudou entretanto — recarrega a página.")
     finally:
         conn.close()
-    return RedirectResponse(f"/sheet/{uid}", status_code=303)
+    return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
 @app.post("/sheet/{uid}/recheck")
-def recheck(uid: str):
+def recheck(uid: str, back: str = Form("")):
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -1391,11 +1467,11 @@ def recheck(uid: str):
         run_cross_check(conn, uid)
     finally:
         conn.close()
-    return RedirectResponse(f"/sheet/{uid}", status_code=303)
+    return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
 @app.post("/sheet/{uid}/validate")
-def validate(uid: str, actor: str = Form("operador")):
+def validate(uid: str, actor: str = Form("operador"), back: str = Form("")):
     """A única porta para o Postgres: valida → INSERT em mes_kanban → imutável."""
     # «Quem valida» deixou de existir no form: valida-se sem entidade e o
     # registo interno fica «operador».
@@ -1427,9 +1503,9 @@ def validate(uid: str, actor: str = Form("operador")):
         # é um erro a sério e queremos o traceback.
         if exc.status_code == 404 or exc.status_code >= 500:
             raise
-        from urllib.parse import quote
-        return RedirectResponse(f"/sheet/{uid}?erro={quote(str(exc.detail))}",
-                                status_code=303)
+        return RedirectResponse(
+            _sheet_location(uid, back, erro=exc.detail), status_code=303,
+        )
     finally:
         conn.close()
-    return RedirectResponse(f"/sheet/{uid}?stored={n}", status_code=303)
+    return RedirectResponse(_sheet_location(uid, back, stored=n), status_code=303)

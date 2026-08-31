@@ -764,6 +764,18 @@ label.inline {
   color: var(--ink);
 }
 
+/* Na revisão, o regresso à lista fica sempre visível à esquerda, incluindo
+   em ecrãs estreitos, e as ações mantêm-se agrupadas à direita. */
+.sheet-topbar {
+  justify-content: flex-start !important;
+  flex-wrap: wrap;
+}
+.sheet-topbar .sheet-back {
+  flex: 0 0 auto;
+  margin-right: auto;
+}
+.sheet-topbar > * { flex: 0 0 auto; }
+
 /* Revisão de folha: fonte (foto + transcrição) à esquerda, trabalho à direita. */
 .review-layout {
   display: grid;
@@ -933,6 +945,7 @@ input.cell-input.is-inherited::placeholder {
     grid-template-columns: 1fr;
     grid-template-areas: "operador" "numero" "maquina" "data" "turno";
   }
+  .sheet-topbar { padding-inline: 10px !important; }
 }
 
 /* Estado vazio dentro de um cartão. */

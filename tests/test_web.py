@@ -3,12 +3,11 @@ com staging SQLite temporário, índice do plano sintético e Postgres simulado.
 O caminho real para o Postgres é coberto pelo teste E2E manual (não aqui)."""
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app import db, pg_store
 from app.matching.loaders import CANTONEIRAS_SPEC
 from app.matching.refs import PlanIndex
 from app.web import main
+from tests.live_client import LiveTestClient
 
 
 def make_index() -> PlanIndex:
@@ -39,9 +38,9 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pg_store, "store_validated_sheet", fake_store)
     monkeypatch.setattr(main, "PROCESS_IN_BACKGROUND", False)  # determinístico
-    c = TestClient(main.app, follow_redirects=False)
-    c.stored_calls = stored_calls
-    return c
+    with LiveTestClient(main.app, follow_redirects=False) as c:
+        c.stored_calls = stored_calls
+        yield c
 
 
 def create_sheet(client) -> str:
@@ -161,7 +160,28 @@ def test_captura_page_has_upload_form(client):
     assert r.status_code == 200
     assert "cantoneiras_kanban" in r.text
     assert 'action="/upload"' in r.text
-    assert client.get("/captura/camara").status_code == 200
+    camera = client.get("/captura/camara")
+    assert camera.status_code == 200
+    assert "if (!r.ok)" in camera.text
+    assert 'window.addEventListener("pagehide", stopCamera)' in camera.text
+
+
+def test_back_e_seguro_e_sobrevive_acoes_da_folha(client):
+    uid = create_sheet(client)
+    back = "/?status=pending&operador=Silva%20%26%20Vinha&page=2"
+    page = client.get(f"/sheet/{uid}", params={"back": back})
+    assert 'class="btn ghost sheet-back"' in page.text
+    assert 'name="back" value="/?status=pending&amp;operador=Silva%20%26%20Vinha&amp;page=2"' in page.text
+
+    r = client.post(f"/sheet/{uid}/recheck", data={"back": back})
+    assert r.status_code == 303
+    assert r.headers["location"] == (
+        f"/sheet/{uid}?back=%2F%3Fstatus%3Dpending%26operador%3DSilva%2520%2526%2520Vinha%26page%3D2"
+    )
+
+    hostile = client.get(f"/sheet/{uid}", params={"back": "//evil.example"})
+    assert 'class="btn ghost sheet-back" href="/"' in hostile.text
+    assert "evil.example" not in hostile.text
 
 
 def test_old_routes_redirect(client):
@@ -436,7 +456,11 @@ def _tiny_png() -> bytes:
 
 def test_delete_draft_but_never_validated(client):
     uid = create_sheet(client)
-    assert client.post(f"/sheet/{uid}/delete").status_code == 303
+    deleted = client.post(f"/sheet/{uid}/delete", data={
+        "back": "/?status=pending&operador=Maria&page=3",
+    })
+    assert deleted.status_code == 303
+    assert deleted.headers["location"] == "/?status=pending&operador=Maria&page=3&deleted=1"
     assert client.get(f"/sheet/{uid}").status_code == 404
 
     uid = create_sheet(client)
@@ -464,6 +488,8 @@ def test_historico_filters(client):
     # chips por estado
     assert client.get("/?status=pending").status_code == 200
     assert client.get("/?status=validated").status_code == 200
+    html = client.get("/?status=pending&operador=Maria").text
+    assert "sessionStorage" not in html and "queue_filters" not in html
 
 
 def test_sheet_pdf_downloads(client):

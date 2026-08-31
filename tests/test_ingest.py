@@ -10,11 +10,11 @@ from __future__ import annotations
 import shutil
 
 import pytest
-from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 from app import db
 from app.web import main
+from tests.live_client import LiveTestClient
 
 
 def make_pdf(path, n_pages: int, seed: str) -> None:
@@ -57,9 +57,9 @@ def client(tmp_path, monkeypatch):
                 "footer": {f: None for f in t.footer_fields}}
 
     monkeypatch.setattr(main, "get_provider", lambda: NullProvider())
-    c = TestClient(main.app, follow_redirects=False)
-    c.drive = drive
-    return c
+    with LiveTestClient(main.app, follow_redirects=False) as c:
+        c.drive = drive
+        yield c
 
 
 def n_sheets(client) -> int:

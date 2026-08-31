@@ -124,21 +124,35 @@
     refresh();
   });
 
-  doneBtn.addEventListener("click", () => {
+  function stopCamera() {
+    if (video.srcObject) {
+      video.srcObject.getTracks().forEach(track => track.stop());
+      video.srcObject = null;
+    }
+  }
+
+  doneBtn.addEventListener("click", async () => {
     const fd = new FormData(form);
     for (const f of photos) fd.append("photos", f);
     doneBtn.disabled = true;
     doneBtn.textContent = "A carregar…";
-    fetch("/upload", { method: "POST", body: fd }).then(r => {
-      window.location = r.redirected ? r.url : "/";
-    }).catch(() => {
+    try {
+      const r = await fetch("/upload", { method: "POST", body: fd });
+      if (!r.ok) {
+        const detail = await r.text();
+        throw new Error(detail || ("HTTP " + r.status));
+      }
+      stopCamera();
+      window.location.assign(r.redirected ? r.url : "/");
+    } catch (error) {
       doneBtn.disabled = false;
       doneBtn.textContent = "Concluir";
-      alert("Falha no envio — tenta outra vez.");
-    });
+      alert("Falha no envio — tenta outra vez. " + (error.message || ""));
+    }
   });
 
   document.getElementById("cam-retry").addEventListener("click", startCamera);
+  window.addEventListener("pagehide", stopCamera);
   startCamera();
 </script>
 {% endblock %}

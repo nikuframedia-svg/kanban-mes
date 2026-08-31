@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Estado — Kanban MES{% endblock %}
 {% block topbar_actions %}
-<a class="btn" href="/estado/pdf?q={{ q }}&amp;familia={{ familia }}">⬇ Relatório PDF</a>
+<a class="btn" href="{{ estado_pdf_url }}">⬇ Relatório PDF</a>
 {% endblock %}
 {% block content %}
 
@@ -72,7 +72,7 @@
 <div class="card" style="margin-bottom:14px;">
   <div class="card-h">
     <span class="card-h-title">Detalhe da OF <span class="mono">{{ of }}</span></span>
-    <a class="btn ghost" href="/estado{% if q or familia %}?q={{ q }}&amp;familia={{ familia }}{% endif %}">Fechar detalhe</a>
+    <a class="btn ghost" href="{{ estado_close_url }}">Fechar detalhe</a>
   </div>
   <div class="card-b">
     <div class="lbl" style="margin-bottom:6px;">Componentes no plano</div>
@@ -114,7 +114,8 @@
             <td>{{ r.model_ref or '—' }}</td>
             <td class="mono tnum">{{ r.quantity or '—' }}</td>
             <td class="mono tnum">{% if r.match_confidence is not none %}{{ '%.0f' | format(r.match_confidence * 100) }}%{% else %}—{% endif %}</td>
-            <td><a class="mono" style="color:var(--accent-ink);" href="/sheet/{{ r.sheet_uid }}">{{ r.sheet_uid[:8] }}</a></td>
+            <td><a class="mono" style="color:var(--accent-ink);"
+                   href="/sheet/{{ r.sheet_uid }}?back={{ estado_back|urlencode }}">{{ r.sheet_uid[:8] }}</a></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -159,13 +160,13 @@
           </tr>
         </thead>
         <tbody>
-          {% for r in estado.rows[:400] %}
+          {% for r in estado.rows %}
           <tr>
             <td>{{ r.cliente or '—' }}</td>
             <td class="mono">{{ r.ov or '—' }}</td>
             <td>
               <a class="mono" style="color:var(--accent-ink);"
-                 href="/estado?of={{ r.of }}&amp;q={{ q }}&amp;familia={{ familia }}">{{ r.of }}</a>
+                 href="/estado?of={{ r.of|urlencode }}&amp;q={{ q|urlencode }}&amp;familia={{ familia|urlencode }}&amp;page={{ pagination.page }}">{{ r.of }}</a>
               {% if r.sem_plano %}<span class="pill crit" title="Validada no MES mas não está no plano actual">sem plano</span>{% endif %}
             </td>
             <td>{{ r.familia or '—' }}</td>
@@ -189,8 +190,13 @@
         </tbody>
       </table>
     </div>
-    {% if estado.rows | length > 400 %}
-    <p class="muted tiny" style="margin-top:10px;">A mostrar as primeiras 400 — usa a pesquisa para restringir.</p>
+    {% if pagination.pages > 1 %}
+    <nav aria-label="Paginação do estado"
+         style="display:flex; justify-content:center; align-items:center; gap:10px; margin-top:14px;">
+      {% if pagination.prev %}<a class="btn ghost" href="{{ pagination.prev }}">← Anterior</a>{% endif %}
+      <span class="muted tiny">Página {{ pagination.page }} de {{ pagination.pages }} · {{ pagination.total }} OFs</span>
+      {% if pagination.next %}<a class="btn ghost" href="{{ pagination.next }}">Seguinte →</a>{% endif %}
+    </nav>
     {% endif %}
     {% endif %}
   </div>

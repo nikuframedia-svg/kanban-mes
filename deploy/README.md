@@ -1,5 +1,25 @@
 # Deploy do Kanban MES
 
+## Produção atual — Windows
+
+A instalação ativa na máquina OCR vive em
+`F:\Apps\OCR-Suite\kanban-mes` e escuta apenas em
+`http://127.0.0.1:8100`. O endereço público unificado é
+`https://cantoneiras.nikufra.ai/`.
+
+O arranque é feito pelo kit comum em `F:\Apps\OCR-Suite\kit\start` e pelo
+atalho do utilizador em `Startup`. Atualizações de código devem ser feitas
+dentro do repositório em F:, com `git pull --ff-only`; `.env`, `data/` e os
+ficheiros importados são estado local ignorado pelo Git e não devem ser
+substituídos. Depois de atualizar, confirmar `/`, `/estado` e `/estado/pdf`,
+e que a porta 8100 devolve HTTP 200.
+
+Os modelos Ollama continuam deliberadamente em
+`C:\Users\Nifruka\.ollama\models`, partilhados pelo serviço Ollama da máquina.
+Não fazem parte deste repositório nem devem ser migrados por um deploy.
+
+## Instalação Linux legada/desenvolvimento
+
 App + túnel Cloudflare como serviços systemd de **utilizador** (sem sudo,
 arrancam no boot porque o linger está ativo para o `luis`).
 
