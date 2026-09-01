@@ -12,9 +12,10 @@ from datetime import datetime, timezone
 from ..config import settings
 
 # regex em vez de LIKE: um '%' literal no SQL colide com os placeholders do psycopg
-_LATEST_MTG = (
-    "(SELECT snapshot_id FROM audit_mtg.snapshots "
-    "WHERE snapshot_id ~ '^mtg_' ORDER BY loaded_at DESC LIMIT 1)"
+_LATEST_KANBAN_MTG3 = (
+    "(SELECT snapshot_id FROM analytics_mtg.kanban_plan_lines "
+    "WHERE source_app = 'kanban-mes' "
+    "ORDER BY snapshot_loaded_at DESC, snapshot_id DESC LIMIT 1)"
 )
 _LATEST_CHAPA_BATCH = (
     "(SELECT batch_id FROM audit_mtg.chapa_batches ORDER BY loaded_at DESC LIMIT 1)"
@@ -39,18 +40,19 @@ def _fetch(sql: str, params: tuple = ()) -> list[dict]:
 def fetch_plan_rows() -> list[dict]:
     """Plano agregado por OF, ambas as famílias, snapshot mais recente."""
     cantoneiras = _fetch(f"""
-        SELECT o.customer_key AS cliente, o.sales_order_no AS ov,
-               l.production_order_no AS of, 'cantoneiras' AS familia,
-               sum(l.quantity_planned)   AS qtd_planeada,
-               sum(l.remaining_quantity) AS qtd_restante,
-               string_agg(DISTINCT l.cutting_machine, ', ') AS maquinas,
-               min(l.planning_week) AS semana
-        FROM core_mtg.production_lines l
-        JOIN core_mtg.production_orders o
-          ON o.snapshot_id = l.snapshot_id
-         AND o.production_order_no = l.production_order_no
-        WHERE l.snapshot_id = {_LATEST_MTG}
-        GROUP BY 1, 2, 3
+        SELECT max(customer_name) AS cliente, max(sales_order_no) AS ov,
+               production_order_no AS of, 'cantoneiras' AS familia,
+               CASE WHEN bool_and(quantity_planned IS NOT NULL)
+                    THEN sum(quantity_planned) ELSE NULL END AS qtd_planeada,
+               CASE WHEN bool_and(remaining_valid IS TRUE)
+                    THEN sum(remaining_quantity) ELSE NULL END AS qtd_restante,
+               string_agg(DISTINCT cutting_machine, ', '
+                          ORDER BY cutting_machine) AS maquinas,
+               min(planning_week) AS semana
+        FROM analytics_mtg.kanban_plan_lines
+        WHERE source_app = 'kanban-mes'
+          AND snapshot_id = {_LATEST_KANBAN_MTG3}
+        GROUP BY production_order_no
     """)
     chapa = _fetch(f"""
         SELECT max(customer_name) AS cliente, max(sales_order_no) AS ov,
@@ -69,20 +71,25 @@ def fetch_plan_rows() -> list[dict]:
 def fetch_validated_rows() -> list[dict]:
     """Produção validada no MES, agregada por OF."""
     return _fetch("""
-        SELECT production_order AS of, family AS familia,
-               max(customer_name) AS cliente, max(sales_order) AS ov,
-               sum(quantity) AS qtd_validada, count(*) AS linhas,
-               max(sheet_date) AS ultima_folha
-        FROM mes_kanban.production_records
-        WHERE production_order IS NOT NULL
-        GROUP BY 1, 2
+        SELECT p.production_order AS of, p.family AS familia,
+               max(p.customer_name) AS cliente, max(p.sales_order) AS ov,
+               sum(p.quantity) AS qtd_validada, count(*) AS linhas,
+               max(p.sheet_date) AS ultima_folha
+        FROM mes_kanban.production_records p
+        JOIN mes_kanban.validated_sheets s ON s.sheet_uid = p.sheet_uid
+        WHERE s.source_app = 'kanban-mes'
+          AND p.production_order IS NOT NULL
+        GROUP BY p.production_order, p.family
     """)
 
 
 def fetch_mes_kpis() -> dict:
     rows = _fetch("""
-        SELECT (SELECT count(*) FROM mes_kanban.validated_sheets)   AS folhas,
-               (SELECT count(*) FROM mes_kanban.production_records) AS registos
+        SELECT (SELECT count(*) FROM mes_kanban.validated_sheets
+                WHERE source_app = 'kanban-mes') AS folhas,
+               (SELECT count(*) FROM mes_kanban.production_records p
+                JOIN mes_kanban.validated_sheets s ON s.sheet_uid = p.sheet_uid
+                WHERE s.source_app = 'kanban-mes') AS registos
     """)
     return rows[0] if rows else {"folhas": 0, "registos": 0}
 
@@ -90,12 +97,19 @@ def fetch_mes_kpis() -> dict:
 def fetch_of_detail(of: str) -> dict:
     """Drill-down de uma OF: componentes do plano + folhas validadas."""
     plan = _fetch(f"""
-        SELECT l.component_ref AS modelo, l.profile_type AS perfil,
-               l.length_mm AS comp_mm, l.quantity_planned AS qtd_planeada,
-               l.remaining_quantity AS qtd_restante, l.cutting_machine AS maquina
-        FROM core_mtg.production_lines l
-        WHERE l.snapshot_id = {_LATEST_MTG} AND l.production_order_no = %s
-        ORDER BY l.component_ref
+        SELECT component_ref AS modelo, profile_type AS perfil,
+               length_mm AS comp_mm, quantity_planned AS qtd_planeada,
+               CASE WHEN remaining_valid IS TRUE THEN remaining_quantity
+                    ELSE NULL END AS qtd_restante,
+               overproduction_quantity AS excesso,
+               quantity_made AS qtd_feita, remaining_valid,
+               cutting_machine AS maquina, planning_week AS semana,
+               plan_key, snapshot_id
+        FROM analytics_mtg.kanban_plan_lines
+        WHERE source_app = 'kanban-mes'
+          AND snapshot_id = {_LATEST_KANBAN_MTG3}
+          AND production_order_no = %s
+        ORDER BY component_ref, plan_key
         LIMIT 200
     """, (of,))
     if not plan:
@@ -109,11 +123,13 @@ def fetch_of_detail(of: str) -> dict:
             LIMIT 200
         """, (of,))
     produced = _fetch("""
-        SELECT sheet_uid, row_index, sheet_date, operator_name, machine,
-               model_ref, quantity, match_confidence
-        FROM mes_kanban.production_records
-        WHERE production_order = %s
-        ORDER BY sheet_date DESC, sheet_uid, row_index
+        SELECT p.sheet_uid, s.sheet_no, p.row_index, p.sheet_date,
+               p.operator_name, p.machine, p.model_ref, p.quantity,
+               p.match_confidence
+        FROM mes_kanban.production_records p
+        JOIN mes_kanban.validated_sheets s ON s.sheet_uid = p.sheet_uid
+        WHERE s.source_app = 'kanban-mes' AND p.production_order = %s
+        ORDER BY p.sheet_date DESC, p.sheet_uid, p.row_index
         LIMIT 200
     """, (of,))
     return {"plan": plan, "produced": produced}
@@ -124,9 +140,14 @@ def merge_by_of(plan_rows: list[dict], validated_rows: list[dict]) -> list[dict]
     out: dict[str, dict] = {}
     for p in plan_rows:
         of = str(p["of"])
-        planeada = float(p.get("qtd_planeada") or 0)
-        restante = float(p.get("qtd_restante") or 0)
-        feita = max(planeada - restante, 0.0)
+        planeada = (float(p["qtd_planeada"])
+                    if p.get("qtd_planeada") is not None else None)
+        restante = (float(p["qtd_restante"])
+                    if p.get("qtd_restante") is not None else None)
+        feita = (
+            max(planeada - restante, 0.0)
+            if planeada is not None and restante is not None else None
+        )
         out[of] = {
             "of": of,
             "cliente": p.get("cliente"),
@@ -134,7 +155,11 @@ def merge_by_of(plan_rows: list[dict], validated_rows: list[dict]) -> list[dict]
             "familia": p.get("familia"),
             "qtd_planeada": planeada,
             "qtd_restante": restante,
-            "progresso": (feita / planeada) if planeada > 0 else None,
+            "progresso": (
+                feita / planeada
+                if feita is not None and planeada is not None and planeada > 0
+                else None
+            ),
             "qtd_validada": 0.0,
             "linhas_validadas": 0,
             "ultima_folha": None,

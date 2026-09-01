@@ -20,6 +20,7 @@ from .config import settings
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sheets (
     uid             TEXT PRIMARY KEY,
+    sheet_no        INTEGER UNIQUE,
     template_name   TEXT NOT NULL,
     status          TEXT NOT NULL DEFAULT 'pending',  -- pending|extracted|in_review|validated|error
     image_path      TEXT,
@@ -46,6 +47,10 @@ CREATE TABLE IF NOT EXISTS edits (
     edited_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS edits_sheet_idx ON edits(sheet_uid);
+CREATE TABLE IF NOT EXISTS app_counters (
+    name        TEXT PRIMARY KEY,
+    next_value  INTEGER NOT NULL CHECK (next_value > 0)
+);
 CREATE TABLE IF NOT EXISTS ingested_files (
     filename    TEXT NOT NULL,     -- nome do PDF na pasta do Drive
     sha256      TEXT NOT NULL PRIMARY KEY,  -- do FICHEIRO; muda → reprocessa
@@ -58,12 +63,13 @@ CREATE TABLE IF NOT EXISTS ingested_files (
 # elas (estão no SCHEMA); as antigas precisam de ALTER, e o SQLite não tem
 # "ADD COLUMN IF NOT EXISTS". A escada por user_version corre uma vez por
 # ficheiro de base; o try/except cobre a corrida entre processos.
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _MIGRATIONS = (
     (1, "ALTER TABLE sheets ADD COLUMN image_rotation INTEGER NOT NULL DEFAULT 0"),
     # v2: ingested_files já nasce no SCHEMA (CREATE TABLE IF NOT EXISTS corre
     # em todas as ligações); a versão sobe só para o registo ficar honesto.
     (2, "SELECT 1"),
+    (3, "ALTER TABLE sheets ADD COLUMN sheet_no INTEGER"),
 )
 _migrated: set[str] = set()
 _migrate_lock = threading.Lock()
@@ -85,6 +91,33 @@ def _migrate(conn: sqlite3.Connection, key: str) -> None:
                     if "duplicate column" not in str(exc).lower():
                         raise
                 version = target
+        # v3: o número público é independente do UUID e comum a todos os
+        # templates desta aplicação. O backfill é determinístico, e o contador
+        # guarda o próximo valor para que números apagados nunca regressem.
+        if version >= 3:
+            missing = conn.execute(
+                "SELECT uid FROM sheets WHERE sheet_no IS NULL "
+                "ORDER BY created_at, uid"
+            ).fetchall()
+            next_no = conn.execute(
+                "SELECT coalesce(max(sheet_no), 0) + 1 FROM sheets"
+            ).fetchone()[0]
+            for row in missing:
+                conn.execute(
+                    "UPDATE sheets SET sheet_no = ? WHERE uid = ?",
+                    (next_no, row["uid"]),
+                )
+                next_no += 1
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS sheets_sheet_no_uq "
+                "ON sheets(sheet_no)"
+            )
+            conn.execute(
+                "INSERT INTO app_counters(name, next_value) VALUES ('sheet_no', ?) "
+                "ON CONFLICT(name) DO UPDATE SET next_value = "
+                "max(app_counters.next_value, excluded.next_value)",
+                (next_no,),
+            )
         if version < _SCHEMA_VERSION:
             version = _SCHEMA_VERSION
         conn.execute(f"PRAGMA user_version = {version}")
@@ -115,12 +148,28 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 def create_sheet(conn: sqlite3.Connection, template_name: str,
                  image_path: str | None = None, image_sha256: str | None = None) -> str:
     uid = uuid.uuid4().hex[:12]
-    conn.execute(
-        "INSERT INTO sheets (uid, template_name, image_path, image_sha256, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (uid, template_name, image_path, image_sha256, now_iso()),
-    )
-    conn.commit()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "INSERT OR IGNORE INTO app_counters(name, next_value) "
+            "VALUES ('sheet_no', coalesce((SELECT max(sheet_no) + 1 FROM sheets), 1))"
+        )
+        sheet_no = conn.execute(
+            "SELECT next_value FROM app_counters WHERE name = 'sheet_no'"
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE app_counters SET next_value = next_value + 1 "
+            "WHERE name = 'sheet_no'"
+        )
+        conn.execute(
+            "INSERT INTO sheets (uid, sheet_no, template_name, image_path, "
+            "image_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (uid, sheet_no, template_name, image_path, image_sha256, now_iso()),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return uid
 
 
@@ -215,7 +264,7 @@ def list_sheets(conn: sqlite3.Connection, status: str | None = None,
     `status` aceita também o pseudo-estado 'pending' = tudo o que não está
     validado nem em erro (o que o Histórico chama «Pendentes»)."""
     sql = (
-        "SELECT uid, template_name, status, image_path, created_at, validated_at, revision, "
+        "SELECT uid, sheet_no, template_name, status, image_path, created_at, validated_at, revision, "
         "  json_extract(sheet_data, '$.header.operador')      AS operador, "
         "  json_extract(sheet_data, '$.header.data')          AS data_folha, "
         "  json_extract(sheet_data, '$.header.setor_maquina') AS setor, "

@@ -43,7 +43,7 @@ CANTONEIRAS_KANBAN = KanbanTemplate(
     footer_fields=("metros_produzidos", "horas_trabalhadas"),
     field_labels={
         "cliente": "Cliente", "ov": "OV", "of": "OF", "perfil": "Perfil",
-        "modelo": "Modelo", "qtd": "Qtd", "perf_comp": "Perf. Comp.",
+        "modelo": "Modelo/Referência", "qtd": "Qtd", "perf_comp": "Perf. Comp.",
         "metros_produzidos": "Metros produzidos",
         "horas_trabalhadas": "Horas trabalhadas",
     },

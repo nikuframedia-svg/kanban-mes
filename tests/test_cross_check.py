@@ -30,25 +30,27 @@ def test_snap_fills_empty_cell_only_when_confident():
         assert by_field["ov"].auto_write
 
 
-def test_human_fields_never_overwritten():
+def test_human_identity_is_evidence_but_plan_wins():
     s = make_scorer()
     row = {"of": "OF259999", "ov": "ERRADO-HUMANO", "cliente": "SILVA & VINHA", "comp_mm": 1234}
     rc = check_row(row, 0, s, human_fields={"ov"})
     by_field = {c.field: c for c in rc.cells}
-    assert not by_field["ov"].auto_write
+    assert by_field["ov"].auto_write
+    assert by_field["ov"].proposal == "OV2409999"
 
 
-def test_unmatched_row_has_no_proposals():
+def test_low_confidence_still_uses_deterministic_best_candidate():
     s = make_scorer()
     row = {"of": "OF990000", "ov": "OV9900000", "cliente": "FANTASMA", "comp_mm": 77777}
     rc = check_row(row, 0, s)
-    assert rc.matched_plan_key is None
-    assert all(c.proposal is None for c in rc.cells)
+    assert rc.matched_plan_key == "A0", "empate total desempata por plan_key"
+    assert rc.mode == "weak_guess"
     by_field = {c.field: c for c in rc.cells}
-    assert by_field["of"].status == "unmatched", "OF que NÃO existe continua vermelha"
+    assert by_field["of"].proposal == "OF250001"
+    assert by_field["of"].auto_write
 
 
-def test_of_exata_confirma_mesmo_sem_linha_credivel():
+def test_of_valida_restringe_candidatos_e_materializa_o_melhor_da_obra():
     """Caso real cd83d1: OF escrita que existe exata no plano ficava vermelha
     («unmatched») só porque o resto da linha não casava com nada. A linha
     continua sem ligação, mas cada célula valida-se contra o plano: o que
@@ -69,15 +71,13 @@ def test_of_exata_confirma_mesmo_sem_linha_credivel():
     # nenhuma linha do plano é credível, mas OF e OV existem lá
     row = {"of": "262796", "ov": "2699999", "modelo": "ZZZ 999", "perfil": "45 x 9"}
     rc = check_row(row, 0, s)
-    assert rc.p_correct < s.params.policy.propose_threshold, "cenário deve cair no ramo H₀"
-    assert rc.matched_plan_key is None, "sem linha credível não há ligação"
+    assert rc.matched_plan_key == "A0", "a OF válida prevalece e plan_key desempata as irmãs"
     by_field = {c.field: c for c in rc.cells}
-    assert by_field["of"].status == "confirmed", \
-        "a OF existe no plano — não pode aparecer como inexistente"
-    assert by_field["ov"].status == "confirmed"
-    assert by_field["of"].proposal is None and not by_field["of"].auto_write
-    assert by_field["modelo"].status == "unmatched"
-    assert by_field["perfil"].status == "unmatched"
+    assert by_field["of"].status == "confirmed"
+    assert by_field["ov"].status == "very_different"
+    assert by_field["ov"].proposal == "2603660" and by_field["ov"].auto_write
+    assert by_field["modelo"].auto_write
+    assert by_field["perfil"].auto_write
 
 
 def test_auto_write_nao_usa_probabilidade_de_outro_valor():
@@ -203,22 +203,21 @@ def test_cliente_parecido_confirma():
     rc = check_row(row, 0, s)
     by_field = {c.field: c for c in rc.cells}
     assert by_field["cliente"].status == "confirmed"
-    assert not by_field["cliente"].auto_write
+    assert by_field["cliente"].auto_write
+    assert by_field["cliente"].proposal == "PAINHAS, SA"
 
 
-def test_cliente_sem_proposta_com_varios_clientes_na_of():
-    """`n_clientes` > 1 = a coluna do cliente no Excel cru trazia lixo
-    (datas, designações de material) — o nome agregado é um artefacto de
-    min() e propô-lo seria espalhar esse lixo."""
+def test_cliente_vem_da_entry_vencedora_mesmo_com_of_ambigua():
+    """A ambiguidade agregada da OF não apaga o cliente da linha vencedora."""
     s = _cantoneiras_scorer(_entries_obra(nome="2026-07-26 00:00:00", n_clientes=2))
     row = {"of": "262796", "ov": "2603660", "modelo": "QS120", "perfil": "60 x 4"}
     rc = check_row(row, 0, s)
-    assert "cliente" not in {c.field for c in rc.cells}
+    cliente = {c.field: c for c in rc.cells}["cliente"]
+    assert cliente.proposal == "2026-07-26 00:00:00"
+    assert cliente.auto_write
 
 
-def test_h0_com_of_exata_resolve_cliente():
-    """Mesmo sem linha vencedora, uma OF exata identifica a obra — e a obra
-    tem dono. Mas no ramo H₀ nunca se escreve nada."""
+def test_of_valida_materializa_cliente_da_entry_vencedora():
     entries = _entries_obra()
     entries += [
         {"plan_key": f"B{i}", "of": "OF262797", "ov": "OV2699999",
@@ -230,14 +229,14 @@ def test_h0_com_of_exata_resolve_cliente():
     # OF de uma obra, OV de outra, modelo/perfil inexistentes → H₀
     row = {"of": "262796", "ov": "2699999", "modelo": "ZZZ 999", "perfil": "45 x 9"}
     rc = check_row(row, 0, s)
-    assert rc.p_correct < s.params.policy.propose_threshold, "cenário deve cair no ramo H₀"
     by_field = {c.field: c for c in rc.cells}
-    assert by_field["of"].status == "confirmed"
+    assert rc.matched_plan_key == "A0"
     assert by_field["cliente"].proposal == "PAINHAS, SA"
-    assert not by_field["cliente"].auto_write, "no ramo H₀ nunca se auto-escreve"
+    assert by_field["cliente"].auto_write
 
-    # OF que não existe no plano → sem célula de cliente
+    # Se a geração não encontra candidato algum, não se inventa uma linha.
     rc2 = check_row({"of": "990000", "modelo": "ZZZ 999"}, 0, s)
+    assert rc2.matched_plan_key is None
     assert "cliente" not in {c.field for c in rc2.cells}
 
 
@@ -309,10 +308,10 @@ def test_substituicao_total_em_linha_forte():
         assert modelo.auto_write, \
             "política 26/08: o escrito que difere substitui-se sempre"
         assert modelo.written == "QS128", "o manuscrito fica visível na célula"
-    # humano continua inviolável
+    # A edição humana fica na auditoria, mas deixou de vetar identidade do plano.
     rc2 = check_row(row, 0, s, human_fields={"modelo"})
     by_field2 = {c.field: c for c in rc2.cells}
-    assert not by_field2["modelo"].auto_write
+    assert by_field2["modelo"].auto_write
 
 
 def test_caso_at1t515_substitui_mas_preserva_o_original():
@@ -351,19 +350,13 @@ def test_caso_at1t515_substitui_mas_preserva_o_original():
             "política 26/08: o escrito que difere substitui-se sempre"
         assert modelo["written"] == "AT1T515", \
             "o manuscrito nunca desaparece — fica no written/raw"
-    # a célula em branco é outra história: um palpite entre irmãs empatadas
-    # (p_field ínfimo) nunca se materializa num vazio
+    # A política obrigatória materializa também vazios, com desempate estável.
     branco = {c["field"]: c for c in result["rows"][2]["cells"]}["modelo"]
     if branco["proposal"]:
-        assert not branco["auto_write"], \
-            "palpite entre irmãs NUNCA preenche uma célula em branco"
+        assert branco["auto_write"]
 
 
-def test_linha_incerta_nao_preenche_vazios_com_palpites():
-    """Política de 26/08: mesmo numa linha incerta, o ESCRITO que difere do
-    plano substitui-se (o original fica visível). As células VAZIAS é que
-    mantêm o regime de propostas — preencher um vazio com um palpite a ~50%
-    continuaria a propagar matches errados em massa."""
+def test_linha_incerta_preenche_vazios_com_melhor_candidato():
     entries = _entries_obra() + [
         {"plan_key": f"B{i}", "of": "OF262797", "ov": "OV2699999",
          "cliente": "outro", "cliente_nome": "OUTRO, LDA", "n_clientes": 1,
@@ -377,8 +370,7 @@ def test_linha_incerta_nao_preenche_vazios_com_palpites():
         limiar = s.params.policy.write_threshold_identity
         for c in rc.cells:
             if c.written is None and c.proposal and c.p_correct < limiar:
-                assert not c.auto_write, \
-                    f"vazio de «{c.field}» preenchido com palpite a {c.p_correct:.2f}"
+                assert c.auto_write, f"vazio de «{c.field}» deve ser materializado"
 
 
 def test_escrito_divergente_substitui_mesmo_com_confianca_baixa():
@@ -400,9 +392,9 @@ def test_escrito_divergente_substitui_mesmo_com_confianca_baixa():
         assert by_field["qtd"].proposal is None
         assert not by_field["qtd"].auto_write
 
-    # edição humana continua inviolável
+    # edição humana é evidência histórica, não um veto ao planeamento
     rc2 = check_row(row, 0, s, human_fields={"modelo"})
-    assert not {c.field: c for c in rc2.cells}["modelo"].auto_write
+    assert {c.field: c for c in rc2.cells}["modelo"].auto_write
 
     # kill switch: sem a política volta o regime de propostas
     s.params.policy.replace_with_plan = False
@@ -413,15 +405,13 @@ def test_escrito_divergente_substitui_mesmo_com_confianca_baixa():
     s.params.policy.replace_with_plan = True
 
 
-def test_h0_continua_sem_propostas_nem_escrita():
-    """O ramo H₀ não muda com a substituição total: sem linha credível não há
-    proposta nenhuma nos campos, e nada se escreve."""
+def test_h0_com_candidatos_materializa_em_vez_de_bloquear():
     s = make_scorer()
     rc = check_row({"of": "OF990000", "ov": "OV9900000", "cliente": "FANTASMA",
                     "comp_mm": 77777}, 0, s)
-    assert rc.matched_plan_key is None
-    assert all(c.proposal is None for c in rc.cells)
-    assert all(not c.auto_write for c in rc.cells)
+    assert rc.matched_plan_key == "A0"
+    assert any(c.proposal is not None for c in rc.cells)
+    assert any(c.auto_write for c in rc.cells)
 
 
 def test_metros_por_linha_e_desperdicio():
@@ -487,6 +477,42 @@ def test_check_sheet_summary_and_review_order():
     ]
     result = check_sheet(rows, s)
     assert result["summary"]["rows"] == 2
-    assert result["summary"]["matched"] == 1
+    assert result["summary"]["matched"] == 2
     # a linha problemática (1) deve vir primeiro na fila de revisão
     assert result["review_order"][0] == 1
+
+
+def test_chapa_weak_tie_materializa_planeamento_e_preserva_producao():
+    """Mesmo num empate fraco, chapa usa plan_key como desempate; repetições e
+    observações são factos reais e ficam intocados."""
+    from app.matching.loaders import NESTING_SPEC
+    from app.matching.refs import PlanIndex
+
+    entries = [
+        {"snapshot_id": "chapa-snap", "plan_key": "S200", "nesting": "S200",
+         "maquina": "Laser 1", "esp": 10, "comp_mm": 3000, "larg_mm": 1500},
+        {"snapshot_id": "chapa-snap", "plan_key": "S100", "nesting": "S100",
+         "maquina": "Laser 1", "esp": 10, "comp_mm": 3000, "larg_mm": 1500},
+    ]
+    scorer = Scorer(
+        PlanIndex(entries, NESTING_SPEC, snapshot_id="chapa-snap"), CrossParams()
+    )
+    original = {
+        "nesting": None, "maquina": "laser1", "esp": None,
+        "comp_mm": None, "larg_mm": None,
+        "repeticoes": "9", "obs": "produção real — não mexer",
+    }
+    rc = check_row(original, 0, scorer)
+    assert rc.mode == "weak_guess"
+    assert rc.matched_plan_key == "S100"
+    assert rc.selected_snapshot_id == "chapa-snap"
+
+    final = dict(original)
+    for cell in rc.cells:
+        if cell.auto_write and cell.proposal is not None:
+            final[cell.field] = cell.proposal
+    assert final == {
+        "nesting": "S100", "maquina": "Laser 1", "esp": "10",
+        "comp_mm": "3000", "larg_mm": "1500",
+        "repeticoes": "9", "obs": "produção real — não mexer",
+    }

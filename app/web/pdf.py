@@ -182,7 +182,8 @@ def sheet_pdf(sheet: dict, template: KanbanTemplate, edit_count: int) -> bytes:
         f"VALIDADA{quem_s} · {sheet.get('validated_at')}"
         if validated else "RASCUNHO — ainda não validada"
     )
-    _brand_header(pdf, family, template.label, f"Folha {sheet.get('uid', '')[:8]} · {estado}")
+    public_no = sheet.get("sheet_no") or sheet.get("uid", "")[:8]
+    _brand_header(pdf, family, template.label, f"Folha {public_no} · {estado}")
 
     # cabeçalho da folha
     pdf.set_font(family, "", 9)
@@ -195,13 +196,18 @@ def sheet_pdf(sheet: dict, template: KanbanTemplate, edit_count: int) -> bytes:
     pdf.ln(2)
 
     # linhas
-    filled = [r for r in rows if any(v is not None and str(v).strip() for v in r.values())]
+    filled = [
+        r for r in rows
+        if r.get("_deleted") is not True
+        and any(not str(k).startswith("_")
+                and v is not None and str(v).strip() for k, v in r.items())
+    ]
     headers = ["#"] + [labels.get(f, f) for f in template.row_fields]
     usable = pdf.w - pdf.l_margin - pdf.r_margin
     widths = [8.0] + [(usable - 8.0) / len(template.row_fields)] * len(template.row_fields)
     body = [
         [str(i + 1)] + [r.get(f) for f in template.row_fields]
-        for i, r in enumerate(rows) if r in filled
+        for i, r in enumerate(filled)
     ]
     _table(pdf, family, headers, body or [["—"] + [""] * len(template.row_fields)], widths)
     pdf.ln(3)
@@ -220,7 +226,7 @@ def sheet_pdf(sheet: dict, template: KanbanTemplate, edit_count: int) -> bytes:
     pdf.set_text_color(*_MUTED)
     sha = (sheet.get("image_sha256") or "")[:16]
     pdf.cell(0, 4,
-             f"uid {sheet.get('uid', '')} · foto sha256 {sha or '—'} · "
+             f"folha {public_no} · uid {sheet.get('uid', '')} · foto sha256 {sha or '—'} · "
              f"{edit_count} célula(s) corrigidas por humanos · gerado pelo Kanban MES",
              new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())

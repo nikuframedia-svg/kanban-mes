@@ -220,6 +220,14 @@ class Scorer:
     MAX_VALUE_ENTRIES = 500
 
     def candidates(self, row: dict, top_k: int = 10) -> list[int]:
+        # A OF é a âncora do planeamento. Se a forma escrita/herdada existe no
+        # snapshot, a melhor referência tem obrigatoriamente de pertencer a
+        # essa OF; Modelo/Perfil servem para ordenar apenas as suas irmãs.
+        of_written = row.get("of")
+        if of_written is not None and str(of_written).strip():
+            of_hits = self.index.exact_matches("of", str(of_written))
+            if of_hits:
+                return sorted(of_hits)
         out: set[int] = set()
         fuzzy_pending: list = []
         for f in self.index.spec.identity_fields:

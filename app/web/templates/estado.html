@@ -14,6 +14,20 @@
 
 <div class="page-content">
 
+{% if validated %}
+<div class="alert ok" style="margin-bottom:14px;">
+  <span><strong>Folha {{ validated }} validada.</strong> {{ stored or 0 }} linha(s) gravadas.</span>
+</div>
+<script>
+  (function () {
+    var url = new URL(window.location.href);
+    url.searchParams.delete('validated');
+    url.searchParams.delete('stored');
+    history.replaceState(null, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams : ''));
+  })();
+</script>
+{% endif %}
+
 <p class="muted" style="margin:0 0 18px; max-width:80ch;">
   O plano de produção lado a lado com o que os operadores registaram em folhas
   validadas. Pesquisa por cliente, OV ou OF e clica numa OF para veres o detalhe.
@@ -115,7 +129,7 @@
             <td class="mono tnum">{{ r.quantity or '—' }}</td>
             <td class="mono tnum">{% if r.match_confidence is not none %}{{ '%.0f' | format(r.match_confidence * 100) }}%{% else %}—{% endif %}</td>
             <td><a class="mono" style="color:var(--accent-ink);"
-                   href="/sheet/{{ r.sheet_uid }}?back={{ estado_back|urlencode }}">{{ r.sheet_uid[:8] }}</a></td>
+                   href="/sheet/{{ r.sheet_uid }}?back={{ estado_back|urlencode }}">{{ r.sheet_no or r.sheet_uid[:8] }}</a></td>
           </tr>
           {% endfor %}
         </tbody>

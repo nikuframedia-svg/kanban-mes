@@ -93,6 +93,20 @@
       </details>
       <a class="btn ghost" href="/export.xlsx" title="Dump técnico do Postgres">Excel técnico</a>
     </div>
+    {% if request.query_params.get('validated') %}
+    <div class="alert ok validation-confirmation" style="margin:14px 24px 0;">
+      <span><strong>Folha {{ request.query_params.get('validated') }} validada.</strong>
+        {{ request.query_params.get('stored', '0') }} linha(s) gravadas.</span>
+    </div>
+    <script>
+      (function () {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('validated');
+        url.searchParams.delete('stored');
+        history.replaceState(null, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams : '') + url.hash);
+      })();
+    </script>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 </div>

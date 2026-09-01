@@ -51,13 +51,10 @@ def _plan_age_days(snapshot_like: str) -> float:
 # - a OF é o campo que identifica de verdade, por isso não leva teto de
 #   candidatos: há OFs com mais de 600 linhas e ficavam invisíveis.
 #
-# `cliente` ficou de fora de propósito: o plano guarda o cliente interno da
-# Metalogalva ("c.m.e.-const. e") e o operador escreve o cliente final ("CMF")
-# ou uma nota. Como discorda sempre, era evidência negativa uniforme — não
-# ajudava a escolher candidato nenhum e mantinha a célula vermelha para sempre.
-# A validação do cliente existe, mas à parte do scorer: `plan_customer_for`
-# em cross_check.py resolve-o pela OF (que o determina por construção) e as
-# entries levam `cliente_nome`/`n_clientes` só para esse check.
+# `cliente` fica fora da escolha do candidato: é um resultado canónico da
+# linha vencedora, não evidência para encontrar essa linha. Depois da escolha,
+# cross_check materializa diretamente o customer_name dessa entry (inclusive
+# quando a OF tem nomes diferentes), sem voltar a agregar por OF.
 CANTONEIRAS_SPEC = IndexSpec(
     identity_fields=(
         FieldSpec("of", "code", "of", code_prefix="OF", max_candidate_entries=None),
@@ -99,38 +96,48 @@ NESTING_SPEC = IndexSpec(
 )
 
 
-def load_cantoneiras_index() -> PlanIndex:
-    entries = _fetch(
-        """
-        SELECT l.source_line_id            AS plan_key,
-               l.production_order_no       AS of,
-               o.sales_order_no            AS ov,
-               o.customer_key              AS cliente,
-               o.distinct_customers        AS n_clientes,
-               c.customer_name             AS cliente_nome,
-               l.component_ref             AS modelo,
-               l.profile_type              AS perfil,
-               l.length_mm                 AS comp_mm,
-               l.quantity_planned          AS qtd_planeada,
-               l.remaining_quantity        AS qtd_restante,
-               l.cutting_machine           AS maquina,
-               l.planning_week             AS semana,
-               l.included_in_backlog       AS em_backlog
-        FROM core_mtg.production_lines l
-        JOIN core_mtg.production_orders o
-          ON o.snapshot_id = l.snapshot_id
-         AND o.production_order_no = l.production_order_no
-        LEFT JOIN core_mtg.customers c
-          ON c.snapshot_id = o.snapshot_id
-         AND c.customer_key = o.customer_key
-        WHERE l.snapshot_id = (
-            SELECT snapshot_id FROM audit_mtg.snapshots
-            WHERE snapshot_id LIKE 'mtg\\_%'
-            ORDER BY loaded_at DESC LIMIT 1
-        )
-        """
+def load_cantoneiras_index(snapshot_id: str | None = None) -> PlanIndex:
+    """Carrega uma fotografia coerente do plano MTG3.
+
+    Quando ``snapshot_id`` é fornecido, nunca volta a resolver o ``latest``.
+    Isto permite que o pop-up e a escolha da referência usem exatamente a
+    mesma fotografia que o índice, mesmo que uma nova carga seja publicada a
+    meio do pedido.
+    """
+    snapshot_filter = (
+        "snapshot_id = %s" if snapshot_id else
+        "snapshot_id = ("
+        "SELECT snapshot_id FROM analytics_mtg.kanban_plan_lines "
+        "WHERE source_app = 'kanban-mes' "
+        "ORDER BY snapshot_loaded_at DESC, snapshot_id DESC LIMIT 1)"
     )
-    return PlanIndex(entries, CANTONEIRAS_SPEC, plan_age_days=_plan_age_days("mtg\\_%"))
+    canonical_params = (snapshot_id,) if snapshot_id else None
+    entries = _fetch(
+        f"""
+        SELECT snapshot_id, snapshot_loaded_at, plan_key,
+               production_order_no AS of, sales_order_no AS ov,
+               customer_name AS cliente, customer_name AS cliente_nome,
+               component_ref AS modelo, profile_type AS perfil,
+               length_mm AS comp_mm, quantity_planned AS qtd_planeada,
+               quantity_made AS qtd_feita,
+               remaining_quantity AS qtd_restante,
+               overproduction_quantity AS excesso,
+               remaining_valid AS falta_valida,
+               cutting_machine AS maquina, planning_week AS semana,
+               remaining_rule AS regra_calculo, closed_x
+          FROM analytics_mtg.kanban_plan_lines
+         WHERE source_app = 'kanban-mes'
+           AND {snapshot_filter}
+        """,
+        canonical_params,
+    )
+    loaded = entries[0].get("snapshot_loaded_at") if entries else None
+    age_days = (
+        max(0.0, (datetime.now(timezone.utc) - loaded).total_seconds() / 86400.0)
+        if loaded else 30.0
+    )
+    return PlanIndex(entries, CANTONEIRAS_SPEC, plan_age_days=age_days,
+                     snapshot_id=snapshot_id)
 
 
 def load_chapa_index() -> PlanIndex:
@@ -160,7 +167,8 @@ def load_chapa_index() -> PlanIndex:
 def load_nesting_index() -> PlanIndex:
     entries = _fetch(
         """
-        SELECT nesting_code                AS plan_key,
+        SELECT snapshot_id,
+               nesting_code                AS plan_key,
                nesting_code                AS nesting,
                machine_name                AS maquina,
                thickness_mm                AS esp,
@@ -212,6 +220,18 @@ def employees_snapshot_id() -> str | None:
     return str(rows[0]["snapshot_id"]) if rows else None
 
 
+def nesting_snapshot_id() -> str | None:
+    """Snapshot dos nestings, independente do plano de perfis."""
+    try:
+        rows = _fetch(
+            "SELECT plan_snapshot_id AS snapshot_id "
+            "FROM audit_mtg.chapa_batches ORDER BY loaded_at DESC LIMIT 1"
+        )
+    except psycopg.Error:
+        return None
+    return str(rows[0]["snapshot_id"]) if rows else None
+
+
 def load_active_ofs(days: int = 14) -> set[str]:
     """OFs com atividade recente nos registos validados do MES (contexto D1).
     Enquanto mes_kanban não existir/estiver vazio, devolve vazio — sem contexto."""
@@ -237,9 +257,11 @@ _CANTONEIRAS_SNAPSHOT = (
 def plan_snapshot_info() -> dict:
     """Identidade e idade do plano de cantoneiras em uso."""
     rows = _fetch(
-        "SELECT snapshot_id, source_filename, loaded_at FROM audit_mtg.snapshots "
-        "WHERE snapshot_id LIKE %s ORDER BY loaded_at DESC LIMIT 1",
-        (_CANTONEIRAS_LIKE,),
+        "SELECT snapshot_id, max(snapshot_loaded_at) AS loaded_at, "
+        "max(source_filename) AS source_filename "
+        "FROM analytics_mtg.kanban_plan_lines "
+        "WHERE source_app = 'kanban-mes' GROUP BY snapshot_id "
+        "ORDER BY loaded_at DESC, snapshot_id DESC LIMIT 1"
     )
     if not rows:
         return {}
@@ -252,7 +274,8 @@ def plan_snapshot_info() -> dict:
     return info
 
 
-def fetch_profile_lines(of: str, perfil: str, limit: int = 500) -> list[dict]:
+def fetch_profile_lines(of: str, perfil: str, limit: int = 500,
+                        *, snapshot_id: str | None = None) -> list[dict]:
     """Todas as referências do plano para a chave OF + Perfil.
 
     É o que uma linha marcada com PERF. COMP. representa: o operador escreveu o
@@ -265,24 +288,58 @@ def fetch_profile_lines(of: str, perfil: str, limit: int = 500) -> list[dict]:
     """
     if not of or not perfil:
         return []
+    return _fetch_canonical_lines(of, perfil, limit, snapshot_id=snapshot_id)
+
+
+def fetch_of_lines(of: str, limit: int = 500,
+                   *, snapshot_id: str | None = None) -> list[dict]:
+    """Todas as referências da OF, mesmo com perfil vazio/incorreto."""
+    if not of:
+        return []
+    return _fetch_canonical_lines(of, None, limit, snapshot_id=snapshot_id)
+
+
+def _fetch_canonical_lines(of: str, perfil: str | None,
+                           limit: int, *, snapshot_id: str | None = None
+                           ) -> list[dict]:
+    profile_sql = (
+        "AND upper(btrim(profile_type)) = upper(btrim(%s))" if perfil else ""
+    )
+    snapshot_sql = (
+        "snapshot_id = %s" if snapshot_id else
+        "snapshot_id = ("
+        "SELECT snapshot_id FROM analytics_mtg.kanban_plan_lines "
+        "WHERE source_app = 'kanban-mes' "
+        "ORDER BY snapshot_loaded_at DESC, snapshot_id DESC LIMIT 1)"
+    )
+    params: tuple = (
+        (snapshot_id, of, perfil, limit) if snapshot_id and perfil else
+        (snapshot_id, of, limit) if snapshot_id else
+        (of, perfil, limit) if perfil else
+        (of, limit)
+    )
     return _fetch(
         f"""
-        SELECT l.component_ref, l.length_mm, l.quantity_planned, l.quantity_made,
-               l.remaining_quantity, l.cutting_machine, l.planning_week,
-               l.cut_date::date AS cut_date, l.status, l.closed_x,
-               l.material_description
-          FROM core_mtg.production_lines l
-         WHERE l.snapshot_id = ({_CANTONEIRAS_SNAPSHOT})
-           AND l.production_order_no = %s
-           AND upper(btrim(l.profile_type)) = upper(btrim(%s))
-         ORDER BY l.closed_x, l.remaining_quantity DESC, l.component_ref
+        SELECT snapshot_id, plan_key, component_ref, profile_type AS perfil,
+               length_mm, quantity_planned, quantity_made,
+               remaining_quantity, overproduction_quantity AS excesso,
+               remaining_valid, cutting_machine, planning_week,
+               cut_date, status, closed_x, material_description,
+               remaining_rule
+          FROM analytics_mtg.kanban_plan_lines
+         WHERE source_app = 'kanban-mes'
+           AND {snapshot_sql}
+           AND production_order_no = %s
+           {profile_sql}
+         ORDER BY closed_x, remaining_quantity DESC NULLS LAST,
+                  profile_type, component_ref, plan_key
          LIMIT %s
         """,
-        (_CANTONEIRAS_LIKE, of, perfil, limit),
+        params,
     )
 
 
-def fetch_profiles_in_of(of: str) -> list[dict]:
+def fetch_profiles_in_of(of: str, *, snapshot_id: str | None = None) -> list[dict]:
     """Perfis existentes numa obra, com quantas linhas tem cada um.
 
     Serve para quando o perfil escrito não casa nada: em vez de um vazio, a
@@ -291,17 +348,26 @@ def fetch_profiles_in_of(of: str) -> list[dict]:
     """
     if not of:
         return []
+    snapshot_sql = (
+        "snapshot_id = %s" if snapshot_id else
+        "snapshot_id = (SELECT snapshot_id "
+        "FROM analytics_mtg.kanban_plan_lines "
+        "WHERE source_app = 'kanban-mes' "
+        "ORDER BY snapshot_loaded_at DESC, snapshot_id DESC LIMIT 1)"
+    )
+    params = (snapshot_id, of) if snapshot_id else (of,)
     return _fetch(
         f"""
-        SELECT btrim(l.profile_type) AS perfil, count(*) AS n_linhas
-          FROM core_mtg.production_lines l
-         WHERE l.snapshot_id = ({_CANTONEIRAS_SNAPSHOT})
-           AND l.production_order_no = %s
-           AND l.profile_type IS NOT NULL AND btrim(l.profile_type) <> ''
+        SELECT btrim(profile_type) AS perfil, count(*) AS n_linhas
+          FROM analytics_mtg.kanban_plan_lines
+         WHERE source_app = 'kanban-mes'
+           AND {snapshot_sql}
+           AND production_order_no = %s
+           AND profile_type IS NOT NULL AND btrim(profile_type) <> ''
          GROUP BY 1 ORDER BY 2 DESC, 1
          LIMIT 40
         """,
-        (_CANTONEIRAS_LIKE, of),
+        params,
     )
 
 

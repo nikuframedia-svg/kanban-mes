@@ -12,12 +12,13 @@ from tests.live_client import LiveTestClient
 
 def make_index() -> PlanIndex:
     entries = [
-        {"plan_key": "P1", "of": "OF250001", "ov": "OV2400001",
+        {"snapshot_id": "test-snapshot", "plan_key": "P1", "of": "OF250001", "ov": "OV2400001",
          "cliente": "SILVA & VINHA SA", "modelo": "L50X50X5", "comp_mm": 1500},
-        {"plan_key": "P2", "of": "OF250002", "ov": "OV2400002",
+        {"snapshot_id": "test-snapshot", "plan_key": "P2", "of": "OF250002", "ov": "OV2400002",
          "cliente": "PROEF EURICO FERREIRA", "modelo": "L60X60X6", "comp_mm": 2000},
     ]
-    return PlanIndex(entries, CANTONEIRAS_SPEC, plan_age_days=1.0)
+    return PlanIndex(entries, CANTONEIRAS_SPEC, plan_age_days=1.0,
+                     snapshot_id="test-snapshot")
 
 
 @pytest.fixture()
@@ -26,6 +27,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "connect", lambda path=None: real_connect(tmp_path / "test.db"))
     monkeypatch.setattr(main, "get_index", lambda loader_name: make_index())
     monkeypatch.setattr(main.loaders, "load_active_ofs", lambda: set())
+    monkeypatch.setattr(
+        main.loaders, "plan_snapshot_info",
+        lambda: {"snapshot_id": "test-snapshot", "age_hours": 1.0},
+    )
 
     stored_calls: list[dict] = []
 
@@ -70,7 +75,8 @@ def test_field_path_hostil_e_rejeitado(client):
     e queda do processo); um negativo corrompia a proteção de células humanas."""
     uid = create_sheet(client)
     for bad in ("rows[50000000].of", "rows[-1].of", "rows[abc].of",
-                "x", "header.<script>", "rows[1].of; DROP"):
+                "x", "header.<script>", "rows[1].of; DROP",
+                "rows[0]._plan_binding"):
         r = client.post(f"/sheet/{uid}/edit", data={
             "field_path": bad, "value": "x",
             "revision": get_revision(client, uid), "actor": "t"})
@@ -85,16 +91,16 @@ def test_scripts_sao_self_hosted(client):
     assert "unpkg.com" not in r.text
 
 
-def test_proposta_vai_em_data_attribute(client):
-    """O tojson dentro de onclick="..." fechava o atributo no primeiro «"» — o
-    link «aceitar proposta» nunca funcionou. O valor vai em data-proposal."""
+def test_cross_obrigatorio_materializa_sem_link_de_proposta(client):
     uid = create_sheet(client)
     edit(client, uid, "rows[0].of", "OF250001")   # linha ligada, OV por preencher
     r = client.get(f"/sheet/{uid}")
-    if "proposal" in r.text and "acceptProposal" in r.text:
-        assert "data-proposal=" in r.text
-        assert "acceptProposal(this)" in r.text
-        assert "acceptProposal(this, " not in r.text, "valor interpolado no onclick"
+    assert "2400001" in r.text
+    conn = db.connect()
+    try:
+        assert db.get_sheet(conn, uid)["sheet_data"]["rows"][0]["ov"] == "2400001"
+    finally:
+        conn.close()
 
 
 def test_reocr_com_edicoes_humanas_exige_force(client, tmp_path, monkeypatch):
@@ -217,12 +223,9 @@ def test_header_cross_is_nested_and_renders_exact_labels(client):
     assert "header-field-operador cc-na" in r.text
 
 
-def test_header_corrige_campos_seguros_e_mantem_precedencia_do_operador(
+def test_header_cross_e_diagnostico_e_nunca_substitui_o_cabecalho(
         client, monkeypatch):
-    """Turno/máquina canonizam-se sozinhos; a DATA é assumida como o dia útil
-    anterior ao PDF de origem (18-08-2026, terça → 17/08/2026, segunda),
-    por cima do que o OCR leu; a identidade do operador continua a ser escrita
-    pelo resolve_operator (o checker descreve-a)."""
+    """Mesmo propostas seguras esperam pelo formulário explícito."""
     from app.matching.operador import Employee
 
     monkeypatch.setattr(main, "get_employees", lambda: {
@@ -253,24 +256,25 @@ def test_header_corrige_campos_seguros_e_mantem_precedencia_do_operador(
     finally:
         conn.close()
 
-    assert sheet["sheet_data"]["header"] == {
-        "operador": "GURPINDER SINGH", "n_operador": "3480",
-        "setor_maquina": "Ficep Rapid 20T -2", "data": "17/08/2026", "turno": "M",
-    }
+    assert sheet["sheet_data"]["header"] == raw["header"]
     header_cross = sheet["cross_check"]["header"]
     assert header_cross["source_document"]["filename"] == "18-08-2026.pdf"
     assert header_cross["source_document"]["page"] == 2
-    assert header_cross["cells"]["operador"]["status"] == "confirmed"
-    assert header_cross["cells"]["data"]["applied"] is True
+    assert header_cross["cells"]["operador"]["status"] == "corrected"
+    assert header_cross["cells"]["operador"]["proposal"] == "GURPINDER SINGH"
+    assert header_cross["cells"]["data"]["applied"] is False
+    assert header_cross["cells"]["data"]["proposal"] == "17/08/2026"
     assert header_cross["cells"]["data"]["reason"] == "assumed_prev_business_day"
-    assert header_cross["cells"]["setor_maquina"]["applied"] is True
+    assert header_cross["cells"]["setor_maquina"]["applied"] is False
+    assert header_cross["cells"]["setor_maquina"]["proposal"] == "Ficep Rapid 20T -2"
     # precedência: a identidade aceite é a do resolve_operator
     assert sheet["cross_check"]["operator"]["rule"] == "token"
     assert sheet["cross_check"]["operator"]["pernr"] == "10003480"
 
     r = client.get(f"/sheet/{uid}")
-    assert "header-field-data cc-match" in r.text
-    assert "substituído automaticamente" in r.text
+    assert "header-field-data cc-warn" in r.text
+    assert "17/08/2026" in r.text
+    assert "substituído automaticamente" not in r.text
     assert "18-08-2026.pdf" in r.text
     assert "não define a data da folha" in r.text
 
@@ -302,9 +306,10 @@ def test_plan_failure_does_not_block_header_cross(client, monkeypatch):
     import datetime as dt
     esperado = main.header_cross.previous_business_day(
         dt.datetime.now(dt.timezone.utc).date()).strftime("%d/%m/%Y")
-    assert sheet["sheet_data"]["header"]["data"] == esperado
-    assert sheet["sheet_data"]["header"]["turno"] == "M"
-    assert cross["header"]["cells"]["data"]["status"] == "confirmed"
+    assert sheet["sheet_data"]["header"]["data"] == "15-08-26"
+    assert sheet["sheet_data"]["header"]["turno"] == "m"
+    assert cross["header"]["cells"]["data"]["proposal"] == esperado
+    assert cross["header"]["cells"]["turno"]["proposal"] == "M"
     assert "Plano indisponível" in client.get(f"/sheet/{uid}").text
 
 
@@ -349,6 +354,28 @@ def test_substituicao_marca_applied_e_mostra_o_original_do_ocr(client):
     assert 'class="ocr-original"' in r.text, "o original do OCR aparece por baixo"
 
 
+def test_recheck_preserva_valores_substituidos_no_payload_final(client):
+    uid = create_sheet(client)
+    edit(client, uid, "rows[0].of", "OF250001")
+    conn = db.connect()
+    try:
+        first = db.get_sheet(conn, uid)["cross_check"]["rows"][0]
+    finally:
+        conn.close()
+    assert first["replaced_values"]["of"] == {
+        "old": "OF250001", "new": "250001",
+    }
+
+    assert client.post(f"/sheet/{uid}/recheck").status_code == 303
+    conn = db.connect()
+    try:
+        final = db.get_sheet(conn, uid)["cross_check"]["rows"][0]
+    finally:
+        conn.close()
+    assert final["replaced_values"]["of"] == first["replaced_values"]["of"]
+    assert final["selected_snapshot_id"] == "test-snapshot"
+
+
 def test_edit_with_stale_revision_conflicts(client):
     uid = create_sheet(client)
     r = client.post(f"/sheet/{uid}/edit", data={
@@ -356,6 +383,184 @@ def test_edit_with_stale_revision_conflicts(client):
         "revision": 999, "actor": "teste",
     })
     assert r.status_code == 409
+
+
+def test_header_form_guarda_tudo_uma_vez_e_preserva_draft_no_conflito(
+    client, monkeypatch
+):
+    uid = create_sheet(client)
+    monkeypatch.setattr(main, "get_employees", lambda: {})
+    calls = []
+    real_cross = main.run_cross_check
+
+    def counted_cross(conn, sheet_uid, **kwargs):
+        calls.append(sheet_uid)
+        return real_cross(conn, sheet_uid, **kwargs)
+
+    monkeypatch.setattr(main, "run_cross_check", counted_cross)
+    revision = get_revision(client, uid)
+    payload = {
+        "operador": "Ana Silva", "n_operador": "42",
+        "setor_maquina": "Rapid 20T - 1", "data": "31/08/2026",
+        "turno": "M", "revision": revision, "actor": "teste",
+        "back": "/?status=pending&page=2",
+    }
+    response = client.post(f"/sheet/{uid}/header", data=payload)
+    assert response.status_code == 303
+    assert calls == [uid], "o cabeçalho integral dispara um único cross"
+
+    conn = db.connect()
+    try:
+        sheet = db.get_sheet(conn, uid)
+        edits = conn.execute(
+            "SELECT field_path FROM edits WHERE sheet_uid = ? AND source = 'human' "
+            "ORDER BY field_path", (uid,),
+        ).fetchall()
+    finally:
+        conn.close()
+    assert sheet["sheet_data"]["header"] == {
+        "operador": "Ana Silva", "n_operador": "42",
+        "setor_maquina": "Rapid 20T - 1", "data": "31/08/2026",
+        "turno": "M",
+    }
+    assert [row[0] for row in edits] == [
+        "header.data", "header.n_operador", "header.operador",
+        "header.setor_maquina", "header.turno",
+    ]
+
+    stale = {**payload, "operador": "Rascunho Preservado", "turno": "T"}
+    conflict = client.post(f"/sheet/{uid}/header", data=stale)
+    assert conflict.status_code == 409
+    assert conflict.headers["content-type"].startswith("text/html")
+    assert "A folha foi alterada; confirma novamente os valores" in conflict.text
+    assert 'value="Rascunho Preservado"' in conflict.text
+    assert 'value="T"' in conflict.text
+    assert "const headerConflict = true" in conflict.text
+    assert "let conflictPending = true" in conflict.text
+
+
+def test_validar_guarda_o_cabecalho_visivel_sem_exigir_guardar_primeiro(
+        client, monkeypatch):
+    monkeypatch.setattr(main, "get_employees", lambda: {})
+    uid = create_sheet(client)
+    revision = get_revision(client, uid)
+    page = client.get(f"/sheet/{uid}")
+    assert "Ao validar, estas alterações também serão guardadas." in page.text
+    assert "validate.disabled" not in page.text
+
+    response = client.post(f"/sheet/{uid}/validate", data={
+        "revision": revision,
+        "header_operador": "Ana Silva",
+        "header_n_operador": "42",
+        "header_setor_maquina": "Rapid 20T - 1",
+        "header_data": "31/08/2026",
+        "header_turno": "M",
+    })
+    assert response.status_code == 303
+    assert "validated=" in response.headers["location"]
+
+    conn = db.connect()
+    try:
+        sheet = db.get_sheet(conn, uid)
+        assert sheet["status"] == "validated"
+        assert sheet["sheet_data"]["header"] == {
+            "operador": "Ana Silva",
+            "n_operador": "42",
+            "setor_maquina": "Rapid 20T - 1",
+            "data": "31/08/2026",
+            "turno": "M",
+        }
+    finally:
+        conn.close()
+
+
+def test_post_incompleto_de_formulario_nunca_devolve_json_cru(client):
+    uid = create_sheet(client)
+    response = client.post(f"/sheet/{uid}/header", data={"operador": "Ana"})
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("text/html")
+    assert not response.text.lstrip().startswith("{")
+
+
+def test_escolha_explicita_prevalece_e_binding_invalida_com_edicao(
+    client, monkeypatch
+):
+    entries = [
+        {"snapshot_id": "snap-ref", "plan_key": "A", "of": "OF250001",
+         "ov": "OV2400001", "cliente": "CLIENTE", "cliente_nome": "CLIENTE",
+         "perfil": "L50X50X5", "modelo": "REF-A", "comp_mm": 1000},
+        {"snapshot_id": "snap-ref", "plan_key": "B", "of": "OF250001",
+         "ov": "OV2400001", "cliente": "CLIENTE", "cliente_nome": "CLIENTE",
+         "perfil": "L50X50X5", "modelo": "REF-B", "comp_mm": 2000},
+    ]
+    index = PlanIndex(entries, CANTONEIRAS_SPEC, snapshot_id="snap-ref")
+    monkeypatch.setattr(main, "get_index", lambda loader_name: index)
+    monkeypatch.setattr(
+        main.loaders, "plan_snapshot_info",
+        lambda: {"snapshot_id": "snap-ref", "age_hours": 0.0},
+    )
+    uid = create_sheet(client)
+    edit(client, uid, "rows[0].of", "250001")
+
+    chosen = client.post(f"/sheet/{uid}/rows/0/reference", data={
+        "snapshot_id": "snap-ref", "plan_key": "B",
+        "revision": get_revision(client, uid), "actor": "teste",
+    })
+    assert chosen.status_code == 303
+    conn = db.connect()
+    try:
+        sheet = db.get_sheet(conn, uid)
+    finally:
+        conn.close()
+    row = sheet["sheet_data"]["rows"][0]
+    assert row["modelo"] == "REF-B"
+    assert row["_plan_binding"] == {
+        "snapshot_id": "snap-ref", "plan_key": "B",
+        "selected_explicitly": True,
+    }
+    cross_row = sheet["cross_check"]["rows"][0]
+    assert cross_row["matched_plan_key"] == "B"
+    assert cross_row["selected_explicitly"] is True
+    assert cross_row["selected_snapshot_id"] == "snap-ref"
+
+    edit(client, uid, "rows[0].perf_comp", "X")
+    conn = db.connect()
+    try:
+        changed = db.get_sheet(conn, uid)
+    finally:
+        conn.close()
+    assert "_plan_binding" not in changed["sheet_data"]["rows"][0]
+    assert changed["cross_check"]["rows"][0]["selected_explicitly"] is False
+
+
+def test_reference_obsoleta_ou_adulterada_fica_na_folha(client, monkeypatch):
+    uid = create_sheet(client)
+    edit(client, uid, "rows[0].of", "250001")
+    response = client.post(f"/sheet/{uid}/rows/0/reference", data={
+        "snapshot_id": "snapshot-antigo", "plan_key": "P1",
+        "revision": get_revision(client, uid), "back": "/?status=pending",
+    })
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/sheet/{uid}?")
+    assert "erro=" in response.headers["location"]
+
+    tampered = client.post(f"/sheet/{uid}/rows/0/reference", data={
+        "snapshot_id": "test-snapshot", "plan_key": "NAO-EXISTE",
+        "revision": get_revision(client, uid),
+    })
+    assert tampered.status_code == 303
+    assert "erro=" in tampered.headers["location"]
+
+    monkeypatch.setattr(
+        main.loaders, "plan_snapshot_info",
+        lambda: (_ for _ in ()).throw(RuntimeError("postgres down")),
+    )
+    unavailable = client.post(f"/sheet/{uid}/rows/0/reference", data={
+        "snapshot_id": "test-snapshot", "plan_key": "P1",
+        "revision": get_revision(client, uid),
+    })
+    assert unavailable.status_code == 303
+    assert "erro=" in unavailable.headers["location"]
 
 
 def test_add_row_and_recheck(client):
@@ -372,6 +577,86 @@ def test_add_row_and_recheck(client):
     finally:
         conn.close()
     assert client.post(f"/sheet/{uid}/recheck").status_code == 303
+
+
+def test_apagar_linha_e_logico_auditado_renumera_e_exclui_csv(client):
+    uid = create_sheet(client)
+    for i, qtd in enumerate(("10", "20", "30")):
+        assert edit(client, uid, f"rows[{i}].qtd", qtd).status_code == 303
+    revision = get_revision(client, uid)
+    response = client.post(f"/sheet/{uid}/rows/1/delete", data={
+        "revision": revision, "actor": "teste",
+        "back": "/?status=in_review&page=2",
+    })
+    assert response.status_code == 303
+    assert "back=%2F%3Fstatus%3Din_review%26page%3D2" in response.headers["location"]
+
+    conn = db.connect()
+    try:
+        sheet = db.get_sheet(conn, uid)
+        assert sheet["sheet_data"]["rows"][1]["_deleted"] is True
+        assert sheet["sheet_data"]["rows"][1]["qtd"] == "20"
+        cross_indexes = [row["row_index"] for row in sheet["cross_check"]["rows"]]
+        assert 1 not in cross_indexes and 0 in cross_indexes and 2 in cross_indexes
+        audit = conn.execute(
+            "SELECT old_value, new_value, source, actor FROM edits "
+            "WHERE sheet_uid=? AND field_path='rows[1]'", (uid,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert '"qtd": "20"' in audit["old_value"]
+    assert audit["new_value"] == "<apagada>"
+    assert (audit["source"], audit["actor"]) == ("human", "teste")
+
+    page = client.get(f"/sheet/{uid}")
+    assert f'/sheet/{uid}/rows/1/delete' not in page.text
+    assert f'/sheet/{uid}/rows/2/delete' in page.text
+    assert 'aria-label="Apagar linha 2"' in page.text
+    csv_text = client.get(f"/sheet/{uid}/csv").text
+    assert ",20" not in csv_text
+    assert ",30" in csv_text
+    assert client.get(f"/sheet/{uid}/plano/1").status_code == 404
+
+
+def test_apagar_linha_respeita_revisao_e_folha_validada(client):
+    uid = create_sheet(client)
+    assert edit(client, uid, "rows[0].qtd", "1").status_code == 303
+    stale = get_revision(client, uid)
+    assert edit(client, uid, "rows[1].qtd", "2").status_code == 303
+    conflict = client.post(f"/sheet/{uid}/rows/0/delete", data={"revision": stale})
+    assert conflict.status_code == 303
+    assert "erro=" in conflict.headers["location"]
+    conn = db.connect()
+    try:
+        assert db.get_sheet(conn, uid)["sheet_data"]["rows"][0].get("_deleted") is not True
+        conn.execute("UPDATE sheets SET status='validated' WHERE uid=?", (uid,))
+        conn.commit()
+        revision = db.get_sheet(conn, uid)["revision"]
+    finally:
+        conn.close()
+    page = client.get(f"/sheet/{uid}")
+    assert "/delete" not in page.text
+    frozen = client.post(f"/sheet/{uid}/rows/0/delete", data={"revision": revision})
+    assert frozen.status_code == 303
+    assert "erro=" in frozen.headers["location"]
+
+
+def test_apagar_primeira_intermedia_e_ultima_linha(client):
+    for row_index in (0, 1, 2):
+        uid = create_sheet(client)
+        for i in range(3):
+            assert edit(client, uid, f"rows[{i}].qtd", str(i + 1)).status_code == 303
+        response = client.post(f"/sheet/{uid}/rows/{row_index}/delete", data={
+            "revision": get_revision(client, uid),
+        })
+        assert response.status_code == 303
+        conn = db.connect()
+        try:
+            rows = db.get_sheet(conn, uid)["sheet_data"]["rows"]
+        finally:
+            conn.close()
+        assert rows[row_index]["_deleted"] is True
+        assert sum(row.get("_deleted") is True for row in rows) == 1
 
 
 def test_validate_requires_header_then_stores_and_freezes(client):
@@ -419,6 +704,88 @@ def test_validate_sem_quem_valida(client):
     page = client.get(f"/sheet/{uid}").text
     assert "✓ validada" in page
     assert "validada · operador" not in page
+
+
+def test_validate_regressa_ao_back_exato_e_mostra_confirmacao(client):
+    uid = create_sheet(client)
+    edit(client, uid, "header.operador", "Ana Silva")
+    edit(client, uid, "header.data", "2026-08-31")
+    edit(client, uid, "rows[0].of", "250001")
+    back = "/?status=pending&operador=Ana%20Silva&of=250001&page=2"
+    response = client.post(f"/sheet/{uid}/validate", data={
+        "revision": get_revision(client, uid), "back": back,
+    })
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        back + "&validated=1&stored=1"
+    )
+    page = client.get(response.headers["location"])
+    assert "Folha 1 validada" in page.text
+    assert "url.searchParams.delete('validated')" in page.text
+    assert "url.searchParams.delete('stored')" in page.text
+
+
+def test_validate_sem_back_volta_a_lista(client):
+    uid = create_sheet(client)
+    edit(client, uid, "header.operador", "Ana")
+    edit(client, uid, "header.data", "2026-08-31")
+    response = client.post(f"/sheet/{uid}/validate", data={
+        "revision": get_revision(client, uid),
+    })
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/?validated=1&stored=")
+
+
+def test_confirmacao_de_validacao_e_transitoria_sem_apagar_filtros(client):
+    page = client.get(
+        "/?status=validated&operador=Ana&validated=17&stored=3"
+    )
+    assert page.status_code == 200
+    assert "Folha 17 validada." in page.text
+    assert "3 linha(s) gravadas." in page.text
+    assert "url.searchParams.delete('validated')" in page.text
+    assert "url.searchParams.delete('stored')" in page.text
+    assert "url.searchParams.delete('status')" not in page.text
+    assert "url.searchParams.delete('operador')" not in page.text
+
+
+def test_validate_rejeita_snapshot_substituido_antes_do_postgres(
+    client, monkeypatch
+):
+    uid = create_sheet(client)
+    edit(client, uid, "header.operador", "Ana")
+    edit(client, uid, "header.data", "2026-08-31")
+    edit(client, uid, "rows[0].of", "250001")
+    monkeypatch.setattr(
+        main.loaders, "plan_snapshot_info",
+        lambda: {"snapshot_id": "snapshot-novo", "age_hours": 0.0},
+    )
+    response = client.post(f"/sheet/{uid}/validate", data={
+        "revision": get_revision(client, uid),
+    })
+    assert response.status_code == 303
+    assert "erro=" in response.headers["location"]
+    assert not client.stored_calls
+    conn = db.connect()
+    try:
+        assert db.get_sheet(conn, uid)["status"] != "validated"
+    finally:
+        conn.close()
+
+
+def test_validate_bloqueia_linha_sem_qualquer_candidato(client, monkeypatch):
+    empty = PlanIndex([], CANTONEIRAS_SPEC, snapshot_id="test-snapshot")
+    monkeypatch.setattr(main, "get_index", lambda loader_name: empty)
+    uid = create_sheet(client)
+    edit(client, uid, "header.operador", "Ana")
+    edit(client, uid, "header.data", "2026-08-31")
+    edit(client, uid, "rows[0].of", "NAO-EXISTE")
+    response = client.post(f"/sheet/{uid}/validate", data={
+        "revision": get_revision(client, uid),
+    })
+    assert response.status_code == 303
+    assert "erro=" in response.headers["location"]
+    assert not client.stored_calls
 
 
 def test_upload_multiple_images_creates_multiple_sheets(client):
@@ -476,7 +843,7 @@ def test_sheet_csv_downloads(client):
     r = client.get(f"/sheet/{uid}/csv")
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]
-    assert "OF250001" in r.text
+    assert "250001" in r.text, "OF é exportada na forma canónica materializada"
 
 
 def test_historico_filters(client):
@@ -521,9 +888,12 @@ def test_plano_popup_totais_so_quando_vem_do_perf_comp(client, monkeypatch):
     """O mesmo pop-up serve dois cliques: da célula do perfil (lista simples)
     e da marca PERF. COMP. (que afirma «fiz tudo» — leva totais e, se o plano
     ainda mostra falta, um aviso)."""
-    monkeypatch.setattr(main.loaders, "plan_snapshot_info", lambda: {"age_hours": 5.0})
+    monkeypatch.setattr(
+        main.loaders, "plan_snapshot_info",
+        lambda: {"snapshot_id": "test-snapshot", "age_hours": 5.0},
+    )
     monkeypatch.setattr(main.loaders, "fetch_profile_lines",
-                        lambda of, perfil: _linhas_plano_fake())
+                        lambda of, perfil, *, snapshot_id=None: _linhas_plano_fake())
     monkeypatch.setattr(main.loaders, "fetch_profiles_in_of", lambda of: [])
     uid = create_sheet(client)
     edit(client, uid, "rows[0].of", "250001")

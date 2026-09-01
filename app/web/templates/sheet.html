@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Folha {{ sheet.uid[:8] }} — Kanban MES{% endblock %}
+{% block title %}Folha {{ sheet.sheet_no or sheet.uid[:8] }} — Kanban MES{% endblock %}
 {% block topbar_actions %}
   <a class="btn ghost sheet-back" href="{{ back_url }}">← Voltar à lista</a>
   <a class="btn" href="/sheet/{{ sheet.uid }}/csv">CSV</a>
@@ -15,12 +15,20 @@
 {% set data = (sheet.raw_extraction if is_raw else sheet.sheet_data) or {} %}
 {% set header = data.get('header') or {} %}
 {% set rows = data.get('rows') or [] %}
+{% set active_rows = [] %}
+{% set visible_row_numbers = {} %}
+{% for candidate in rows %}
+  {% if is_raw or candidate.get('_deleted') is not sameas true %}
+    {% set _ = active_rows.append((loop.index0, candidate)) %}
+    {% set _ = visible_row_numbers.update({loop.index0: active_rows|length}) %}
+  {% endif %}
+{% endfor %}
 {% set footer = data.get('footer') or {} %}
 
 <div class="page-h">
   <div>
     <div class="page-eyebrow">Revisão · {{ t.label }}</div>
-    <h1 class="page-title">Folha {{ sheet.uid[:8] }}</h1>
+    <h1 class="page-title">Folha {{ sheet.sheet_no or sheet.uid[:8] }}</h1>
     {% if has_ocr %}
     <div class="tabs" style="margin-top:10px; border-bottom:none;">
       <a class="tab {% if not is_raw %}active{% endif %}"
@@ -55,7 +63,7 @@
 
 {% if erro %}
 <div class="alert crit" style="margin-bottom:14px;">
-  <span><strong>Não foi possível validar.</strong> {{ erro }}</span>
+  <span><strong>{{ 'Conflito no cabeçalho.' if header_conflict else 'Não foi possível validar.' }}</strong> {{ erro }}</span>
 </div>
 {% endif %}
 
@@ -116,7 +124,8 @@ setTimeout(function () {
 {% if plan_reference.status == 'no_reference' and not is_raw %}
 <div class="alert warn" style="margin-bottom:14px;">
   <span><strong>Plano indisponível.</strong> As linhas foram mantidas sem
-  cruzamento; o cabeçalho continua verificado pelas restantes fontes.</span>
+  cruzamento; o cabeçalho continua verificado pelas restantes fontes. A
+  validação fica bloqueada até o planeamento voltar.</span>
 </div>
 {% endif %}
 
@@ -180,7 +189,8 @@ setTimeout(function () {
     <div class="alert info">
       <span>Estás a ver a transcrição original da máquina, sem correcções e sem
         cores — as cores dizem se o valor bate com o plano, e o plano só foi
-        cruzado contra os valores corrigidos.</span>
+        cruzado contra os valores corrigidos.
+        <a href="/sheet/{{ sheet.uid }}{% if back_url %}?back={{ back_url|urlencode }}{% endif %}"><strong>Editar no Cross-check</strong></a>.</span>
     </div>
     {% endif %}
 
@@ -275,7 +285,13 @@ setTimeout(function () {
           </span>
         </div>
         {% endif %}
-        <div class="header-grid">
+        {% if not readonly %}
+        <form method="post" action="/sheet/{{ sheet.uid }}/header" id="header-form">
+          <input type="hidden" name="revision" value="{{ sheet.revision }}">
+          <input type="hidden" name="back" value="{{ back_url }}">
+          <input type="hidden" name="actor" value="operador">
+        {% endif %}
+        <div class="header-grid" id="header-fields">
           {% for f in t.header_fields %}
           {% set hc = header_cells.get(f) if (header_cells and not is_raw) else none %}
           {% set state_class = {'confirmed': 'cc-match',
@@ -286,7 +302,15 @@ setTimeout(function () {
                                 'no_reference': 'cc-na'}.get(hc.status, 'cc-na') if hc else '' %}
           <div class="field header-field header-field-{{ f }} {{ state_class }}">
             <span class="lbl">{{ header_labels.get(f, (t.field_labels or {}).get(f, f)) }}{% if f in ('operador', 'data') %} *{% endif %}</span>
-            {{ edit_cell('header.' ~ f, header.get(f)) }}
+            {% if readonly %}
+              <div class="header-value">{{ header.get(f) or '' }}</div>
+              {{ snap_mark('header.' ~ f) }}
+            {% else %}
+              <input type="text" class="cell-input header-input" name="{{ f }}"
+                     value="{{ header.get(f) or '' }}"
+                     {% if f == 'data' %}autocomplete="off"{% endif %}>
+              {{ snap_mark('header.' ~ f) }}
+            {% endif %}
             {% if hc %}
             <div class="header-check-message">
               <span class="pill {{ 'ok' if hc.status == 'confirmed' else ('warn' if hc.status == 'corrected' else ('crit' if hc.status in ('review', 'ambiguous') else 'neutral')) }}">
@@ -330,13 +354,22 @@ setTimeout(function () {
           </div>
           {% endfor %}
         </div>
+        {% if not readonly %}
+          <div class="header-savebar">
+            <span class="muted tiny" id="header-dirty-message" hidden>
+              Ao validar, estas alterações também serão guardadas.
+            </span>
+            <button type="submit" class="btn primary">Guardar cabeçalho</button>
+          </div>
+        </form>
+        {% endif %}
       </div>
     </div>
 
     <div class="card" style="margin-bottom:14px;">
       <div class="card-h">
         <span class="card-h-title">{{ 'Paragens da máquina' if not t.index_loader else 'Linhas de produção' }}</span>
-        <span class="card-h-sub">{{ rows | length }} linhas</span>
+        <span class="card-h-sub">{{ active_rows | length }} linhas</span>
       </div>
       <div class="card-b">
         {% if t.index_loader and not is_raw %}
@@ -345,7 +378,7 @@ setTimeout(function () {
         {% if review_order and not readonly %}
         <p class="muted tiny" style="margin:0 0 10px;">
           Começa pelas linhas
-          {% for i in review_order[:6] %}<a href="#row-{{ i }}" style="color:var(--accent-ink);"><b>{{ i + 1 }}</b></a>{{ ", " if not loop.last }}{% endfor %}
+          {% for i in review_order[:6] %}<a href="#row-{{ i }}" style="color:var(--accent-ink);"><b>{{ visible_row_numbers.get(i, i + 1) }}</b></a>{{ ", " if not loop.last }}{% endfor %}
           — são as que mais precisam de olho humano.
         </p>
         {% endif %}
@@ -362,11 +395,27 @@ setTimeout(function () {
               </tr>
             </thead>
             <tbody>
-              {% for row in rows %}
-              {% set i = loop.index0 %}
+              {% for indexed_row in active_rows %}
+              {% set i = indexed_row[0] %}
+              {% set row = indexed_row[1] %}
+              {% set visible_i = loop.index %}
               {% set cr = cross_rows.get(i) %}
               <tr id="row-{{ i }}">
-                <td class="muted mono">{{ i + 1 }}</td>
+                <td class="muted mono">
+                  <div class="row-number-actions">
+                    <span>{{ visible_i }}</span>
+                    {% if not readonly %}
+                    <form method="post" action="/sheet/{{ sheet.uid }}/rows/{{ i }}/delete"
+                          onsubmit="return confirm('Apagar a linha {{ visible_i }}?');">
+                      <input type="hidden" name="revision" value="{{ sheet.revision }}">
+                      <input type="hidden" name="back" value="{{ back_url }}">
+                      <input type="hidden" name="actor" value="operador">
+                      <button type="submit" class="btn danger row-delete-btn"
+                              title="Apagar linha" aria-label="Apagar linha {{ visible_i }}">−</button>
+                    </form>
+                    {% endif %}
+                  </div>
+                </td>
                 {% for f in t.row_fields %}
                 {% set cell = (cr.cells_by_field.get(f) if cr else None) %}
                 {# Estados do motor → classes de cor do design system.
@@ -386,14 +435,15 @@ setTimeout(function () {
                     <button type="button" class="btn ghost plano-btn"
                             title="Ver as referências deste perfil na obra"
                             aria-label="Ver as referências deste perfil na obra"
-                            onclick="abrirPlano('/sheet/{{ sheet.uid }}/plano/{{ i }}?origem=perf_comp')">→</button>
+                            onclick="abrirPlano('/sheet/{{ sheet.uid }}/plano/{{ i }}?origem=perf_comp&amp;back={{ back_url|urlencode }}')">→</button>
                   {% endif %}
-                  {# E na própria célula do perfil — é aqui que é natural
-                     clicar para ver o que a obra tem daquele perfil. #}
-                  {% if f == 'perfil' and t.index_loader and (field_value(row, f) or (cell and cell.inherited)) %}
+                  {# A ação vive junto de Modelo/Referência, o valor que a
+                     escolha explícita altera. Funciona mesmo com perfil vazio
+                     para mostrar todas as referências da OF. #}
+                  {% if f == 'modelo' and t.name == 'cantoneiras_kanban' %}
                     <button type="button" class="btn ghost plano-btn"
-                            title="Ver as referências deste perfil na obra"
-                            onclick="abrirPlano('/sheet/{{ sheet.uid }}/plano/{{ i }}')">refs</button>
+                            title="Ver referências desta OF/perfil"
+                            onclick="abrirPlano('/sheet/{{ sheet.uid }}/plano/{{ i }}?back={{ back_url|urlencode }}')">Referências</button>
                   {% endif %}
                 </td>
                 {% endfor %}
@@ -409,7 +459,7 @@ setTimeout(function () {
                     {% elif cr.mode == 'weak_guess' %}<span class="pill warn">incerta</span>
                     {% elif cr.mode == 'no_match' %}<span class="pill crit">fora do plano</span>
                     {% else %}<span class="pill neutral">{{ cr.mode }}</span>{% endif %}
-                    <div class="proposal">P = {{ '%.0f' | format(cr.p_correct * 100) }}%{% if cr.matched_plan_key %} · {{ cr.matched_plan_key }}{% endif %}</div>
+                    <div class="proposal">P = {{ '%.0f' | format(cr.p_correct * 100) }}%{% if cr.matched_plan_key and not is_marked(field_value(row, 'perf_comp')) %} · {{ cr.matched_plan_key }}{% endif %}</div>
                   {% else %}
                     <span class="pill neutral">—</span>
                   {% endif %}
@@ -492,11 +542,16 @@ setTimeout(function () {
             <button type="submit" class="btn">Re-verificar contra o plano</button>
           </form>
           {% endif %}
-          <form method="post" action="/sheet/{{ sheet.uid }}/validate"
+          <form method="post" action="/sheet/{{ sheet.uid }}/validate" id="validate-form"
                 style="display:flex; gap:8px; align-items:center; margin-left:auto;"
-                onsubmit="return confirm('Validar a folha? Depois de validada fica imutável.')">
+                onsubmit="syncHeaderIntoValidation(); return confirm('Validar a folha? Depois de validada fica imutável.')">
             <input type="hidden" name="back" value="{{ back_url }}">
-            <button type="submit" class="btn primary">Validar folha</button>
+            <input type="hidden" name="revision" value="{{ sheet.revision }}">
+            {% for field in t.header_fields %}
+            <input type="hidden" name="header_{{ field }}"
+                   value="{{ header.get(field) or '' }}" data-header-copy="{{ field }}">
+            {% endfor %}
+            <button type="submit" class="btn primary" id="validate-button">Validar folha</button>
           </form>
         </div>
       </div>
@@ -552,10 +607,64 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') fecharPlano(
 
 function acceptProposal(link) {
   const td = link.closest('td, .field');
-  const input = td.querySelector('input[name=value]');
-  if (input) { input.value = link.dataset.proposal; input.form.submit(); }
+  const input = td.querySelector('input[name=value], input.header-input');
+  if (input) {
+    input.value = link.dataset.proposal;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    if (!input.classList.contains('header-input')) input.form.submit();
+  }
   return false;
 }
+
+function syncHeaderIntoValidation() {
+  const headerForm = document.getElementById('header-form');
+  const validateForm = document.getElementById('validate-form');
+  if (!headerForm || !validateForm) return;
+  validateForm.querySelectorAll('[data-header-copy]').forEach(copy => {
+    const source = headerForm.elements[copy.dataset.headerCopy];
+    if (source) copy.value = source.value;
+  });
+}
+
+(function guardUnsavedHeader() {
+  const form = document.getElementById('header-form');
+  if (!form) return;
+  const initial = new FormData(form);
+  const initialValues = {};
+  for (const [key, value] of initial.entries()) {
+    if (!['revision', 'back', 'actor'].includes(key)) initialValues[key] = value;
+  }
+  const message = document.getElementById('header-dirty-message');
+  let conflictPending = {{ header_conflict | tojson }};
+  function refresh() {
+    const current = new FormData(form);
+    const dirty = conflictPending || Object.keys(initialValues).some(
+      key => String(current.get(key) || '') !== String(initialValues[key] || '')
+    );
+    if (message) message.hidden = !dirty;
+  }
+  form.addEventListener('input', refresh);
+  form.addEventListener('change', refresh);
+  refresh();
+})();
+
+(function focusValidationProblem() {
+  const focus = {{ request.query_params.get('focus', '') | tojson }};
+  const headerConflict = {{ header_conflict | tojson }};
+  if (!focus && !headerConflict) return;
+  let input = null;
+  if (focus.startsWith('header.')) {
+    input = document.querySelector('#header-form [name="' + focus.slice(7) + '"]');
+  }
+  if (!input && headerConflict) {
+    input = document.querySelector('#header-form .header-input');
+  }
+  input = input || document.querySelector('.cc-no-match input, .cc-warn input');
+  if (input) {
+    input.focus({ preventScroll: true });
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+})();
 
 function rodarFolha(uid, btn) {
   btn.disabled = true;

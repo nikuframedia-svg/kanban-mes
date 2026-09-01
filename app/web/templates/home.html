@@ -24,6 +24,11 @@
   {% if deleted %}
   <div class="alert ok" style="margin-bottom:14px;"><span>Folha apagada.</span></div>
   {% endif %}
+  {% if validated %}
+  <div class="alert ok" style="margin-bottom:14px;">
+    <span><strong>Folha {{ validated }} validada.</strong> {{ stored or 0 }} linha(s) gravadas.</span>
+  </div>
+  {% endif %}
 
   {# Os botões de estado levam consigo todos os outros filtros activos. #}
   <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; align-items:center;">
@@ -105,7 +110,7 @@
         <tbody>
           {% for s in sheets %}
           <tr>
-            <td class="mono"><b>{{ s.uid[:8] }}</b></td>
+            <td class="mono" title="UID {{ s.uid }}"><b>{{ s.sheet_no or s.uid[:8] }}</b></td>
             <td class="muted tiny mono">{{ s.created_at[:16].replace('T', ' ') }}</td>
             <td>{{ s.operador or '—' }}</td>
             <td class="muted tiny mono">{{ (s.data_folha or '—')[:10] }}</td>
@@ -133,7 +138,7 @@
               <a href="/sheet/{{ s.uid }}/csv" class="btn ghost">csv</a>
               {% if s.status != 'validated' %}
               <form method="post" action="/sheet/{{ s.uid }}/delete" style="display:inline;"
-                    onsubmit="return confirm('Apagar a folha {{ s.uid[:8] }}? Não há volta.');">
+                    onsubmit="return confirm('Apagar a folha {{ s.sheet_no or s.uid[:8] }}? Não há volta.');">
                 <input type="hidden" name="back" value="{{ history_url }}">
                 <button class="btn ghost" type="submit"
                         style="color:var(--crit); border-color:var(--crit-soft);">apagar</button>
@@ -166,12 +171,14 @@
   </div>
   {% endif %}
 </div>
-{% if created or deleted %}
+{% if created or deleted or validated or stored %}
 <script>
   (function () {
     var url = new URL(window.location.href);
     url.searchParams.delete('created');
     url.searchParams.delete('deleted');
+    url.searchParams.delete('validated');
+    url.searchParams.delete('stored');
     history.replaceState(null, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams : ''));
   })();
 </script>

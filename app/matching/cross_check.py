@@ -11,12 +11,12 @@ Estados de célula:
 - unmatched      — sem vencedor credível no plano (H₀ venceu ou não há candidatos);
 - na             — campo sem referência para cruzar.
 
-Escrita automática (política de 26/08): uma célula ESCRITA cuja proposta
-difere aplica-se sempre — o valor lido fica no raw e visível na revisão.
-Células sem valor escrito (vazias/herdadas) mantêm a perda esperada: só se
-preenchem quando P(certo) > limiar do campo (ou of/ov em linha forte).
-Edições humanas nunca são sobrescritas (imposto na camada web, que marca
-células com origem humana antes de chamar isto); a Qtd nunca se reescreve.
+Escrita automática: existindo candidato, todos os campos que pertencem ao
+planeamento são materializados a partir do vencedor determinístico, incluindo
+vazios, herdados, equivalentes só na forma e valores antes editados à mão. A
+edição humana continua no trilho de auditoria, mas não é um veto sobre factos
+do plano. Cabeçalho, quantidades e restantes factos de produção ficam fora
+desta política e nunca são reescritos.
 """
 
 from __future__ import annotations
@@ -70,6 +70,12 @@ class RowCheck:
     # rodapé se conferem — a diferença é o desperdício/excedente.
     plan_length_mm: float | None = None
     line_meters: float | None = None
+    selected_snapshot_id: str | None = None
+    selected_explicitly: bool = False
+    binding_stale: bool = False
+    plan_refs: list[dict] = field(default_factory=list)
+    plan_refs_valid: bool | None = None
+    plan_refs_error: str | None = None
 
 
 def plan_quantity_for(index: PlanIndex, of: str, modelo: str) -> float | None:
@@ -147,7 +153,8 @@ def _cliente_check(row: dict, scored_row: dict, index: PlanIndex,
                    params: CrossParams, inherited_values: dict,
                    inherited_from: dict, human_fields: set[str],
                    p: float, permitir_escrita: bool,
-                   replace_all: bool = False) -> CellCheck | None:
+                   replace_all: bool = False,
+                   forced_name: str | None = None) -> CellCheck | None:
     """Célula do cliente, fora do scorer.
 
     O cliente não entra na identificação da linha (o plano guarda o cliente
@@ -159,7 +166,8 @@ def _cliente_check(row: dict, scored_row: dict, index: PlanIndex,
     para quando a substituição está desligada ou o ramo não permite escrita.
     O que o operador escreveu fica no raw e no trilho de auditoria.
     """
-    nome = plan_customer_for(index, str(scored_row.get("of") or ""))
+    nome = (str(forced_name).strip() if forced_name is not None
+            else plan_customer_for(index, str(scored_row.get("of") or "")))
     if not nome:
         return None
     written = row.get("cliente")
@@ -167,6 +175,21 @@ def _cliente_check(row: dict, scored_row: dict, index: PlanIndex,
         written = None
     written_s = str(written).strip() if written is not None else ""
     efectivo = written_s or str(inherited_values.get("cliente") or "").strip()
+    if params.policy.replace_with_plan and permitir_escrita:
+        similarity = sim.text_similarity(efectivo, nome) if efectivo else 0.0
+        status = (
+            "confirmed" if efectivo and similarity >= params.score.sim_near
+            else "snapped"
+        )
+        materialize = written_s != nome
+        return CellCheck(
+            field="cliente", written=written_s or None,
+            proposal=nome if materialize else None,
+            status=status, similarity=similarity,
+            auto_write=materialize, p_correct=p,
+            inherited=inherited_values.get("cliente"),
+            inherited_from=inherited_from.get("cliente"),
+        )
     if not efectivo:
         writable = (permitir_escrita
                     and "cliente" not in human_fields
@@ -216,6 +239,41 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     index: PlanIndex = scorer.index
     scored_row = carryover.effective_row(row, identity) if identity else row
     match: RowMatch = scorer.match_row(scored_row)
+    linha_marcada = is_marked(field_value(scored_row, "perf_comp"))
+    binding = (
+        row.get("_plan_binding")
+        if not linha_marcada and isinstance(row.get("_plan_binding"), dict)
+        else {}
+    )
+    current_snapshot = str(index.snapshot_id) if index.snapshot_id is not None else None
+    bound_snapshot = str(binding.get("snapshot_id")) if binding.get("snapshot_id") else None
+    bound_key = str(binding.get("plan_key")) if binding.get("plan_key") else None
+    binding_stale = bool(
+        binding and current_snapshot and bound_snapshot != current_snapshot
+    )
+    selected_explicitly = False
+    if bound_key and not binding_stale:
+        bound_idx = next(
+            (idx for idx, entry in enumerate(index.entries)
+             if str(entry.get(index.spec.key_field)) == bound_key),
+            None,
+        )
+        if bound_idx is not None:
+            selected_explicitly = True
+            bound_score = scorer.score_entry(scored_row, bound_idx)
+            rivals = list(match.rivals)
+            if match.winner is not None and match.winner.plan_key != bound_key:
+                rivals = [match.winner, *rivals]
+            match = RowMatch(
+                winner=bound_score, p_correct=1.0, p_primary=1.0,
+                margin_bits=match.margin_bits, mode="explicit",
+                rivals=rivals[:5], candidates_evaluated=match.candidates_evaluated,
+                marginals=match.marginals,
+            )
+        else:
+            # Um binding explícito sem chave no snapshot que diz pertencer é
+            # inválido; não o degradar silenciosamente para escolha automática.
+            binding_stale = True
     inherited_from = dict(identity.inherited_from) if identity else {}
     inherited_values = {f: identity.values.get(f) for f in inherited_from} if identity else {}
 
@@ -226,7 +284,7 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     # não «que linha exacta do plano é esta». Numa OF com 300 irmãs a segunda
     # nunca passa de 0,3 por construção, e usá-la deitava fora tudo.
     confidence = max(match.p_primary, match.p_correct)
-    if match.winner is None or confidence < params.policy.propose_threshold:
+    if match.winner is None:
         # H₀ plausível: nada de propostas. Mas mesmo sem linha vencedora há
         # uma pergunta respondível célula a célula: este VALOR existe no
         # plano? Caso real: OF escrita e exata ficava vermelha só porque o
@@ -282,6 +340,8 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             p_correct=confidence, margin_bits=match.margin_bits,
             mode="no_match" if match.winner is None else match.mode,
             review_priority=priority, cells=cells,
+            selected_snapshot_id=current_snapshot,
+            binding_stale=binding_stale,
         )
 
     entry = index.entries[match.winner.idx]
@@ -291,14 +351,13 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     # dezenas — o que essa linha precisa é do pop-up com a lista.
     # `field_value` e não `.get`: folhas lidas antes do rename guardaram o
     # visto em `comp_mm`, e ignorá-las punha o motor a propor modelos nelas.
-    linha_marcada = is_marked(field_value(scored_row, "perf_comp"))
     # Política de substituição total (19/08, alargada a 26/08): uma célula
     # ESCRITA que difere do plano substitui-se SEMPRE que a linha tem ligação
     # credível — mesmo weak, mesmo com confiança baixa; o valor lido fica no
     # raw e visível por baixo da célula na revisão. `replace_all` (match
     # forte) continua a mandar só nas células SEM valor escrito
     # (materialização de herdadas e preenchimento de vazias).
-    replace_all = params.policy.replace_with_plan and match.mode == "strong"
+    replace_all = params.policy.replace_with_plan
 
     for f in spec_fields:
         written = row.get(f.name)
@@ -331,7 +390,18 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             p_field = marginal[1]
         else:
             p_field = p
-        if not proposal or (linha_marcada and f.name == "modelo" and not written_s):
+        if linha_marcada and f.name == "modelo":
+            # A linha física representa TODAS as referências da combinação
+            # OF+Perfil. Um modelo isolado (mesmo escrito à mão) seria uma
+            # falsa redução; limpa-se sem tocar na marca Perf. Comp.
+            cells.append(CellCheck(
+                f.name, written_s or None, "" if written_s else None,
+                "snapped" if written_s else "na", 0.0, bool(written_s), p_field,
+                inherited=inherited_values.get(f.name),
+                inherited_from=inherited_from.get(f.name),
+            ))
+            continue
+        if not proposal:
             cells.append(CellCheck(
                 f.name, written_s or None, None, "na", 0.0, False, p_field,
                 inherited=inherited_values.get(f.name),
@@ -358,36 +428,24 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             similarity = sim.text_similarity(efectivo, proposal_plan)
 
         threshold = _threshold_for(f.name, params)
-        # A lição AT1T515 (agora só para células SEM valor escrito): «strong»
-        # responde «é desta OF», nunca «é esta irmã». of/ov são função da OF
-        # e a substituição total pode confiar neles; modelo/perfil escolhem a
-        # linha ENTRE irmãs e continuam a exigir o marginal do campo — sem
-        # isto gravou-se um valor com p_field=0.013 numa célula em branco,
-        # escolhido por ordem alfabética entre 8 irmãs empatadas.
-        anchored = f.name in ("of", "ov")
-        if params.policy.replace_with_plan and written_s:
-            # Substituição total (26/08): o ESCRITO que difere do plano
-            # substitui-se sempre, mesmo com confiança baixa — só a edição
-            # humana trava. O valor lido fica no raw e visível na revisão.
-            writable = f.name not in human_fields
-        elif replace_all:
-            writable = (f.name not in human_fields
-                        and (anchored or p_field >= threshold))
-        else:
-            # Campo herdado nunca é auto-escrito: seria transformar uma
-            # inferência nossa num valor registado como se o operador o
-            # tivesse escrito.
-            writable = (f.name not in human_fields
-                        and f.name not in inherited_from
-                        and p_field >= threshold)
+        # O vencedor já foi ordenado por score, nº de concordâncias e
+        # plan_key. Com a política obrigatória, o limiar afeta apenas a cor e
+        # a confiança mostrada; nunca impede materializar um campo do plano.
+        writable = (
+            True if replace_all
+            else (f.name not in human_fields
+                  and f.name not in inherited_from
+                  and p_field >= threshold)
+        )
 
         if efectivo and similarity >= 1.0:
             # Certo — mas se o valor só existe por herança/aspas (nada escrito
             # na célula), a substituição total materializa-o: a folha fica
             # auto-contida, sem células vazias «a valer» por outras. É seguro
             # mesmo sem marginal: o valor efetivo JÁ é este.
-            auto_materialize = bool(replace_all and f.name not in human_fields
-                                    and not written_s)
+            auto_materialize = bool(
+                writable and (not written_s or written_s != proposal)
+            )
             status, auto = "confirmed", auto_materialize
         elif similarity >= params.score.sim_near or not efectivo:
             # correção suave ou preenchimento de célula vazia
@@ -407,11 +465,7 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     qtd_written = str(row.get("qtd") or "").strip()
     if qtd_written and not is_marked(field_value(scored_row, "perf_comp")):
         qtd_num = sim.parse_number(qtd_written) if _looks_numeric(qtd_written) else None
-        limite = plan_quantity_for(
-            index,
-            str(scored_row.get("of") or ""),
-            str(scored_row.get("modelo") or ""),
-        ) if qtd_num is not None else None
+        limite = sim.parse_number(entry.get("qtd_planeada")) if qtd_num is not None else None
         if limite is not None:
             over = qtd_num > limite
             cells.append(CellCheck(
@@ -424,20 +478,83 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
                 plan_limit=limite,
             ))
 
-    # Cliente: também fora dos campos cruzados — não é «parecido com o plano?»
-    # mas «de quem é esta obra?», e a resposta vem da OF (ver _cliente_check).
+    # Cliente não participa na escolha, mas pertence ao planeamento: depois de
+    # escolhido o vencedor vem diretamente dessa entry, sem agregar a OF.
     cliente_cell = _cliente_check(
-        row, scored_row, index, params, inherited_values,
-        inherited_from, human_fields, p=p, permitir_escrita=True,
+        row, {**scored_row, "of": entry.get("of")}, index, params,
+        inherited_values, inherited_from,
+        (set() if replace_all else human_fields), p=p, permitir_escrita=True,
         replace_all=replace_all,
+        forced_name=(entry.get("cliente_nome") or entry.get("cliente")),
     )
     if cliente_cell is not None:
         cells.append(cliente_cell)
 
     # Metros teóricos da linha: qtd × comprimento da peça no plano (mm→m).
-    # Linhas de perfil completo não têm «a» peça, portanto não têm metros.
     plan_length = sim.parse_number(entry.get("comp_mm"))
     line_meters = None
+    plan_refs: list[dict] = []
+    plan_refs_valid: bool | None = None
+    plan_refs_error: str | None = None
+    if linha_marcada:
+        of_truth = entry.get("of")
+        perfil_truth = entry.get("perfil")
+        of_norm = index.normalize_written("of", str(of_truth or ""))
+        perfil_norm = index.normalize_written("perfil", str(perfil_truth or ""))
+        seen_keys: set[str] = set()
+        invalid: list[str] = []
+        for ref in index.entries:
+            if index.normalize_written("of", str(ref.get("of") or "")) != of_norm:
+                continue
+            if index.normalize_written("perfil", str(ref.get("perfil") or "")) != perfil_norm:
+                continue
+            plan_key = str(ref.get(index.spec.key_field) or "")
+            if not plan_key or plan_key in seen_keys:
+                continue
+            seen_keys.add(plan_key)
+            remaining = sim.parse_number(ref.get("qtd_restante"))
+            remaining_rule = str(ref.get("regra_calculo") or "").strip()
+            validity_flag = ref.get("falta_valida")
+            valid = (
+                bool(validity_flag) if validity_flag is not None
+                else remaining is not None
+            )
+            # A regra faz parte da proveniencia canonica guardada nos filhos e
+            # e obrigatoria no contrato Postgres. Uma linha sem regra e tao
+            # incompleta como uma falta desconhecida: nao se valida Perfil
+            # Completo com dados que depois nao podem ser auditados.
+            if not valid or remaining is None or remaining < 0 or not remaining_rule:
+                valid = False
+                invalid.append(plan_key)
+            plan_refs.append({
+                "plan_key": plan_key,
+                "component_ref": ref.get("modelo"),
+                "profile_type": ref.get("perfil"),
+                "length_mm": sim.parse_number(ref.get("comp_mm")),
+                "quantity_planned": sim.parse_number(ref.get("qtd_planeada")),
+                "quantity_made_before": sim.parse_number(ref.get("qtd_feita")),
+                "remaining_before": remaining,
+                "overproduction_before": sim.parse_number(ref.get("excesso")),
+                "assumed_quantity": remaining if valid else None,
+                "remaining_rule": remaining_rule or None,
+            })
+        plan_refs_valid = bool(plan_refs) and not invalid
+        if not plan_refs:
+            plan_refs_error = "Sem referências para a combinação OF + Perfil."
+        elif invalid:
+            plan_refs_error = (
+                "Falta inválida ou desconhecida nas referências: "
+                + ", ".join(invalid[:8])
+            )
+        if plan_refs_valid:
+            positive = [
+                ref for ref in plan_refs if (ref["assumed_quantity"] or 0.0) > 0
+            ]
+            if all(ref["length_mm"] is not None for ref in positive):
+                line_meters = round(sum(
+                    ref["assumed_quantity"] * ref["length_mm"]
+                    for ref in positive
+                ) / 1000.0, 2)
     if plan_length is not None and not linha_marcada:
         qtd_m = sim.parse_number(qtd_written) if _looks_numeric(qtd_written) else None
         if qtd_m is not None:
@@ -459,6 +576,12 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
         rivals=[r.plan_key for r in match.rivals],
         plan_length_mm=plan_length,
         line_meters=line_meters,
+        selected_snapshot_id=current_snapshot,
+        selected_explicitly=selected_explicitly,
+        binding_stale=binding_stale,
+        plan_refs=plan_refs,
+        plan_refs_valid=plan_refs_valid,
+        plan_refs_error=plan_refs_error,
     )
 
 
@@ -477,10 +600,13 @@ def check_sheet(rows: list[dict], scorer: Scorer,
         + list(scorer.index.spec.numeric_fields)
         if f.name not in carryover.CARRY_FIELDS
     )
-    identities = carryover.resolve(rows, content_fields, human_fields_by_row)
+    # Edições humanas dos campos do planeamento são evidência de auditoria,
+    # não um veto à convenção de células vazias («igual à linha anterior»).
+    identities = carryover.resolve(rows, content_fields, {})
     checks = [
         check_row(row, i, scorer, human_fields_by_row.get(i), identities[i])
         for i, row in enumerate(rows)
+        if not carryover.is_deleted(row)
     ]
     summary = {
         "rows": len(checks),
@@ -500,15 +626,17 @@ def check_sheet(rows: list[dict], scorer: Scorer,
     metros_teoricos = round(
         sum(c.line_meters for c in checks if c.line_meters is not None), 2)
     metros_produzidos = sim.parse_number((footer or {}).get("metros_produzidos"))
-    # Linhas de produção sem metros (perfil completo, sem match): o total
-    # teórico é PARCIAL e a diferença deixa de ser um desperdício honesto —
-    # numa folha real, 2 linhas de perfil completo faziam «desperdício» de
-    # 200 m que era só produção não contada.
+    # Linhas de produção sem metros tornam o total teórico parcial. Linhas de
+    # perfil completo válidas já trazem a soma dos filhos e deixam de criar
+    # esse falso buraco.
     parcial = any(
         c.line_meters is None
-        and i < len(rows)
-        and any(v is not None and str(v).strip() for v in rows[i].values())
-        for i, c in enumerate(checks)
+        and c.row_index < len(rows)
+        and any(
+            v is not None and str(v).strip()
+            for key, v in rows[c.row_index].items() if not str(key).startswith("_")
+        )
+        for c in checks
     )
     summary["metros_teoricos"] = metros_teoricos if metros_teoricos else None
     summary["metros_produzidos"] = metros_produzidos
@@ -518,11 +646,14 @@ def check_sheet(rows: list[dict], scorer: Scorer,
         if metros_produzidos is not None and metros_teoricos and not parcial
         else None
     )
-    review_order = sorted(
-        (c.row_index for c in checks if c.review_priority > 0),
-        key=lambda i: -checks[i].review_priority,
-    )
+    review_order = [
+        c.row_index for c in sorted(
+            (check for check in checks if check.review_priority > 0),
+            key=lambda check: -check.review_priority,
+        )
+    ]
     return {
+        "snapshot_id": scorer.index.snapshot_id,
         "summary": summary,
         "review_order": review_order,
         "rows": [asdict(c) for c in checks],

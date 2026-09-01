@@ -22,7 +22,7 @@ from . import similarity as sim
 # bloco nas folhas reais («50x5» vale para as linhas seguintes) — herdá-lo é o
 # sinal que desempata linhas irmãs quando o modelo está ambíguo (o caso
 # AT1T515: o perfil do bloco distinguia AT2T515/50x5 de AT1T145/40x5).
-CARRY_FIELDS = ("of", "ov", "cliente", "perfil")
+CARRY_FIELDS = ("of", "ov", "cliente", "perfil", "modelo")
 
 # Marcas de «idem» que os operadores usam em vez de deixar em branco: aspas
 # (nas várias grafias que o OCR devolve), vírgulas duplas (aspas rentes à
@@ -72,8 +72,17 @@ def _has_content(row: dict, content_fields: tuple[str, ...]) -> bool:
     real (qtd/perf_comp não estão no IndexSpec) — tratá-la como muda deixava-a
     sem OF e ainda cortava o bloco às linhas seguintes.
     """
-    extra = tuple(f for f in row if f not in content_fields and f not in CARRY_FIELDS)
+    extra = tuple(
+        f for f in row
+        if f not in content_fields and f not in CARRY_FIELDS
+        and not str(f).startswith("_")
+    )
     return any(_written(row, f) for f in (*content_fields, *extra))
+
+
+def is_deleted(row: object) -> bool:
+    """Uma linha eliminada conserva o OCR/auditoria, mas não existe na folha."""
+    return isinstance(row, dict) and row.get("_deleted") is True
 
 
 def resolve(rows: list[dict], content_fields: tuple[str, ...],
@@ -85,6 +94,11 @@ def resolve(rows: list[dict], content_fields: tuple[str, ...],
     block_source: dict[str, int] = {}  # linha de onde veio
 
     for i, row in enumerate(rows):
+        if is_deleted(row):
+            # Uma eliminação aproxima visualmente as linhas vizinhas: não
+            # fornece identidade e também não corta o bloco entre elas.
+            out.append(RowIdentity(values={}, inherited_from={}))
+            continue
         human = human_fields_by_row.get(i, set())
         written = {f: _written(row, f) for f in CARRY_FIELDS}
 
@@ -98,8 +112,15 @@ def resolve(rows: list[dict], content_fields: tuple[str, ...],
         if written["of"]:
             same_block = bool(block.get("of")) and sim.code_similarity(written["of"], block["of"]) >= 0.9
             if not same_block:
-                # OF nova a meio da folha: começa bloco, não arrasta nada do anterior
+                # A identidade da obra recomeça, mas o Modelo é uma sequência
+                # independente: por decisão operacional continua até aparecer
+                # outro Modelo ou uma linha totalmente vazia.
+                previous_model = block.get("modelo")
+                previous_model_source = block_source.get("modelo")
                 block, block_source = {}, {}
+                if previous_model:
+                    block["modelo"] = previous_model
+                    block_source["modelo"] = previous_model_source if previous_model_source is not None else i
 
         values: dict[str, str] = {}
         inherited: dict[str, int] = {}

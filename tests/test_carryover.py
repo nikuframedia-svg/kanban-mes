@@ -60,7 +60,7 @@ def test_linha_totalmente_vazia_nao_herda_e_corta():
     ]
     ids = ident(rows)
     assert ids[1].values == {}
-    assert ids[2].values == {}, "depois de um vazio o bloco recomeça"
+    assert ids[2].values == {"modelo": "B"}, "o modelo novo abre a sequência seguinte"
 
 
 def test_campo_apagado_por_humano_nao_e_reposto():
@@ -84,7 +84,7 @@ def test_effective_row_nao_toca_no_original():
 def test_campos_transportados_sao_os_de_identidade_da_obra():
     # perfil incluído desde 19/08: escreve-se uma vez por bloco nas folhas
     # reais, e herdá-lo desempata linhas irmãs (caso AT1T515/AT2T515)
-    assert CARRY_FIELDS == ("of", "ov", "cliente", "perfil")
+    assert CARRY_FIELDS == ("of", "ov", "cliente", "perfil", "modelo")
 
 
 def test_perfil_herda_por_bloco_e_corta_com_perfil_novo():
@@ -154,4 +154,31 @@ def test_linha_so_de_aspas_nao_conta_como_conteudo():
     ]
     ids = ident(rows)
     assert ids[1].values == {}, "linha vazia — e corta o bloco como qualquer vazia"
-    assert ids[2].values == {}
+    assert ids[2].values == {"modelo": "B"}
+
+
+def test_modelo_herda_ate_outro_modelo_mesmo_com_of_e_perfil_novos():
+    rows = [
+        {"of": "263323", "perfil": "50x5", "modelo": "AT2T515", "qtd": "2"},
+        {"qtd": "3"},
+        {"of": "263324", "perfil": "60x6", "qtd": "4"},
+        {"modelo": "NOVO", "qtd": "1"},
+    ]
+    ids = ident(rows)
+    assert ids[1].values["modelo"] == "AT2T515"
+    assert ids[2].values["modelo"] == "AT2T515"
+    assert ids[2].is_inherited("modelo")
+    assert ids[3].values["modelo"] == "NOVO"
+    assert not ids[3].is_inherited("modelo")
+
+
+def test_linha_eliminada_nao_fornece_nem_corta_a_heranca():
+    rows = [
+        {"of": "263323", "modelo": "A", "qtd": "1"},
+        {"modelo": "ERRADO", "qtd": "2", "_deleted": True},
+        {"qtd": "3"},
+    ]
+    ids = ident(rows)
+    assert ids[1].values == {}
+    assert ids[2].values["modelo"] == "A"
+    assert ids[2].inherited_from["modelo"] == 0

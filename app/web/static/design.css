@@ -266,6 +266,8 @@ input[type="date"] {
 .btn.ghost:hover { background: var(--paper-2); }
 .btn.lg { padding: 14px 20px; font-size: 16px; }
 .btn.danger { background: var(--crit); color: white; border-color: var(--crit); }
+.row-number-actions { display:flex; align-items:center; justify-content:center; gap:5px; }
+.row-delete-btn { min-width:22px; width:22px; height:22px; padding:0; line-height:18px; }
 
 /* =====================================================================
    Pills & dots
@@ -852,6 +854,11 @@ input.cell-input:focus {
 /* Proposta do plano por baixo do valor escrito. */
 .proposal { margin-top: 3px; font-size: 10px; color: var(--ink-4); }
 .proposal a { color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
+.plan-selected td {
+  background: var(--info-soft) !important;
+  box-shadow: inset 0 1px 0 var(--info), inset 0 -1px 0 var(--info);
+}
+.plan-closed { opacity: .58; }
 
 /* Valor lido pelo OCR quando a célula já mostra outro (substituição do motor
    ou correção humana). Fica sempre visível por baixo da célula — com a
@@ -918,6 +925,25 @@ input.cell-input.is-inherited::placeholder {
   color: var(--ink-3);
 }
 .header-field input.cell-input { background: rgba(255, 255, 255, .62); }
+.header-value {
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .42);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.header-savebar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
+.header-savebar #header-dirty-message { color: var(--warn); }
 .header-check-message {
   display: flex;
   align-items: center;

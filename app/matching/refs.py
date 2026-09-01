@@ -40,11 +40,19 @@ class IndexSpec:
 
 
 class PlanIndex:
-    def __init__(self, entries: list[dict], spec: IndexSpec, plan_age_days: float = 0.0):
+    def __init__(self, entries: list[dict], spec: IndexSpec,
+                 plan_age_days: float = 0.0, snapshot_id: str | None = None):
         self.spec = spec
         self.entries = entries
         self.n = len(entries)
         self.plan_age_days = plan_age_days
+        # O snapshot acompanha o índice: cross, escolha explícita e validação
+        # têm de falar exatamente da mesma fotografia do planeamento.
+        inferred = {
+            str(entry.get("snapshot_id"))
+            for entry in entries if entry.get("snapshot_id") is not None
+        }
+        self.snapshot_id = snapshot_id or (next(iter(inferred)) if len(inferred) == 1 else None)
 
         # normalização por entrada + estruturas de lookup
         self._norm: dict[str, list[str]] = {}          # field -> [valor normalizado por entrada]

@@ -15,8 +15,8 @@ from pathlib import PurePath
 import psycopg
 
 from .config import settings
-from .matching import carryover
 from .matching import similarity as sim
+from .production_facts import materialize_sheet
 from .templates_spec import LEGACY_FIELD_ALIASES, KanbanTemplate, is_marked
 
 APP_VERSION = "kanban-mes 0.1.0"
@@ -47,7 +47,10 @@ _BOOLEAN_COLUMNS = {"full_profile"}
 # a sonda é um SELECT ao information_schema por validação (raras), e a cache
 # fixava para sempre o schema visto na primeira validação do processo.
 _OPTIONAL_COLUMNS = ("profile_type", "full_profile", "plan_quantity",
-                     "plan_length_mm", "line_meters", "meters_produced")
+                     "plan_length_mm", "line_meters", "meters_produced",
+                     "plan_snapshot_id")
+
+SOURCE_APP = "kanban-mes"
 
 
 def _dsn() -> str:
@@ -161,7 +164,7 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
     rows = data.get("rows") or []
     footer = data.get("footer") or {}
     cross = sheet.get("cross_check") or {}
-    cross_rows = {r["row_index"]: r for r in cross.get("rows", [])}
+    materialized = materialize_sheet(sheet, template)
 
     # Levanta InvalidSheetDate se a data não se interpretar — o chamador
     # transforma isso num 422 com mensagem, nunca num 500.
@@ -178,17 +181,11 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
     # linhas com conteúdo (pelo menos um campo preenchido)
     filled = [
         (i, row) for i, row in enumerate(rows)
-        if any(v is not None and str(v).strip() != "" for v in row.values())
+        if row.get("_deleted") is not True
+        and any(not str(k).startswith("_")
+                and v is not None and str(v).strip() != ""
+                for k, v in row.items())
     ]
-
-    # Identidade herdada resolvida aqui, não lida das células do cross: o
-    # `cliente` das cantoneiras fica fora do IndexSpec (tem célula própria via
-    # `_cliente_check`, mas só quando a OF resolve) — e as linhas herdadas iam
-    # para o Postgres com customer_name NULL. O carryover é a fonte de verdade
-    # da herança.
-    identities = carryover.resolve(
-        rows, tuple(f for f in template.row_fields if f not in carryover.CARRY_FIELDS),
-    ) if template.name != "cantoneiras_paragens" else []
 
     with psycopg.connect(_dsn(), connect_timeout=10) as conn:
         with conn.cursor() as cur:
@@ -217,13 +214,19 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
             # entre deploy do código e aplicação do sql/016 não pode importar.
             validated_present = _columns_present(cur, "validated_sheets")
             source_columns = [
-                name for name in ("source_filename", "source_page")
+                name for name in (
+                    "source_filename", "source_page", "source_app",
+                    "sheet_no", "plan_snapshot_id",
+                )
                 if name in validated_present
             ]
             source_filename, source_page = source_from_image_path(
                 sheet.get("image_path"))
             source_values = {"source_filename": source_filename,
-                            "source_page": source_page}
+                             "source_page": source_page,
+                             "source_app": SOURCE_APP,
+                             "sheet_no": sheet.get("sheet_no"),
+                             "plan_snapshot_id": cross.get("snapshot_id")}
             validated_columns = (
                 "sheet_uid, sheet_date, template_name, family, operator_name, "
                 "operator_no, sector_machine, shift, image_sha256, "
@@ -268,12 +271,19 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 + ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
                   "%s, %s, %s, %s, %s, %s, %s, %s, %s, now()"
                 + ", %s" * len(optional)
-                + ")"
+                + ") RETURNING id"
             )
             row_fields = set(template.row_fields)
+            refs_by_row: dict[int, list[dict]] = {}
+            for ref in materialized["plan_refs"]:
+                refs_by_row.setdefault(ref["row_index"], []).append(ref)
+            if refs_by_row and not _columns_present(cur, "production_record_plan_refs"):
+                raise RuntimeError(
+                    "Migração production_record_plan_refs ainda não foi aplicada."
+                )
             n = 0
-            for i, row in filled:
-                cr = cross_rows.get(i) or {}
+            for fact in materialized["parents"]:
+                i, row, cr = fact["row_index"], fact["row"], fact["cross"]
                 cells = {c["field"]: c for c in cr.get("cells", [])}
                 cols: dict[str, object] = {}
                 extra: dict[str, object] = {}
@@ -291,22 +301,9 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                         cols[col] = sim.parse_number(value)
                     else:
                         cols.setdefault(col, str(value).strip())
-                # Identidade herdada da linha de cima: no staging fica em branco
-                # (é o que está no papel), mas aqui tem de ser explícita, senão
-                # a linha chega ao Postgres sem OF. Vem do carryover (não das
-                # células do cross: o cliente não cruza e não tem célula). A
-                # proveniência fica em `extra` para se saber depois o que foi
-                # escrito e o que foi lido.
-                identity = identities[i] if i < len(identities) else None
-                inherited: dict[str, int] = {}
-                if identity is not None:
-                    for f, col in (("of", "production_order"), ("ov", "sales_order"),
-                                   ("cliente", "customer_name")):
-                        if not cols.get(col) and identity.is_inherited(f):
-                            cols[col] = str(identity.values[f]).strip()
-                            inherited[f] = identity.inherited_from[f]
-                if inherited:
-                    extra["identidade_herdada"] = inherited
+                if fact.get("aggregate"):
+                    extra["full_profile_aggregate"] = True
+                    extra["plan_ref_count"] = len(refs_by_row.get(i, ()))
                 # Quantidade planeada da linha do plano que casou, para se poder
                 # ver mais tarde porque é que uma quantidade foi assinalada.
                 qtd_cell = cells.get("qtd") or {}
@@ -318,6 +315,7 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 cols["line_meters"] = cr.get("line_meters")
                 cols["meters_produced"] = sim.parse_number(
                     footer.get("metros_produzidos"))
+                cols["plan_snapshot_id"] = cross.get("snapshot_id")
                 # OF/OV como números puros, a convenção do planeamento —
                 # mesmo quando o valor veio do plano (com prefixo)
                 for ref_col in ("production_order", "sales_order"):
@@ -343,6 +341,33 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                         *[cols.get(c) for c in optional],
                     ),
                 )
+                production_record_id = cur.fetchone()[0]
+                for ref in refs_by_row.get(i, ()):
+                    cur.execute(
+                        """
+                        INSERT INTO mes_kanban.production_record_plan_refs
+                            (production_record_id, sheet_uid, row_index,
+                             plan_snapshot_id, plan_key, component_ref,
+                             profile_type, length_mm, quantity_planned,
+                             quantity_made_before, remaining_before,
+                             overproduction_before, assumed_quantity,
+                             remaining_rule, extra)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            production_record_id, sheet["uid"], i,
+                            ref.get("plan_snapshot_id"), ref.get("plan_key"),
+                            ref.get("component_ref"), ref.get("profile_type"),
+                            ref.get("length_mm"), ref.get("quantity_planned"),
+                            ref.get("quantity_made_before"),
+                            ref.get("remaining_before"),
+                            ref.get("overproduction_before"),
+                            ref.get("assumed_quantity"),
+                            ref.get("remaining_rule"),
+                            json.dumps({"source_app": SOURCE_APP}, ensure_ascii=False),
+                        ),
+                    )
                 n += 1
         conn.commit()
     return n

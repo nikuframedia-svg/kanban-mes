@@ -80,32 +80,23 @@ def cpis_row_for(sheet: dict, row: dict, cr: dict | None,
                  operator: dict | None) -> dict:
     """Uma linha de kanban → uma linha CPIS.
 
-    Depois da política de substituição, os valores da linha JÁ são os do
-    plano; a herança e as propostas do cross servem de fallback para folhas
-    antigas ou por rever.
+    Os valores da linha já são finais e materializados. Propostas do cross são
+    auditoria, nunca uma fonte alternativa para exportação.
     """
     header = (sheet.get("sheet_data") or {}).get("header") or {}
-    cells = {c["field"]: c for c in (cr or {}).get("cells", [])}
-
     def efetivo(field: str) -> str:
-        value = str(row.get(field) or "").strip()
-        cell = cells.get(field) or {}
-        if not value:
-            value = str(cell.get("inherited") or "").strip()
-        if not value:
-            value = str(cell.get("proposal") or "").strip()
-        return value
+        return str(row.get(field) or "").strip()
 
     try:
         data = dt.date.fromisoformat(normalize_sheet_date(header.get("data")))
     except (InvalidSheetDate, ValueError):
         data = str(header.get("data") or "").strip() or None
 
-    op = operator or {}
+    del operator
     return {
         "data": data,
-        "cod_funcionario": op.get("cod") or str(header.get("n_operador") or "").strip() or None,
-        "nome_funcionario": op.get("name") or str(header.get("operador") or "").strip() or None,
+        "cod_funcionario": str(header.get("n_operador") or "").strip() or None,
+        "nome_funcionario": str(header.get("operador") or "").strip() or None,
         "setor_maquina_desc": str(header.get("setor_maquina") or "").strip() or None,
         "cod_maquina": None,
         "of": sim.strip_ref_prefix(efetivo("of")) or None,
@@ -208,15 +199,9 @@ _BASEDADOS_WIDTHS = (12, 12, 24, 12, 18, 12, 12, 16, 18, 10, 10)
 
 
 def _efetivo(row: dict, cells: dict, field: str) -> str:
-    """Valor efetivo de uma célula: o escrito, senão o herdado.
-
-    Sem fallback para a proposta do cross: com a substituição total, o que o
-    motor aprova JÁ está gravado na folha — exportar uma proposta não aplicada
-    seria exportar o que a folha não diz."""
-    value = str(row.get(field) or "").strip()
-    if not value:
-        value = str((cells.get(field) or {}).get("inherited") or "").strip()
-    return value
+    """Valor final materializado; ``cells`` fica por compatibilidade da API."""
+    del cells
+    return str(row.get(field) or "").strip()
 
 
 def basedados_row_for(sheet: dict, row: dict, cr: dict | None,
@@ -230,11 +215,11 @@ def basedados_row_for(sheet: dict, row: dict, cr: dict | None,
     except (InvalidSheetDate, ValueError):
         data = str(header.get("data") or "").strip() or None
 
-    op = operator or {}
+    del operator
     return {
         "data": data,
-        "operador_id": op.get("cod") or str(header.get("n_operador") or "").strip() or None,
-        "nome_operador": op.get("name") or str(header.get("operador") or "").strip() or None,
+        "operador_id": _num(header.get("n_operador")),
+        "nome_operador": str(header.get("operador") or "").strip() or None,
         "cod_maquina": None,
         "maquina": str(header.get("setor_maquina") or "").strip() or None,
         "ov": sim.strip_ref_prefix(_efetivo(row, cells, "ov")) or None,

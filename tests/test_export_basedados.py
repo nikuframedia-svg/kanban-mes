@@ -38,11 +38,13 @@ def test_linha_com_valores_efetivos_e_refs_nuas():
     bd = basedados_row_for(sheet, row, cr, op)
     assert bd["data"] == dt.date(2026, 8, 10)
     assert bd["operador_id"] == 47
-    assert bd["nome_operador"] == "JOSE SANTOS"
+    assert bd["nome_operador"] == "Ze Manel", \
+        "o match de colaboradores é proveniência, não substitui o cabeçalho final"
     assert bd["cod_maquina"] is None, "sem tabela oficial de códigos, segue vazio"
     assert bd["maquina"] == "Rapid 20T - 1"
     assert bd["of"] == "263322", "OF nua, convenção do planeamento"
-    assert bd["ov"] == "2504634", "herdada do bloco e nua"
+    assert bd["ov"] is None, \
+        "exports só consomem o valor final materializado, nunca metadados do cross"
     assert bd["perfil"] == "60x6"
     assert bd["modelo"] == "AT2T562"
     assert bd["qtd_un"] == 4.0
@@ -81,7 +83,7 @@ def test_proposta_nao_aplicada_ja_nao_e_exportada():
                     {"field": "ov", "inherited": "OV2504634", "proposal": "OV9"}]}
     bd = basedados_row_for(sheet, row, cr, None)
     assert bd["of"] is None, "proposta por aplicar fica fora do export"
-    assert bd["ov"] == "2504634", "o herdado continua a valer"
+    assert bd["ov"] is None, "herança não materializada também fica fora do export"
 
 
 def test_nome_do_ficheiro():

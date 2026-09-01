@@ -9,16 +9,19 @@ from __future__ import annotations
 import csv
 import datetime
 import hashlib
+import html
 import io
+import json
 import re
 import threading
 import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import unquote_plus, urlencode, urlsplit, urlunsplit
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -29,7 +32,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import db, imaging, pg_store
+from .. import db, imaging, pg_store, production_facts
 from ..config import settings
 from ..matching import carryover, header_cross, loaders, operador
 from ..matching.cross_check import check_sheet
@@ -86,6 +89,38 @@ from ..matching import similarity as _sim  # noqa: E402
 templates.env.globals["strip_ref"] = _sim.strip_ref_prefix
 # lê a célula pelo nome atual e pelo antigo (folhas lidas antes do rename)
 templates.env.globals["field_value"] = field_value
+
+
+@app.exception_handler(HTTPException)
+async def _html_post_errors(request: Request, exc: HTTPException):
+    """Formulários do browser nunca aterram num documento JSON cru."""
+    if request.method.upper() == "POST":
+        detail = html.escape(str(exc.detail))
+        return HTMLResponse(
+            "<!doctype html><html lang='pt'><meta charset='utf-8'>"
+            "<title>Kanban MES — erro</title><body>"
+            f"<h1>Não foi possível concluir</h1><p>{detail}</p>"
+            "<p><a href='javascript:history.back()'>Voltar</a></p></body></html>",
+            status_code=exc.status_code,
+        )
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code,
+                        headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def _html_post_validation_errors(request: Request,
+                                       exc: RequestValidationError):
+    """Os erros de parsing/fields obrigatórios dos forms também são HTML."""
+    if request.method.upper() == "POST":
+        return HTMLResponse(
+            "<!doctype html><html lang='pt'><meta charset='utf-8'>"
+            "<title>Kanban MES — erro</title><body>"
+            "<h1>Não foi possível concluir</h1>"
+            "<p>O formulário está incompleto ou contém um valor inválido.</p>"
+            "<p><a href='javascript:history.back()'>Voltar</a></p></body></html>",
+            status_code=422,
+        )
+    return JSONResponse({"detail": exc.errors()}, status_code=422)
 
 
 @app.middleware("http")
@@ -161,9 +196,15 @@ def get_index(loader_name: str):
                 _index_cache[loader_name] = (time.monotonic(), index, snapshot)
             return index
     index = getattr(loaders, loader_name)()
+    # A fotografia que etiqueta o cache é a que foi efetivamente carregada.
+    # Sondar o latest aqui abria uma corrida: carregar A, publicar B, etiquetar
+    # o índice A como B e mantê-lo em cache sem nova invalidação.
+    loaded_snapshot = getattr(index, "snapshot_id", None)
     with _index_lock:
         _index_cache[loader_name] = (
-            time.monotonic(), index, _current_index_snapshot(loader_name)
+            time.monotonic(), index,
+            (str(loaded_snapshot) if loaded_snapshot is not None
+             else _current_index_snapshot(loader_name)),
         )
     return index
 
@@ -181,6 +222,11 @@ def _current_index_snapshot(loader_name: str) -> str | None:
     if loader_name == "load_employees":
         try:
             return loaders.employees_snapshot_id()
+        except Exception:
+            return None
+    if loader_name == "load_nesting_index":
+        try:
+            return loaders.nesting_snapshot_id()
         except Exception:
             return None
     return _current_snapshot_id()
@@ -286,12 +332,14 @@ def _plan_header_machines(cross: dict, scorer: Scorer | None) -> list[str]:
 
 
 def resolve_operator(conn, uid: str, sheet: dict) -> dict | None:
-    """Resolve o operador da folha contra a lista de colaboradores.
+    """Compara o operador da folha com a lista de colaboradores.
 
     Corre para TODAS as folhas, incluindo o verso (paragens): é lá que estão
     metade dos casos, e a mesma pessoa aparecia com nomes diferentes na frente
-    e no verso da mesma folha física.
+    e no verso da mesma folha física. É apenas diagnóstico: o formulário
+    explícito é a única porta de escrita do cabeçalho.
     """
+    del conn, uid
     header = (sheet["sheet_data"] or {}).get("header") or {}
     try:
         employees = get_employees()
@@ -300,50 +348,20 @@ def resolve_operator(conn, uid: str, sheet: dict) -> dict | None:
     if not employees:
         return None
 
-    match = operador.resolve(header.get("operador"), header.get("n_operador"), employees)
-    if match.cod is None and match.pernr is None:
-        return asdict(match)
-
-    protegidos = db.human_header_fields(conn, uid)
-    updates = [
-        (field, value)
-        for field, value in (("operador", match.name), ("n_operador", str(match.cod or "")))
-        if value and field not in protegidos
-        and str(header.get(field) or "").strip() != value
-    ]
-    if updates:
-        # Aplicar sobre o estado FRESCO, nunca sobre a cópia com que se
-        # calculou: substituir o header inteiro por uma cópia velha apagava
-        # edições humanas feitas enquanto o worker corria. Se a folha mudou
-        # entretanto, desiste-se — a edição que a mudou dispara novo ciclo.
-        fresh = db.get_sheet(conn, uid)
-        if fresh and fresh["sheet_data"] and fresh["revision"] == sheet["revision"]:
-            data = fresh["sheet_data"]
-            if db.save_sheet_data(
-                conn, uid,
-                {**data, "header": {**(data.get("header") or {}),
-                                    **dict(updates)}},
-                fresh["revision"],
-            ):
-                for field, value in updates:
-                    db.record_edit(conn, uid, f"header.{field}",
-                                   (data.get("header") or {}).get(field), value,
-                                   "system", "colaboradores")
-    return asdict(match)
+    return asdict(operador.resolve(
+        header.get("operador"), header.get("n_operador"), employees
+    ))
 
 
-def run_cross_check(conn, uid: str) -> None:
+def run_cross_check(conn, uid: str, *, force_plan: bool = False) -> None:
     sheet = db.get_sheet(conn, uid)
     if not sheet or not sheet["sheet_data"]:
         return
-    # O operador resolve-se primeiro e escreve como sempre escreveu (nome/nº
-    # canónicos do SAP). O checker do cabeçalho corre DEPOIS, sobre o estado
-    # já canónico: as células dele descrevem e propõem, nunca disputam a
-    # decisão do resolve_operator.
+    # A identidade do operador é calculada como proveniência/diagnóstico; não
+    # altera o cabeçalho confirmado no formulário.
     operator_match = resolve_operator(conn, uid, sheet)
-    # Reler DEPOIS do resolve_operator (que pode ter escrito): o cruzamento é
-    # calculado sobre uma revisão conhecida e só se grava se a folha ainda for
-    # essa — um cross calculado sobre valores velhos não pode pintar os novos.
+    # Reler antes de calcular: o resultado só será gravado por CAS sobre esta
+    # revisão conhecida.
     base = db.get_sheet(conn, uid)
     if not base or not base["sheet_data"]:
         return
@@ -361,6 +379,9 @@ def run_cross_check(conn, uid: str) -> None:
         plan_reference = {"status": "not_applicable"}
     else:
         try:
+            if force_plan:
+                with _index_lock:
+                    _index_cache.pop(template.index_loader, None)
             scorer = make_scorer(base["template_name"])
             plan_reference = {"status": "available"}
         except Exception:
@@ -371,9 +392,12 @@ def run_cross_check(conn, uid: str) -> None:
                 "status": "no_reference",
                 "message": "Plano indisponível; linhas mantidas sem cruzamento.",
             }
-    human_rows = db.human_fields_by_row(conn, uid)
     if scorer is not None:
-        cross = check_sheet(rows, scorer, human_rows, footer=data.get("footer"))
+        # Edições anteriores de identidade são evidência de auditoria, não um
+        # veto sobre campos que pertencem ao planeamento. Também não desligam
+        # a herança que o cross precisa de resolver.
+        cross = check_sheet(rows, scorer, {}, footer=data.get("footer"))
+        plan_reference["snapshot_id"] = scorer.index.snapshot_id
     else:
         cross = {"summary": {}, "review_order": [], "rows": []}
 
@@ -408,64 +432,62 @@ def run_cross_check(conn, uid: str) -> None:
 
     header_result = check_current_header()
 
-    # escrita automática (política de perda esperada), auditada como 'system';
-    # valores, auditoria e cross final vão num único commit CAS
+    # Cabeçalho é só diagnóstico/proposta. Mesmo um valor confirmado sem
+    # alteração (logo sem audit no POST /header) não pode ser revertido por um
+    # cross posterior: o formulário explícito é a única porta de escrita.
     edits: list[tuple[str, object, object, str]] = []
-    applied_header: dict[str, dict] = {}
-    for field_name, cell in header_result["cells"].items():
-        proposal = cell.get("proposal")
-        if not cell.get("auto_write") or proposal is None:
-            continue
-        old = header.get(field_name)
-        if str(old or "").strip() == str(proposal).strip():
-            continue
-        edits.append((f"header.{field_name}", old, str(proposal),
-                      cell.get("actor") or "header:cross"))
-        header[field_name] = str(proposal)
-        applied_header[field_name] = cell
-    data["header"] = header
-    if applied_header:
-        # Recalcular sobre o estado final: as células têm de descrever o valor
-        # que fica gravado, não o que existia antes da substituição.
-        header_result = check_current_header()
-        for field_name, original in applied_header.items():
-            final_cell = header_result["cells"].get(field_name)
-            if final_cell is None:
-                continue
-            final_cell["applied"] = True
-            final_cell["actor"] = original.get("actor")
-            final_cell["message"] = (
-                "Substituído automaticamente. " + final_cell["message"]
-            )
 
-    applied_cells: list[tuple[int, str]] = []
-    for rc in cross["rows"]:
-        for cell in rc["cells"]:
-            if cell["auto_write"] and cell["proposal"] is not None:
-                i, f = rc["row_index"], cell["field"]
-                if i < len(rows) and str(rows[i].get(f) or "").strip() != cell["proposal"]:
-                    edits.append((f"rows[{i}].{f}", rows[i].get(f),
-                                  cell["proposal"], "cross"))
-                    rows[i][f] = cell["proposal"]
-                    applied_cells.append((i, f))
-    if applied_cells and scorer is not None:
-        # Como no cabeçalho: recalcular sobre o estado final, para cada célula
-        # descrever o valor que ficou gravado (não o que existia antes da
-        # substituição), com a marca `applied` a dizer que foi o motor.
-        cross_final = check_sheet(rows, scorer, human_rows,
-                                  footer=data.get("footer"))
-        final_by_row = {r["row_index"]: r for r in cross_final["rows"]}
+    # Fixed point: materializar pode mudar o melhor candidato. Repetimos o
+    # cálculo sobre os valores finais até estabilizar, mantendo um único old→new
+    # por célula no trilho de auditoria e um guarda de ciclo/iterações.
+    applied_cells: set[tuple[int, str]] = set()
+    original_values: dict[tuple[int, str], object] = {}
+    fixed_point = True
+    seen_states: set[str] = set()
+    if scorer is not None:
+        for _iteration in range(8):
+            signature = json.dumps(rows, ensure_ascii=False, sort_keys=True, default=str)
+            if signature in seen_states:
+                fixed_point = False
+                break
+            seen_states.add(signature)
+            changed = False
+            for rc in cross.get("rows", []):
+                for cell in rc.get("cells", []):
+                    if not cell.get("auto_write") or cell.get("proposal") is None:
+                        continue
+                    i, f = rc["row_index"], cell["field"]
+                    if i >= len(rows):
+                        continue
+                    proposal = cell["proposal"]
+                    if str(rows[i].get(f) or "").strip() == str(proposal).strip():
+                        continue
+                    key = (i, f)
+                    original_values.setdefault(key, rows[i].get(f))
+                    rows[i][f] = proposal if str(proposal).strip() else None
+                    applied_cells.add(key)
+                    changed = True
+            if not changed:
+                break
+            cross = check_sheet(rows, scorer, {}, footer=data.get("footer"))
+        else:
+            fixed_point = False
+
+        final_by_row = {r["row_index"]: r for r in cross.get("rows", [])}
         for i, f in applied_cells:
+            edits.append((f"rows[{i}].{f}", original_values[(i, f)],
+                          rows[i].get(f), "cross"))
             final_cell = next(
-                (c for c in final_by_row.get(i, {}).get("cells", [])
-                 if c["field"] == f), None)
+                (cell for cell in final_by_row.get(i, {}).get("cells", [])
+                 if cell["field"] == f), None
+            )
             if final_cell is not None:
                 final_cell["applied"] = True
-                final_cell["message"] = ("Substituído automaticamente. "
-                                         "O valor lido pelo OCR fica visível na célula.")
-        cross["rows"] = cross_final["rows"]
-        cross["summary"] = cross_final["summary"]
-        cross["review_order"] = cross_final["review_order"]
+                final_cell["message"] = (
+                    "Substituído automaticamente. "
+                    "O valor lido pelo OCR fica no histórico de auditoria."
+                )
+        cross["fixed_point"] = fixed_point
 
     cross["header"] = {
         "cells": header_result["cells"],
@@ -476,6 +498,34 @@ def run_cross_check(conn, uid: str) -> None:
         # Precedência: a identidade aceite continua a ser a do resolve_operator
         # — as células do cabeçalho descrevem-na, não a substituem.
         cross["operator"] = operator_match
+
+    # Não apagar a proveniência numa revalidação sobre valores já canónicos.
+    # O payload final conserva o primeiro valor substituído e o último valor
+    # materializado durante toda a revisão da folha.
+    replaced_by_row: dict[int, dict[str, dict[str, object]]] = {
+        int(row.get("row_index")): {
+            field: dict(change)
+            for field, change in (row.get("replaced_values") or {}).items()
+            if isinstance(change, dict)
+        }
+        for row in ((base.get("cross_check") or {}).get("rows") or [])
+        if row.get("row_index") is not None
+    }
+    for path, old, new, _actor in edits:
+        match = re.match(r"^rows\[(\d+)]\.([A-Za-z_][A-Za-z0-9_]*)$", path)
+        if match:
+            row_changes = replaced_by_row.setdefault(int(match.group(1)), {})
+            previous = row_changes.get(match.group(2)) or {}
+            row_changes[match.group(2)] = {
+                "old": previous.get("old", old), "new": new,
+            }
+    for row_cross in cross.get("rows", []):
+        row_cross["replaced_values"] = replaced_by_row.get(
+            row_cross.get("row_index"), {}
+        )
+    # A revisão que estes metadados descrevem. Validação recusa um cross velho
+    # se uma edição entrar entre o cálculo e a reserva SQLite.
+    cross["data_revision"] = expected + (1 if edits else 0)
 
     if edits:
         # Se o humano editou entre o cálculo e a gravação, o CAS recusa e
@@ -490,7 +540,8 @@ def run_cross_check(conn, uid: str) -> None:
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, status: str = "", operador: str = "", setor: str = "",
          data: str = "", data_captura: str = "", of: str = "",
-         created: str = "", deleted: str = "", page: int = 1):
+         created: str = "", deleted: str = "", validated: str = "",
+         stored: str = "", page: int = 1):
     status = status if status in {"", "pending", "validated", "error"} else ""
     page = max(1, page)
     conn = _conn()
@@ -528,6 +579,7 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
             "next": _history_location(page=page + 1, **filters) if page < pages else None,
         },
         "created": created, "deleted": deleted,
+        "validated": validated, "stored": stored,
         "tunnel_url": tunnel_url(),
     })
 
@@ -548,7 +600,7 @@ def camara(request: Request):
 
 @app.get("/estado", response_class=HTMLResponse)
 def estado_page(request: Request, q: str = "", familia: str = "", of: str = "",
-                page: int = 1):
+                validated: str = "", stored: str = "", page: int = 1):
     conn = _conn()
     try:
         sheets = db.list_sheets(conn)
@@ -568,6 +620,7 @@ def estado_page(request: Request, q: str = "", familia: str = "", of: str = "",
     return templates.TemplateResponse(request, "estado.html", {
         "estado": data_estado,
         "q": q, "familia": familia, "of": of,
+        "validated": validated, "stored": stored,
         "by_status": by_status, "n_sheets": len(sheets),
         "estado_back": estado_back,
         "estado_close_url": _estado_location(q=q, familia=familia, page=page),
@@ -966,15 +1019,22 @@ def sheet_csv(uid: str):
     w = csv.writer(buf)
     w.writerow(["folha", "estado", "operador", "data", "setor_maquina", "linha"]
                + list(template.row_fields))
-    for i, row in enumerate(data.get("rows") or []):
-        if not any(v is not None and str(v).strip() for v in row.values()):
+    visible_no = 0
+    for row in data.get("rows") or []:
+        if row.get("_deleted") is True:
             continue
+        if not any(not str(k).startswith("_")
+                   and v is not None and str(v).strip()
+                   for k, v in row.items()):
+            continue
+        visible_no += 1
         w.writerow([
-            sheet["uid"][:8], sheet["status"], header.get("operador"),
-            header.get("data"), header.get("setor_maquina"), i + 1,
+            sheet.get("sheet_no") or sheet["uid"][:8], sheet["status"], header.get("operador"),
+            header.get("data"), header.get("setor_maquina"), visible_no,
         ] + [row.get(f) for f in template.row_fields])
     return Response(buf.getvalue(), media_type="text/csv; charset=utf-8", headers={
-        "Content-Disposition": f'attachment; filename="kanban_{uid[:8]}.csv"',
+        "Content-Disposition":
+            f'attachment; filename="kanban_{sheet.get("sheet_no") or uid[:8]}.csv"',
     })
 
 
@@ -1009,19 +1069,20 @@ def export_cpis(de: str = "", ate: str = "", operador: str = "", validadas: int 
             if ate and (not iso or iso > ate):
                 continue
             cross = sheet.get("cross_check") or {}
-            cross_rows = {r["row_index"]: r for r in cross.get("rows", [])}
             op = cross.get("operator")
-            for i, row in enumerate(sheet["sheet_data"].get("rows") or []):
-                if not any(v is not None and str(v).strip() for v in row.values()):
-                    continue
+            template = get_template(sheet["template_name"])
+            for fact in production_facts.materialize_sheet(sheet, template)["exports"]:
+                i, row, row_cross = fact["row_index"], fact["row"], fact["cross"]
                 cpis_rows.append(
-                    (iso or "9999", str(header.get("operador") or ""), meta["uid"], i,
-                     cpis_export.cpis_row_for(sheet, row, cross_rows.get(i), op)))
+                    (iso or "9999", str(header.get("operador") or ""),
+                     meta.get("sheet_no") or meta["uid"], i,
+                     str(fact.get("plan_key") or ""),
+                     cpis_export.cpis_row_for(sheet, row, row_cross, op)))
     finally:
         conn.close()
     # ordenação do original: data, operador, folha, linha
-    cpis_rows.sort(key=lambda t: t[:4])
-    content = cpis_export.build_cpis_workbook([t[4] for t in cpis_rows])
+    cpis_rows.sort(key=lambda t: t[:5])
+    content = cpis_export.build_cpis_workbook([t[5] for t in cpis_rows])
     filename = cpis_export.cpis_filename_for(de or None, ate or None, bool(validadas))
     return Response(
         content,
@@ -1060,18 +1121,19 @@ def export_basedados(de: str = "", ate: str = "", operador: str = "", validadas:
             if ate and (not iso or iso > ate):
                 continue
             cross = sheet.get("cross_check") or {}
-            cross_rows = {r["row_index"]: r for r in cross.get("rows", [])}
             op = cross.get("operator")
-            for i, row in enumerate(sheet["sheet_data"].get("rows") or []):
-                if not any(v is not None and str(v).strip() for v in row.values()):
-                    continue
+            template = get_template(sheet["template_name"])
+            for fact in production_facts.materialize_sheet(sheet, template)["exports"]:
+                i, row, row_cross = fact["row_index"], fact["row"], fact["cross"]
                 bd_rows.append(
-                    (iso or "9999", str(header.get("operador") or ""), meta["uid"], i,
-                     cpis_export.basedados_row_for(sheet, row, cross_rows.get(i), op)))
+                    (iso or "9999", str(header.get("operador") or ""),
+                     meta.get("sheet_no") or meta["uid"], i,
+                     str(fact.get("plan_key") or ""),
+                     cpis_export.basedados_row_for(sheet, row, row_cross, op)))
     finally:
         conn.close()
-    bd_rows.sort(key=lambda t: t[:4])
-    content = cpis_export.build_basedados_workbook([t[4] for t in bd_rows])
+    bd_rows.sort(key=lambda t: t[:5])
+    content = cpis_export.build_basedados_workbook([t[5] for t in bd_rows])
     filename = cpis_export.basedados_filename_for(de or None, ate or None)
     return Response(
         content,
@@ -1091,12 +1153,30 @@ def export_xlsx():
             pconn.read_only = True
             with pconn.cursor() as cur:
                 cur.execute(
-                    "SELECT sheet_uid, row_index, sheet_date, family, operator_name, "
-                    "machine, production_order, sales_order, customer_name, model_ref, "
-                    "matched_plan_key, match_confidence, quantity, length_mm, width_mm, "
-                    "thickness_mm, hours_worked, validated_at "
-                    "FROM mes_kanban.production_records "
-                    "ORDER BY sheet_date DESC, sheet_uid, row_index")
+                    "WITH facts AS ("
+                    " SELECT s.source_app, s.sheet_no, p.sheet_uid, p.row_index, "
+                    " p.sheet_date, p.family, p.operator_name, p.machine, "
+                    " p.production_order, p.sales_order, p.customer_name, p.model_ref, "
+                    " p.matched_plan_key, p.match_confidence, p.quantity, p.length_mm, "
+                    " p.width_mm, p.thickness_mm, p.hours_worked, p.plan_snapshot_id, "
+                    " p.validated_at "
+                    " FROM mes_kanban.production_records p "
+                    " JOIN mes_kanban.validated_sheets s ON s.sheet_uid = p.sheet_uid "
+                    " WHERE NOT EXISTS (SELECT 1 FROM mes_kanban.production_record_plan_refs r "
+                    "                   WHERE r.production_record_id = p.id) "
+                    " UNION ALL "
+                    " SELECT s.source_app, s.sheet_no, p.sheet_uid, p.row_index, "
+                    " p.sheet_date, p.family, p.operator_name, p.machine, "
+                    " p.production_order, p.sales_order, p.customer_name, r.component_ref, "
+                    " r.plan_key, p.match_confidence, r.assumed_quantity, r.length_mm, "
+                    " p.width_mm, p.thickness_mm, p.hours_worked, r.plan_snapshot_id, "
+                    " p.validated_at "
+                    " FROM mes_kanban.production_record_plan_refs r "
+                    " JOIN mes_kanban.production_records p ON p.id = r.production_record_id "
+                    " JOIN mes_kanban.validated_sheets s ON s.sheet_uid = p.sheet_uid "
+                    " WHERE r.assumed_quantity > 0"
+                    ") SELECT * FROM facts "
+                    "ORDER BY sheet_date DESC, source_app, sheet_no, row_index, model_ref")
                 cols = [d.name for d in cur.description]
                 rows = cur.fetchall()
     except Exception as exc:
@@ -1158,10 +1238,18 @@ def _estado_location(*, q: str = "", familia: str = "", of: str = "",
 
 def _with_query(location: str, **values: object) -> str:
     parts = urlsplit(location)
-    params = dict(parse_qsl(parts.query, keep_blank_values=True))
-    params.update({key: str(value) for key, value in values.items()
-                   if value is not None})
-    return urlunsplit(("", "", parts.path, urlencode(params), parts.fragment))
+    additions = {key: str(value) for key, value in values.items()
+                 if value is not None}
+    # Preserva byte a byte filtros, ordem e encoding do `back` original. Só os
+    # parâmetros transitórios que estamos a acrescentar são substituídos.
+    untouched = []
+    for raw_pair in parts.query.split("&") if parts.query else []:
+        raw_key = raw_pair.partition("=")[0]
+        if unquote_plus(raw_key) not in additions:
+            untouched.append(raw_pair)
+    suffix = urlencode(additions)
+    query = "&".join([*untouched, *([suffix] if suffix else [])])
+    return urlunsplit(("", "", parts.path, query, parts.fragment))
 
 
 def _diverged_map(sheet: dict) -> dict[str, str]:
@@ -1192,6 +1280,8 @@ def _diverged_map(sheet: dict) -> dict[str, str]:
         r = raw_rows[i] if i < len(raw_rows) and isinstance(raw_rows[i], dict) else {}
         c = cur_rows[i] if i < len(cur_rows) and isinstance(cur_rows[i], dict) else {}
         for f in set(r) | set(c):
+            if str(f).startswith("_"):
+                continue
             diff(f"rows[{i}].{f}", r.get(f), c.get(f))
     return out
 
@@ -1206,6 +1296,20 @@ def sheet_view(request: Request, uid: str, back: str | None = None,
         conn.close()
     if not sheet:
         raise HTTPException(404)
+    return _render_sheet(request, sheet, back=back, view=view)
+
+
+def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
+                  view: str | None = None, status_code: int = 200,
+                  header_draft: dict | None = None,
+                  erro: str | None = None):
+    """Render único da folha, incluindo conflitos que preservam o formulário."""
+    if header_draft is not None:
+        current = sheet.get("sheet_data") or {}
+        sheet = {
+            **sheet,
+            "sheet_data": {**current, "header": dict(header_draft)},
+        }
     template = get_template(sheet["template_name"])
     raw = sheet.get("raw_extraction") or {}
     raw_rows = [r for r in (raw.get("rows") or []) if isinstance(r, dict)]
@@ -1235,7 +1339,8 @@ def sheet_view(request: Request, uid: str, back: str | None = None,
         "review_order": cross.get("review_order", []),
         "plan_reference": cross.get("plan_reference") or {},
         "stored": request.query_params.get("stored"),
-        "erro": request.query_params.get("erro"),
+        "erro": erro if erro is not None else request.query_params.get("erro"),
+        "header_conflict": header_draft is not None,
         "has_ocr": has_ocr, "view_mode": view_mode,
         "operator": cross.get("operator"),
         "header_cells": header_cells,
@@ -1243,7 +1348,7 @@ def sheet_view(request: Request, uid: str, back: str | None = None,
         "source_document": source_document,
         "diverged": diverged, "n_diverged": len(diverged),
         "back_url": _safe_back(back) or "/",
-    })
+    }, status_code=status_code)
 
 
 @app.get("/sheet/{uid}/photo")
@@ -1290,9 +1395,10 @@ def _totais_plano(linhas: list) -> dict:
     de colunas vazias mostraria «0» onde a verdade é «não se sabe».
     """
     totais: dict = {"planeada": None, "feita": None, "falta": None,
+                    "excesso": None,
                     "parcial": len(linhas) >= 500}
     colunas = {"planeada": "quantity_planned", "feita": "quantity_made",
-               "falta": "remaining_quantity"}
+               "falta": "remaining_quantity", "excesso": "excesso"}
     for chave, col in colunas.items():
         valores = [l[col] for l in linhas if l.get(col) is not None]
         if valores:
@@ -1316,7 +1422,6 @@ def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str =
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
-        human = db.human_fields_by_row(conn, uid)
     finally:
         conn.close()
     if not sheet:
@@ -1325,11 +1430,28 @@ def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str =
     rows = (sheet["sheet_data"] or {}).get("rows") or []
     if row_index < 0 or row_index >= len(rows):
         raise HTTPException(404)
+    if rows[row_index].get("_deleted") is True:
+        raise HTTPException(404)
 
-    ctx: dict = {"row_index": row_index, "of": None, "perfil": None,
+    perf_comp_marked = is_marked(field_value(rows[row_index], "perf_comp"))
+    row_number = sum(
+        row.get("_deleted") is not True for row in rows[:row_index + 1]
+    )
+    ctx: dict = {"row_index": row_index, "row_number": row_number,
+                 "of": None, "perfil": None,
                  "linhas": [], "perfis": [], "erro": None, "plano": {},
-                 "origem_perf_comp": origem == "perf_comp", "totais": None}
+                 "origem_perf_comp": perf_comp_marked or origem == "perf_comp", "totais": None,
+                 "sheet": sheet, "editable": sheet["status"] != "validated",
+                 "current_model": rows[row_index].get("modelo"),
+                 "current_binding": (
+                     {} if perf_comp_marked
+                     else (rows[row_index].get("_plan_binding") or {})
+                 ),
+                 "showing_all_of": False}
     try:
+        if template.index_loader:
+            with _index_lock:
+                _index_cache.pop(template.index_loader, None)
         index = get_index(template.index_loader) if template.index_loader else None
         if index is None:
             ctx["erro"] = "Esta folha não cruza com o plano."
@@ -1337,7 +1459,7 @@ def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str =
 
         content = tuple(f.name for f in index.spec.identity_fields
                         if f.name not in carryover.CARRY_FIELDS)
-        identities = carryover.resolve(rows, content, human)
+        identities = carryover.resolve(rows, content, {})
         eff = carryover.effective_row(rows[row_index], identities[row_index])
         escrito = str(eff.get("perfil") or "").strip()
         of_escrita = str(eff.get("of") or "").strip()
@@ -1353,17 +1475,156 @@ def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str =
             ctx["erro"] = "Esta linha não tem OF — escreve-a (ou herda-a da linha de cima)."
         else:
             ctx["plano"] = loaders.plan_snapshot_info()
+            if (index.snapshot_id and ctx["plano"].get("snapshot_id")
+                    and str(index.snapshot_id) != str(ctx["plano"]["snapshot_id"])):
+                ctx["erro"] = "O planeamento mudou; fecha e reabre Referências."
+                return templates.TemplateResponse(request, "_plano_perfil.html", ctx)
             if perfil:
-                ctx["linhas"] = loaders.fetch_profile_lines(of, perfil)
+                ctx["linhas"] = loaders.fetch_profile_lines(
+                    of, perfil, snapshot_id=index.snapshot_id
+                )
             if ctx["linhas"]:
                 ctx["totais"] = _totais_plano(ctx["linhas"])
             else:
-                # Sem correspondência mostra-se o que a obra tem mesmo: o caso
-                # comum é o perfil estar escrito com uma medida trocada.
-                ctx["perfis"] = loaders.fetch_profiles_in_of(of)
+                # Perfil vazio/incorreto: mostram-se as referências completas
+                # da OF, não apenas chips com nomes de perfil.
+                ctx["linhas"] = loaders.fetch_of_lines(
+                    of, snapshot_id=index.snapshot_id
+                )
+                ctx["showing_all_of"] = True
+                if ctx["linhas"]:
+                    ctx["totais"] = _totais_plano(ctx["linhas"])
+            # A query das linhas foi fixada ao snapshot do índice. Uma última
+            # sonda impede mostrar como atual uma fotografia substituída a
+            # meio do pedido.
+            latest = loaders.plan_snapshot_info() or {}
+            if (index.snapshot_id and latest.get("snapshot_id")
+                    and str(index.snapshot_id) != str(latest["snapshot_id"])):
+                ctx["linhas"] = []
+                ctx["totais"] = None
+                ctx["erro"] = "O planeamento mudou; fecha e reabre Referências."
     except Exception as exc:  # Postgres em baixo não pode rebentar a revisão
         ctx["erro"] = f"Não foi possível ler o plano: {exc}"
     return templates.TemplateResponse(request, "_plano_perfil.html", ctx)
+
+
+@app.post("/sheet/{uid}/rows/{row_index}/reference")
+def sheet_reference(
+    uid: str,
+    row_index: int,
+    snapshot_id: str = Form(...),
+    plan_key: str = Form(...),
+    revision: int = Form(...),
+    actor: str = Form("operador"),
+    back: str = Form(""),
+):
+    """Escolha explícita e autenticada de uma referência do snapshot atual."""
+    conn = _conn()
+    try:
+        sheet = db.get_sheet(conn, uid)
+        if not sheet:
+            raise HTTPException(404)
+        if sheet["status"] == "validated":
+            raise HTTPException(409, "Folha validada é imutável.")
+        if sheet["template_name"] != "cantoneiras_kanban":
+            raise HTTPException(422, "Esta folha não permite escolher referências.")
+        rows = (sheet.get("sheet_data") or {}).get("rows") or []
+        if row_index < 0 or row_index >= len(rows):
+            raise HTTPException(404)
+        if rows[row_index].get("_deleted") is True:
+            raise HTTPException(404)
+        if is_marked(field_value(rows[row_index], "perf_comp")):
+            raise HTTPException(
+                422, "Perfil completo representa todas as referências; não permite escolher uma."
+            )
+        if sheet["revision"] != revision:
+            raise HTTPException(409, "A folha foi alterada; reabre Referências.")
+        try:
+            current_info = loaders.plan_snapshot_info() or {}
+            current_snapshot = current_info.get("snapshot_id")
+            with _index_lock:
+                _index_cache.pop("load_cantoneiras_index", None)
+            index = get_index("load_cantoneiras_index")
+        except Exception as exc:
+            raise HTTPException(
+                422, "Planeamento indisponível; tenta novamente mais tarde."
+            ) from exc
+        if (not current_snapshot or not index.snapshot_id
+                or str(index.snapshot_id) != str(current_snapshot)):
+            raise HTTPException(
+                409, "O planeamento mudou; reabre Referências e confirma novamente."
+            )
+        if not current_snapshot or snapshot_id != str(current_snapshot):
+            raise HTTPException(
+                409, "O planeamento mudou; reabre Referências e confirma novamente."
+            )
+        matches = [
+            entry for entry in index.entries
+            if str(entry.get(index.spec.key_field)) == plan_key
+        ]
+        if len(matches) != 1:
+            raise HTTPException(422, "Referência inexistente ou adulterada.")
+        entry = matches[0]
+        content = tuple(
+            f.name for f in index.spec.identity_fields
+            if f.name not in carryover.CARRY_FIELDS
+        )
+        identities = carryover.resolve(rows, content, {})
+        effective = carryover.effective_row(rows[row_index], identities[row_index])
+        written_of = str(effective.get("of") or "").strip()
+        if not written_of or not (
+            index.variants_for("of", written_of)
+            & index.variants_for("of", str(entry.get("of") or ""))
+        ):
+            raise HTTPException(422, "A referência escolhida não pertence à OF desta linha.")
+        model = str(entry.get("modelo") or "").strip()
+        if not model:
+            raise HTTPException(422, "A referência escolhida não tem Modelo/Referência.")
+        try:
+            latest_info = loaders.plan_snapshot_info() or {}
+        except Exception as exc:
+            raise HTTPException(
+                422, "Planeamento indisponível; tenta novamente mais tarde."
+            ) from exc
+        if (not latest_info.get("snapshot_id")
+                or str(latest_info["snapshot_id"]) != str(current_snapshot)):
+            raise HTTPException(
+                409, "O planeamento mudou; reabre Referências e confirma novamente."
+            )
+        data_doc = sheet["sheet_data"]
+        row = data_doc["rows"][row_index]
+        old_model = row.get("modelo")
+        old_binding = row.get("_plan_binding")
+        binding = {
+            "snapshot_id": str(current_snapshot),
+            "plan_key": plan_key,
+            "selected_explicitly": True,
+        }
+        row["modelo"] = model
+        row["_plan_binding"] = binding
+        audit = []
+        if old_model != model:
+            audit.append((f"rows[{row_index}].modelo", old_model, model,
+                          "human", actor))
+        if old_binding != binding:
+            audit.append((f"rows[{row_index}]._plan_binding", old_binding, binding,
+                          "human", actor))
+        if audit and not db.save_sheet_data_with_edits(
+            conn, uid, data_doc, revision, audit
+        ):
+            raise HTTPException(409, "A folha foi alterada; reabre Referências.")
+        if audit:
+            run_cross_check(conn, uid, force_plan=True)
+    except HTTPException as exc:
+        if exc.status_code == 404 or exc.status_code >= 500:
+            raise
+        return RedirectResponse(
+            _sheet_location(uid, back, erro=exc.detail, focus="problem"),
+            status_code=303,
+        )
+    finally:
+        conn.close()
+    return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
 @app.get("/sheet/{uid}/pdf")
@@ -1379,8 +1640,72 @@ def sheet_pdf(uid: str):
     template = get_template(sheet["template_name"])
     content = pdf_gen.sheet_pdf(sheet, template, edits)
     return Response(content, media_type="application/pdf", headers={
-        "Content-Disposition": f'attachment; filename="kanban_{uid[:8]}.pdf"',
+        "Content-Disposition":
+            f'attachment; filename="kanban_{sheet.get("sheet_no") or uid[:8]}.pdf"',
     })
+
+
+@app.post("/sheet/{uid}/header")
+def sheet_header(
+    request: Request,
+    uid: str,
+    operador: str = Form(""),
+    n_operador: str = Form(""),
+    setor_maquina: str = Form(""),
+    data: str = Form(""),
+    turno: str = Form(""),
+    revision: int = Form(...),
+    actor: str = Form("operador"),
+    back: str = Form(""),
+):
+    """Guarda todo o cabeçalho numa única transação CAS auditada."""
+    posted = {
+        "operador": operador.strip() or None,
+        "n_operador": n_operador.strip() or None,
+        "setor_maquina": setor_maquina.strip() or None,
+        "data": data.strip() or None,
+        "turno": turno.strip() or None,
+    }
+    conn = _conn()
+    try:
+        sheet = db.get_sheet(conn, uid)
+        if not sheet:
+            raise HTTPException(404)
+        if sheet["status"] == "validated":
+            raise HTTPException(409, "Folha validada é imutável.")
+        template = get_template(sheet["template_name"])
+        posted = {field: posted.get(field) for field in template.header_fields}
+        data_doc = sheet.get("sheet_data") or {"header": {}, "rows": [], "footer": {}}
+        old_header = data_doc.get("header") or {}
+        edits = [
+            (f"header.{field}", old_header.get(field), value, "human", actor)
+            for field, value in posted.items()
+            if (str(old_header.get(field) or "").strip() or None)
+               != (str(value or "").strip() or None)
+        ]
+        if sheet["revision"] != revision:
+            latest = db.get_sheet(conn, uid) or sheet
+            return _render_sheet(
+                request, latest, back=back, status_code=409,
+                header_draft=posted,
+                erro="A folha foi alterada; confirma novamente os valores",
+            )
+        if edits:
+            data_doc["header"] = {**old_header, **posted}
+            if not db.save_sheet_data_with_edits(
+                conn, uid, data_doc, revision, edits
+            ):
+                latest = db.get_sheet(conn, uid) or sheet
+                return _render_sheet(
+                    request, latest, back=back, status_code=409,
+                    header_draft=posted,
+                    erro="A folha foi alterada; confirma novamente os valores",
+                )
+        # Um único ciclo do cross depois do commit integral do formulário.
+        run_cross_check(conn, uid)
+    finally:
+        conn.close()
+    return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
 @app.post("/sheet/{uid}/edit")
@@ -1404,15 +1729,32 @@ def sheet_edit(uid: str, field_path: str = Form(...), value: str = Form(""),
             raise HTTPException(400, "field_path inválido.")
         old = None
         value_clean = value.strip() or None
+        audit_edits: list[tuple[str, object, object, str, str]] = []
         if m.group("idx") is not None:
             i = int(m.group("idx"))
             if i > _MAX_ROWS:
                 raise HTTPException(422, f"Linha {i} fora do limite ({_MAX_ROWS}).")
+            if i < len(data["rows"]) and data["rows"][i].get("_deleted") is True:
+                raise HTTPException(409, "A linha foi apagada e já não pode ser editada.")
             fname = m.group("rfield")
+            if fname.startswith("_"):
+                raise HTTPException(400, "Campo interno não é editável.")
             while len(data["rows"]) <= i:
                 data["rows"].append({})
             old = data["rows"][i].get(fname)
             data["rows"][i][fname] = value_clean
+            planning_fields = (
+                {"of", "ov", "cliente", "perfil", "modelo", "perf_comp"}
+                if sheet["template_name"] == "cantoneiras_kanban"
+                else {"nesting", "maquina", "esp", "comp_mm", "larg_mm"}
+            )
+            if fname in planning_fields:
+                old_binding = data["rows"][i].pop("_plan_binding", None)
+                if old_binding is not None:
+                    audit_edits.append((
+                        f"rows[{i}]._plan_binding", old_binding, None,
+                        "system", "binding:identity-edited",
+                    ))
         else:
             section, fname = m.group("section"), m.group("sfield")
             old = (data.get(section) or {}).get(fname)
@@ -1425,9 +1767,11 @@ def sheet_edit(uid: str, field_path: str = Form(...), value: str = Form(""),
             return RedirectResponse(_sheet_location(uid, back), status_code=303)
         # controlo otimista: a revisão vem do formulário — se a folha mudou
         # desde que a página foi carregada, recusa em vez de sobrescrever
-        if not db.save_sheet_data(conn, uid, data, revision):
+        audit_edits.insert(0, (field_path, old, value_clean, "human", actor))
+        if not db.save_sheet_data_with_edits(
+            conn, uid, data, revision, audit_edits
+        ):
             raise HTTPException(409, "A folha mudou entretanto — recarrega a página.")
-        db.record_edit(conn, uid, field_path, old, value_clean, "human", actor)
         run_cross_check(conn, uid)
     finally:
         conn.close()
@@ -1455,6 +1799,49 @@ def add_row(uid: str, back: str = Form("")):
     return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
+@app.post("/sheet/{uid}/rows/{row_index}/delete")
+def delete_row(uid: str, row_index: int, revision: int = Form(...),
+               actor: str = Form("operador"), back: str = Form("")):
+    """Retira uma linha sem destruir a transcrição/auditoria que lhe deu origem."""
+    conn = _conn()
+    try:
+        try:
+            sheet = db.get_sheet(conn, uid)
+            if not sheet:
+                raise HTTPException(404)
+            if sheet["status"] == "validated":
+                raise HTTPException(409, "Folha validada é imutável.")
+            data = sheet.get("sheet_data")
+            if data is None:
+                raise HTTPException(409, "A folha ainda está a ser lida pelo OCR.")
+            rows = data.get("rows") or []
+            if row_index < 0 or row_index >= len(rows):
+                raise HTTPException(422, "Linha inexistente.")
+            row = rows[row_index]
+            if not isinstance(row, dict) or row.get("_deleted") is True:
+                raise HTTPException(409, "Esta linha já foi apagada.")
+            old_row = json.dumps(row, ensure_ascii=False, sort_keys=True, default=str)
+            row["_deleted"] = True
+            if not db.save_sheet_data_with_edits(
+                conn, uid, data, revision,
+                [(f"rows[{row_index}]", old_row, "<apagada>", "human", actor)],
+            ):
+                raise HTTPException(
+                    409, "A folha foi alterada; confirma novamente os valores"
+                )
+            run_cross_check(conn, uid)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                raise
+            return RedirectResponse(
+                _sheet_location(uid, back, erro=exc.detail, focus=f"row-{row_index}"),
+                status_code=303,
+            )
+    finally:
+        conn.close()
+    return RedirectResponse(_sheet_location(uid, back), status_code=303)
+
+
 @app.post("/sheet/{uid}/recheck")
 def recheck(uid: str, back: str = Form("")):
     conn = _conn()
@@ -1471,13 +1858,74 @@ def recheck(uid: str, back: str = Form("")):
 
 
 @app.post("/sheet/{uid}/validate")
-def validate(uid: str, actor: str = Form("operador"), back: str = Form("")):
-    """A única porta para o Postgres: valida → INSERT em mes_kanban → imutável."""
+def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
+             revision: int | None = Form(None),
+             header_operador: str | None = Form(None),
+             header_n_operador: str | None = Form(None),
+             header_setor_maquina: str | None = Form(None),
+             header_data: str | None = Form(None),
+             header_turno: str | None = Form(None)):
+    """Re-cross atual + reserva CAS + INSERT PG + imutabilidade local."""
     # «Quem valida» deixou de existir no form: valida-se sem entidade e o
     # registo interno fica «operador».
     actor = actor.strip() or "operador"
     conn = _conn()
     try:
+        before = db.get_sheet(conn, uid)
+        if not before:
+            raise HTTPException(404)
+        if before["status"] == "validated":
+            raise HTTPException(409, "Folha já validada.")
+        if revision is not None and revision != before["revision"]:
+            raise HTTPException(
+                409, "A folha foi alterada; confirma novamente os valores."
+            )
+        # O botão Validar também confirma o que estiver atualmente escrito no
+        # formulário do cabeçalho. Assim o utilizador nunca é obrigado a
+        # carregar primeiro em «Guardar cabeçalho», nem perde o rascunho que
+        # está visível no browser. POSTs antigos/administrativos que não enviam
+        # estes campos continuam a validar os valores já persistidos.
+        submitted_header = {
+            "operador": header_operador,
+            "n_operador": header_n_operador,
+            "setor_maquina": header_setor_maquina,
+            "data": header_data,
+            "turno": header_turno,
+        }
+        if any(value is not None for value in submitted_header.values()):
+            template = get_template(before["template_name"])
+            data_doc = before.get("sheet_data") or {
+                "header": {}, "rows": [], "footer": {},
+            }
+            old_header = dict(data_doc.get("header") or {})
+            new_header = dict(old_header)
+            edits = []
+            for field in template.header_fields:
+                raw = submitted_header.get(field)
+                if raw is None:
+                    continue
+                value = raw.strip() or None
+                new_header[field] = value
+                if (str(old_header.get(field) or "").strip() or None) != value:
+                    edits.append((
+                        f"header.{field}", old_header.get(field), value,
+                        "human", actor,
+                    ))
+            if edits:
+                data_doc["header"] = new_header
+                if not db.save_sheet_data_with_edits(
+                    conn, uid, data_doc, before["revision"], edits
+                ):
+                    raise HTTPException(
+                        409, "A folha foi alterada; confirma novamente os valores."
+                    )
+                before = db.get_sheet(conn, uid)
+                if not before:
+                    raise HTTPException(404)
+        # O índice é recarregado: a validação congela uma única fotografia
+        # atual, não a que por acaso ficou no cache durante a revisão.
+        run_cross_check(conn, uid, force_plan=True)
+        conn.execute("BEGIN IMMEDIATE")
         sheet = db.get_sheet(conn, uid)
         if not sheet:
             raise HTTPException(404)
@@ -1489,13 +1937,79 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form("")):
         if not str(header.get("data") or "").strip():
             raise HTTPException(422, "Validação exige data preenchida no cabeçalho.")
         template = get_template(sheet["template_name"])
+        cross = sheet.get("cross_check") or {}
+        if template.index_loader:
+            plan_ref = cross.get("plan_reference") or {}
+            if plan_ref.get("status") != "available" or not cross.get("snapshot_id"):
+                raise HTTPException(
+                    422, "Validação bloqueada: o planeamento está indisponível."
+                )
+            if cross.get("data_revision") != sheet["revision"]:
+                raise HTTPException(
+                    409, "A folha mudou durante o cross-check; tenta novamente."
+                )
+            if cross.get("fixed_point") is False:
+                raise HTTPException(
+                    422, "O cross-check não estabilizou; revê a identidade das linhas."
+                )
+            rows = (sheet.get("sheet_data") or {}).get("rows") or []
+            cross_rows = {
+                row.get("row_index"): row for row in cross.get("rows", [])
+            }
+            visible_no = 0
+            for row_index, row in enumerate(rows):
+                if row.get("_deleted") is True:
+                    continue
+                visible_no += 1
+                if not any(
+                    value is not None and str(value).strip()
+                    for key, value in row.items() if not str(key).startswith("_")
+                ):
+                    continue
+                row_cross = cross_rows.get(row_index) or {}
+                if row_cross.get("binding_stale"):
+                    raise HTTPException(
+                        422,
+                        f"Linha {visible_no}: o planeamento mudou; "
+                        "reabre Referências.",
+                    )
+                if not row_cross.get("matched_plan_key"):
+                    raise HTTPException(
+                        422,
+                        f"Linha {visible_no}: não existe candidato no planeamento.",
+                    )
+                if is_marked(field_value(row, "perf_comp")):
+                    if not row_cross.get("plan_refs_valid"):
+                        raise HTTPException(
+                            422,
+                            f"Linha {visible_no}: "
+                            + (row_cross.get("plan_refs_error")
+                               or "as referências de perfil completo são inválidas."),
+                        )
+            # Última sonda imediatamente antes de materializar no Postgres.
+            # Se uma carga foi publicada depois do cross, esse snapshot já
+            # deixou de ser o atual e a seleção explícita tem de ser reaberta.
+            current_snapshot = _current_index_snapshot(template.index_loader)
+            if current_snapshot is None:
+                raise HTTPException(
+                    422, "Validação bloqueada: o planeamento está indisponível."
+                )
+            if str(current_snapshot) != str(cross.get("snapshot_id")):
+                raise HTTPException(
+                    409, "O planeamento mudou; reabre Referências e confirma novamente."
+                )
         try:
             n = pg_store.store_validated_sheet(
                 sheet, template, db.edit_count(conn, uid), actor)
         except pg_store.InvalidSheetDate as exc:
             raise HTTPException(
                 422, f"Data «{exc}» não é interpretável — escreve dd/mm/aaaa.")
-        db.mark_validated(conn, uid, actor)
+        if not db.mark_validated(
+            conn, uid, actor, expected_revision=sheet["revision"]
+        ):
+            raise HTTPException(
+                409, "A folha mudou durante a validação — tenta novamente."
+            )
     except HTTPException as exc:
         # Os portões da validação (422/409) voltam à folha como banner: o
         # form navega para o POST, e a resposta JSON crua lê-se como crash.
@@ -1503,9 +2017,21 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form("")):
         # é um erro a sério e queremos o traceback.
         if exc.status_code == 404 or exc.status_code >= 500:
             raise
+        focus = (
+            "header.operador" if "operador" in str(exc.detail).lower()
+            else ("header.data" if "data" in str(exc.detail).lower() else "problem")
+        )
         return RedirectResponse(
-            _sheet_location(uid, back, erro=exc.detail), status_code=303,
+            _sheet_location(uid, back, erro=exc.detail, focus=focus), status_code=303,
         )
     finally:
         conn.close()
-    return RedirectResponse(_sheet_location(uid, back, stored=n), status_code=303)
+    destination = _safe_back(back) or "/"
+    return RedirectResponse(
+        _with_query(
+            destination,
+            validated=sheet.get("sheet_no") or uid[:8],
+            stored=n,
+        ),
+        status_code=303,
+    )

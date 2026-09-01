@@ -3,7 +3,7 @@
    Aparece quando uma linha está marcada com PERF. COMP.: nessas linhas o
    operador escreve o perfil e não lista modelo a modelo, portanto para
    conferir é preciso ver o que a obra tem daquele perfil. #}
-<div class="lbl">Linha {{ row_index + 1 }}</div>
+<div class="lbl">Linha {{ row_number }}</div>
 <div style="font-size:18px; font-weight:600; margin:2px 0 2px;">
   Referências do perfil nesta obra
 </div>
@@ -33,6 +33,12 @@
         o plano pode estar desatualizado (idade acima).</span>
     </div>
   {% endif %}
+  {% if showing_all_of %}
+    <div class="alert warn" style="margin-bottom:10px;">
+      <span>O perfil está vazio ou não aparece nesta OF. A mostrar todas as
+        referências da OF para poderes corrigir a linha.</span>
+    </div>
+  {% endif %}
   <div class="muted tiny" style="margin-bottom:6px;">
     {{ linhas | length }} referência(s){% if linhas | length >= 500 %} — a mostrar as primeiras 500{% endif %}.
     <input type="text" class="kv-select" placeholder="filtrar…"
@@ -43,23 +49,40 @@
     <table class="tbl" id="tabela-plano">
       <thead>
         <tr>
-          <th>Referência</th><th>Comp.</th><th>Planeada</th>
-          <th>Feita</th><th>Falta</th><th>Máquina</th><th>Semana</th><th></th>
+          <th>Referência</th><th>Perfil</th><th>Comp.</th><th>Planeado</th>
+          <th>Feito</th><th>Por fazer</th><th>Excesso</th>
+          <th>Máquina</th><th>Semana</th><th></th>
         </tr>
       </thead>
       <tbody>
         {% for l in linhas %}
-        <tr{% if l.closed_x %} style="opacity:.55;"{% endif %}>
-          <td class="mono"><b>{{ l.component_ref or '—' }}</b></td>
-          <td class="mono tnum">{{ '%g' | format(l.length_mm) if l.length_mm is not none else '—' }}</td>
-          <td class="mono tnum">{{ '%g' | format(l.quantity_planned) if l.quantity_planned is not none else '—' }}</td>
-          <td class="mono tnum">{{ '%g' | format(l.quantity_made) if l.quantity_made is not none else '—' }}</td>
-          <td class="mono tnum">{{ '%g' | format(l.remaining_quantity) if l.remaining_quantity is not none else '—' }}</td>
-          <td class="tiny">{{ l.cutting_machine or '—' }}</td>
-          <td class="tiny mono">{{ l.planning_week or '—' }}</td>
-          <td>{% if l.closed_x %}<span class="pill neutral">fechada</span>
-              {% elif l.remaining_quantity is not none and l.remaining_quantity <= 0 %}<span class="pill ok">completa</span>
-              {% endif %}</td>
+        {% set selected = (current_binding.get('plan_key') and current_binding.get('plan_key') == l.get('plan_key'))
+                          or (not current_binding.get('plan_key') and current_model and current_model == l.get('component_ref')) %}
+        <tr class="{% if selected %}plan-selected{% endif %}{% if l.get('closed_x') %} plan-closed{% endif %}">
+          <td class="mono"><b>{{ l.get('component_ref') or '—' }}</b></td>
+          <td class="mono">{{ l.get('perfil') or '—' }}</td>
+          <td class="mono tnum">{{ '%g' | format(l.get('length_mm')) if l.get('length_mm') is not none else '—' }}</td>
+          <td class="mono tnum">{{ '%g' | format(l.get('quantity_planned')) if l.get('quantity_planned') is not none else '—' }}</td>
+          <td class="mono tnum">{{ '%g' | format(l.get('quantity_made')) if l.get('quantity_made') is not none else '—' }}</td>
+          <td class="mono tnum">{{ '%g' | format(l.get('remaining_quantity')) if l.get('remaining_quantity') is not none else '—' }}</td>
+          <td class="mono tnum">{{ '%g' | format(l.get('excesso')) if l.get('excesso') is not none else '—' }}</td>
+          <td class="tiny">{{ l.get('cutting_machine') or '—' }}</td>
+          <td class="tiny mono">{{ l.get('planning_week') or '—' }}</td>
+          <td>
+            {% if selected %}<span class="pill info">seleção atual</span>{% endif %}
+            {% if origem_perf_comp %}
+              {% if l.get('closed_x') %}<span class="pill neutral">fechada</span>
+              {% elif l.get('remaining_quantity') is not none and l.get('remaining_quantity') <= 0 %}<span class="pill ok">completa</span>{% endif %}
+            {% elif editable and l.get('plan_key') and l.get('snapshot_id') %}
+              <form method="post" action="/sheet/{{ sheet.uid }}/rows/{{ row_index }}/reference" style="display:inline;">
+                <input type="hidden" name="snapshot_id" value="{{ l.get('snapshot_id') }}">
+                <input type="hidden" name="plan_key" value="{{ l.get('plan_key') }}">
+                <input type="hidden" name="revision" value="{{ sheet.revision }}">
+                <input type="hidden" name="back" value="{{ request.query_params.get('back', '') }}">
+                <button class="btn {% if selected %}primary{% endif %}" type="submit">Escolher</button>
+              </form>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -69,30 +92,16 @@
       <tfoot>
         <tr>
           <td><b>Totais{{ ' (parciais)' if totais.parcial else '' }}</b></td>
-          <td></td>
+          <td></td><td></td>
           <td class="mono tnum"><b>{{ '%g' | format(totais.planeada) if totais.planeada is not none else '—' }}</b></td>
           <td class="mono tnum"><b>{{ '%g' | format(totais.feita) if totais.feita is not none else '—' }}</b></td>
           <td class="mono tnum"><b>{{ '%g' | format(totais.falta) if totais.falta is not none else '—' }}</b></td>
+          <td class="mono tnum"><b>{{ '%g' | format(totais.excesso) if totais.excesso is not none else '—' }}</b></td>
           <td></td><td></td><td></td>
         </tr>
       </tfoot>
       {% endif %}
     </table>
-  </div>
-
-{% elif perfis %}
-  {# O perfil escrito não existe nesta obra. Em vez de um vazio, mostrar o que
-     a obra tem — o erro típico é uma medida trocada (L200x100x12 por x10). #}
-  <div class="alert warn" style="margin-bottom:10px;">
-    <span>O perfil <b>{{ perfil or perfil_escrito }}</b> não aparece nesta obra.
-      Estes são os perfis que a obra tem:</span>
-  </div>
-  <div style="display:flex; gap:6px; flex-wrap:wrap;">
-    {% for p in perfis %}
-      <span class="pill neutral mono" title="{{ p.n_linhas }} linhas no plano">
-        {{ p.perfil }} · {{ p.n_linhas }}
-      </span>
-    {% endfor %}
   </div>
 
 {% else %}

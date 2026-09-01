@@ -136,6 +136,49 @@ def test_linha_marcada_nao_recebe_proposta_de_modelo():
     assert cells["modelo"].status == "na"
 
 
+def test_linha_marcada_limpa_modelo_isolado_e_expande_por_fazer():
+    plano = [
+        {"snapshot_id": "snap", "plan_key": "K1", "of": "OF263323",
+         "modelo": "REF-1", "perfil": "L40X40X4", "comp_mm": 2000,
+         "qtd_planeada": 10, "qtd_feita": 4, "qtd_restante": 6,
+         "excesso": 0, "falta_valida": True,
+         "regra_calculo": "max(QTD - Maq., 0)"},
+        {"snapshot_id": "snap", "plan_key": "K2", "of": "OF263323",
+         "modelo": "REF-2", "perfil": "L40X40X4", "comp_mm": 1500,
+         "qtd_planeada": 5, "qtd_feita": 5, "qtd_restante": 0,
+         "excesso": 0, "falta_valida": True,
+         "regra_calculo": "max(QTD - Maq., 0)"},
+    ]
+    rc = check_row(
+        {"of": "263323", "perfil": "40x4", "modelo": "REF-1",
+         "qtd": "999", "perf_comp": "X"},
+        0, Scorer(PlanIndex(plano, SPEC, snapshot_id="snap"), CrossParams()),
+    )
+    modelo = {cell.field: cell for cell in rc.cells}["modelo"]
+    assert modelo.proposal == "" and modelo.auto_write
+    assert rc.plan_refs_valid is True
+    assert [ref["assumed_quantity"] for ref in rc.plan_refs] == [6, 0]
+    assert rc.line_meters == 12.0
+    assert rc.selected_snapshot_id == "snap"
+
+
+def test_linha_marcada_bloqueia_se_uma_falta_for_desconhecida():
+    plano = [
+        {"snapshot_id": "snap", "plan_key": "K1", "of": "OF263323",
+         "modelo": "REF-1", "perfil": "L40X40X4", "qtd_restante": 6,
+         "falta_valida": True},
+        {"snapshot_id": "snap", "plan_key": "K2", "of": "OF263323",
+         "modelo": "REF-2", "perfil": "L40X40X4", "qtd_restante": None,
+         "falta_valida": False},
+    ]
+    rc = check_row(
+        {"of": "263323", "perfil": "40x4", "perf_comp": "X"}, 0,
+        Scorer(PlanIndex(plano, SPEC, snapshot_id="snap"), CrossParams()),
+    )
+    assert rc.plan_refs_valid is False
+    assert "K2" in rc.plan_refs_error
+
+
 def test_celula_herdada_confere_contra_o_valor_herdado():
     """A célula em branco por «idem» não é «vazia»: vale o valor de cima."""
     rows = [

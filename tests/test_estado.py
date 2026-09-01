@@ -36,6 +36,34 @@ def test_merge_by_of_junta_plano_e_validado():
     assert rows[0]["of"] == "OF250001"
 
 
+def test_merge_nao_converte_falta_desconhecida_em_zero():
+    rows = estado.merge_by_of([{
+        "cliente": "x", "ov": "OV1", "of": "OF1",
+        "familia": "cantoneiras", "qtd_planeada": 10,
+        "qtd_restante": None, "maquinas": None, "semana": None,
+    }], [])
+    assert rows[0]["qtd_restante"] is None
+    assert rows[0]["progresso"] is None
+
+
+def test_estado_isola_factos_validados_desta_aplicacao(monkeypatch):
+    queries = []
+
+    def capture(sql, params=()):
+        queries.append((sql, params))
+        return [{"x": 1}]
+
+    monkeypatch.setattr(estado, "_fetch", capture)
+    estado.fetch_validated_rows()
+    estado.fetch_mes_kpis()
+    estado.fetch_of_detail("OF1")
+
+    validated_sql, kpi_sql, _plan_sql, detail_sql = [sql for sql, _ in queries]
+    assert "s.source_app = 'kanban-mes'" in validated_sql
+    assert kpi_sql.count("source_app = 'kanban-mes'") == 2
+    assert "s.source_app = 'kanban-mes'" in detail_sql
+
+
 def test_filter_rows():
     rows = estado.merge_by_of(PLAN, VALIDATED)
     assert {r["of"] for r in estado.filter_rows(rows, q="silva")} == {"OF250001"}
