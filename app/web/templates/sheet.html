@@ -63,7 +63,7 @@
 
 {% if erro %}
 <div class="alert crit" style="margin-bottom:14px;">
-  <span><strong>{{ 'Conflito no cabeçalho.' if header_conflict else 'Não foi possível validar.' }}</strong> {{ erro }}</span>
+  <span><strong>{% if header_conflict %}Conflito no cabeçalho.{% elif error_context == 'edit' %}Não foi possível guardar.{% else %}Não foi possível validar.{% endif %}</strong> {{ erro }}</span>
 </div>
 {% endif %}
 
@@ -649,7 +649,7 @@ function syncHeaderIntoValidation() {
 })();
 
 (function focusValidationProblem() {
-  const focus = {{ request.query_params.get('focus', '') | tojson }};
+  const focus = {{ (focus or '') | tojson }};
   const headerConflict = {{ header_conflict | tojson }};
   if (!focus && !headerConflict) return;
   let input = null;

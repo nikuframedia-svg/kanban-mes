@@ -67,6 +67,14 @@ class InvalidSheetDate(ValueError):
     como a devolver ao utilizador (422, não 500)."""
 
 
+class SheetNumberConflict(RuntimeError):
+    """O número público local já pertence a outro UID no PostgreSQL."""
+
+    def __init__(self, sheet_no: object):
+        self.sheet_no = sheet_no
+        super().__init__(f"número público {sheet_no} já utilizado")
+
+
 def normalize_sheet_date(raw: object) -> str:
     """Data manuscrita → ISO (aaaa-mm-dd), SEMPRE dia/mês/ano à portuguesa.
 
@@ -248,11 +256,27 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 operator_pernr, operator_rule,
                 *[source_values[name] for name in source_columns],
             )
-            cur.execute(
-                f"INSERT INTO mes_kanban.validated_sheets ({validated_columns}) "
-                f"VALUES ({', '.join(['%s'] * len(validated_values))})",
-                validated_values,
-            )
+            sheet_no = sheet.get("sheet_no")
+            if ({"source_app", "sheet_no"}.issubset(validated_present)
+                    and sheet_no is not None):
+                cur.execute(
+                    "SELECT sheet_uid FROM mes_kanban.validated_sheets "
+                    "WHERE source_app = %s AND sheet_no = %s AND sheet_uid <> %s",
+                    (SOURCE_APP, sheet_no, sheet["uid"]),
+                )
+                if cur.fetchone():
+                    raise SheetNumberConflict(sheet_no)
+            try:
+                cur.execute(
+                    f"INSERT INTO mes_kanban.validated_sheets ({validated_columns}) "
+                    f"VALUES ({', '.join(['%s'] * len(validated_values))})",
+                    validated_values,
+                )
+            except psycopg.errors.UniqueViolation as exc:
+                # Cobre duas validações concorrentes entre a sonda e o INSERT.
+                if exc.diag.constraint_name == "validated_sheets_source_app_sheet_no_uidx":
+                    raise SheetNumberConflict(sheet_no) from exc
+                raise
             if template.name == "cantoneiras_paragens":
                 n = _store_stoppages(cur, sheet, header, filled, sheet_date, operator,
                                      operator_pernr)

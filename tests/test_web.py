@@ -376,13 +376,54 @@ def test_recheck_preserva_valores_substituidos_no_payload_final(client):
     assert final["selected_snapshot_id"] == "test-snapshot"
 
 
-def test_edit_with_stale_revision_conflicts(client):
+def test_edit_with_stale_revision_preserva_valor_para_confirmar(client):
     uid = create_sheet(client)
     r = client.post(f"/sheet/{uid}/edit", data={
         "field_path": "rows[0].of", "value": "OF250001",
         "revision": 999, "actor": "teste",
     })
     assert r.status_code == 409
+    assert "Não foi possível guardar" in r.text
+    assert "confirma novamente este valor" in r.text
+    assert 'name="value"' in r.text and 'value="OF250001"' in r.text
+    assert 'name="revision" value="1"' in r.text
+
+    # O primeiro POST não atropela a revisão nova. O formulário devolvido já
+    # contém essa revisão e confirma o mesmo texto num segundo POST.
+    conn = db.connect()
+    try:
+        assert db.get_sheet(conn, uid)["sheet_data"]["rows"][0]["of"] is None
+    finally:
+        conn.close()
+    assert client.post(f"/sheet/{uid}/edit", data={
+        "field_path": "rows[0].of", "value": "OF250001",
+        "revision": 1, "actor": "teste",
+    }).status_code == 303
+
+
+def test_edit_preserva_valor_se_o_cross_falhar(client, monkeypatch):
+    uid = create_sheet(client)
+
+    def broken_cross(*_args, **_kwargs):
+        raise RuntimeError("falha sintética do cross")
+
+    monkeypatch.setattr(main, "run_cross_check", broken_cross)
+    response = client.post(f"/sheet/{uid}/edit", data={
+        "field_path": "rows[0].of", "value": "OF250001",
+        "revision": get_revision(client, uid), "actor": "teste",
+    })
+    assert response.status_code == 303
+    assert "erro=" in response.headers["location"]
+    assert "erro_context=edit" in response.headers["location"]
+    conn = db.connect()
+    try:
+        assert db.get_sheet(conn, uid)["sheet_data"]["rows"][0]["of"] == "OF250001"
+    finally:
+        conn.close()
+    page = client.get(response.headers["location"])
+    assert page.status_code == 200
+    assert "Não foi possível guardar" in page.text
+    assert "A edição ficou preservada" in page.text
 
 
 def test_header_form_guarda_tudo_uma_vez_e_preserva_draft_no_conflito(
@@ -437,6 +478,35 @@ def test_header_form_guarda_tudo_uma_vez_e_preserva_draft_no_conflito(
     assert 'value="T"' in conflict.text
     assert "const headerConflict = true" in conflict.text
     assert "let conflictPending = true" in conflict.text
+
+
+def test_header_fica_guardado_quando_o_cross_lanca_excecao(
+    client, monkeypatch
+):
+    uid = create_sheet(client)
+    monkeypatch.setattr(
+        main, "run_cross_check",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("falha sintética do cross")
+        ),
+    )
+    response = client.post(f"/sheet/{uid}/header", data={
+        "operador": "Ana", "n_operador": "42",
+        "setor_maquina": "Rapid 20T - 1", "data": "31/08/2026",
+        "turno": "M", "revision": get_revision(client, uid),
+        "actor": "teste",
+    })
+    assert response.status_code == 303
+    assert "erro=" in response.headers["location"]
+    assert "erro_context=edit" in response.headers["location"]
+    conn = db.connect()
+    try:
+        assert db.get_sheet(conn, uid)["sheet_data"]["header"]["operador"] == "Ana"
+    finally:
+        conn.close()
+    page = client.get(response.headers["location"])
+    assert "Não foi possível guardar" in page.text
+    assert "Os valores ficaram preservados" in page.text
 
 
 def test_validar_guarda_o_cabecalho_visivel_sem_exigir_guardar_primeiro(
@@ -561,6 +631,33 @@ def test_reference_obsoleta_ou_adulterada_fica_na_folha(client, monkeypatch):
     })
     assert unavailable.status_code == 303
     assert "erro=" in unavailable.headers["location"]
+
+
+def test_reference_escolhida_fica_guardada_se_o_cross_falhar(
+    client, monkeypatch
+):
+    uid = create_sheet(client)
+    edit(client, uid, "rows[0].of", "250001")
+    monkeypatch.setattr(
+        main, "run_cross_check",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("falha sintética do cross")
+        ),
+    )
+    response = client.post(f"/sheet/{uid}/rows/0/reference", data={
+        "snapshot_id": "test-snapshot", "plan_key": "P1",
+        "revision": get_revision(client, uid), "actor": "teste",
+    })
+    assert response.status_code == 303
+    assert "erro=" in response.headers["location"]
+    conn = db.connect()
+    try:
+        binding = db.get_sheet(conn, uid)["sheet_data"]["rows"][0]["_plan_binding"]
+    finally:
+        conn.close()
+    assert binding["plan_key"] == "P1"
+    page = client.get(response.headers["location"])
+    assert "A escolha ficou preservada" in page.text
 
 
 def test_add_row_and_recheck(client):
@@ -688,6 +785,66 @@ def test_validate_requires_header_then_stores_and_freezes(client):
     r = client.get(f"/sheet/{uid}")
     assert r.status_code == 200
     assert "validada" in r.text
+
+
+def test_validate_colisao_de_numero_volta_a_folha_e_permite_retry(
+    client, monkeypatch
+):
+    uid = create_sheet(client)
+    edit(client, uid, "rows[0].of", "OF250001")
+    edit(client, uid, "header.operador", "João")
+    edit(client, uid, "header.data", "2026-08-06")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            pg_store, "store_validated_sheet",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                pg_store.SheetNumberConflict(1)
+            ),
+        )
+        response = client.post(
+            f"/sheet/{uid}/validate", data={"actor": "luis"}
+        )
+    assert response.status_code == 303
+    assert "erro=" in response.headers["location"]
+    page = client.get(response.headers["location"])
+    assert page.status_code == 200
+    assert "número público 1" in page.text
+    assert "Internal Server Error" not in page.text
+    conn = db.connect()
+    try:
+        assert db.get_sheet(conn, uid)["status"] != "validated"
+    finally:
+        conn.close()
+
+    retry = client.post(f"/sheet/{uid}/validate", data={"actor": "luis"})
+    assert retry.status_code == 303
+    assert "stored=" in retry.headers["location"]
+
+
+def test_validate_excecao_do_cross_nunca_devolve_erro_500(
+    client, monkeypatch
+):
+    uid = create_sheet(client)
+    edit(client, uid, "header.operador", "João")
+    edit(client, uid, "header.data", "2026-08-06")
+    monkeypatch.setattr(
+        main, "run_cross_check",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("falha sintética do cross")
+        ),
+    )
+    response = client.post(f"/sheet/{uid}/validate", data={"actor": "luis"})
+    assert response.status_code == 303
+    assert "erro=" in response.headers["location"]
+    page = client.get(response.headers["location"])
+    assert page.status_code == 200
+    assert "Internal Server Error" not in page.text
+    conn = db.connect()
+    try:
+        assert db.get_sheet(conn, uid)["status"] != "validated"
+    finally:
+        conn.close()
 
 
 def test_validate_sem_quem_valida(client):

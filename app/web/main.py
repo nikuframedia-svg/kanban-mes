@@ -6,6 +6,7 @@ com células coloridas → /validate = única porta para o Postgres.
 
 from __future__ import annotations
 
+import copy
 import csv
 import datetime
 import hashlib
@@ -15,6 +16,7 @@ import json
 import re
 import threading
 import time
+import traceback
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -353,10 +355,10 @@ def resolve_operator(conn, uid: str, sheet: dict) -> dict | None:
     ))
 
 
-def run_cross_check(conn, uid: str, *, force_plan: bool = False) -> None:
+def run_cross_check(conn, uid: str, *, force_plan: bool = False) -> bool:
     sheet = db.get_sheet(conn, uid)
     if not sheet or not sheet["sheet_data"]:
-        return
+        return False
     # A identidade do operador é calculada como proveniência/diagnóstico; não
     # altera o cabeçalho confirmado no formulário.
     operator_match = resolve_operator(conn, uid, sheet)
@@ -364,7 +366,7 @@ def run_cross_check(conn, uid: str, *, force_plan: bool = False) -> None:
     # revisão conhecida.
     base = db.get_sheet(conn, uid)
     if not base or not base["sheet_data"]:
-        return
+        return False
     template = get_template(base["template_name"])
     data = base["sheet_data"]
     rows = data.get("rows") or []
@@ -530,9 +532,10 @@ def run_cross_check(conn, uid: str, *, force_plan: bool = False) -> None:
     if edits:
         # Se o humano editou entre o cálculo e a gravação, o CAS recusa e
         # desiste-se — a edição dele dispara um run_cross_check novo.
-        db.apply_cross_corrections(conn, uid, data, cross, expected, edits)
-    else:
-        db.save_cross_check(conn, uid, cross, expected_revision=expected)
+        return db.apply_cross_corrections(
+            conn, uid, data, cross, expected, edits
+        )
+    return db.save_cross_check(conn, uid, cross, expected_revision=expected)
 
 
 # ---------- páginas ----------
@@ -1286,6 +1289,31 @@ def _diverged_map(sheet: dict) -> dict[str, str]:
     return out
 
 
+def _with_field_draft(sheet: dict, field_path: str,
+                      value: object) -> dict:
+    """Sobrepõe só a célula submetida numa cópia usada para renderizar.
+
+    Num conflito de revisão, a folha mais recente continua a ser a fonte de
+    todos os restantes campos. Assim o operador vê o valor que escreveu e
+    pode confirmá-lo novamente sem esmagar alterações concorrentes.
+    """
+    draft = copy.deepcopy(sheet)
+    data = draft.get("sheet_data") or {"header": {}, "rows": [], "footer": {}}
+    draft["sheet_data"] = data
+    match = _FIELD_PATH_RE.match(field_path)
+    if not match:  # o chamador já validou; guarda defensiva para uso futuro
+        return draft
+    if match.group("idx") is not None:
+        row_index = int(match.group("idx"))
+        rows = data.setdefault("rows", [])
+        while len(rows) <= row_index:
+            rows.append({})
+        rows[row_index][match.group("rfield")] = value
+    else:
+        data.setdefault(match.group("section"), {})[match.group("sfield")] = value
+    return draft
+
+
 @app.get("/sheet/{uid}", response_class=HTMLResponse)
 def sheet_view(request: Request, uid: str, back: str | None = None,
                view: str | None = None):
@@ -1302,7 +1330,9 @@ def sheet_view(request: Request, uid: str, back: str | None = None,
 def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
                   view: str | None = None, status_code: int = 200,
                   header_draft: dict | None = None,
-                  erro: str | None = None):
+                  field_draft: tuple[str, object] | None = None,
+                  erro: str | None = None, focus: str | None = None,
+                  error_context: str | None = None):
     """Render único da folha, incluindo conflitos que preservam o formulário."""
     if header_draft is not None:
         current = sheet.get("sheet_data") or {}
@@ -1310,6 +1340,8 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
             **sheet,
             "sheet_data": {**current, "header": dict(header_draft)},
         }
+    if field_draft is not None:
+        sheet = _with_field_draft(sheet, *field_draft)
     template = get_template(sheet["template_name"])
     raw = sheet.get("raw_extraction") or {}
     raw_rows = [r for r in (raw.get("rows") or []) if isinstance(r, dict)]
@@ -1341,6 +1373,9 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
         "stored": request.query_params.get("stored"),
         "erro": erro if erro is not None else request.query_params.get("erro"),
         "header_conflict": header_draft is not None,
+        "error_context": (error_context
+                          or request.query_params.get("erro_context")),
+        "focus": focus if focus is not None else request.query_params.get("focus"),
         "has_ocr": has_ocr, "view_mode": view_mode,
         "operator": cross.get("operator"),
         "header_cells": header_cells,
@@ -1520,6 +1555,7 @@ def sheet_reference(
 ):
     """Escolha explícita e autenticada de uma referência do snapshot atual."""
     conn = _conn()
+    saved = False
     try:
         sheet = db.get_sheet(conn, uid)
         if not sheet:
@@ -1614,12 +1650,39 @@ def sheet_reference(
         ):
             raise HTTPException(409, "A folha foi alterada; reabre Referências.")
         if audit:
-            run_cross_check(conn, uid, force_plan=True)
+            saved = True
+            if not run_cross_check(conn, uid, force_plan=True):
+                raise HTTPException(
+                    409,
+                    "A referência foi guardada, mas a folha mudou durante o cross.",
+                )
     except HTTPException as exc:
         if exc.status_code == 404 or exc.status_code >= 500:
             raise
         return RedirectResponse(
-            _sheet_location(uid, back, erro=exc.detail, focus="problem"),
+            _sheet_location(
+                uid, back, erro=exc.detail, focus="problem",
+                erro_context="edit",
+            ),
+            status_code=303,
+        )
+    except Exception as exc:
+        print(
+            f"[reference] folha {uid}, linha {row_index}: "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        traceback.print_exc()
+        message = (
+            "A referência foi guardada, mas não foi possível atualizar o cross. "
+            "A escolha ficou preservada."
+            if saved else
+            "Não foi possível guardar a referência; reabre o pop-up e tenta novamente."
+        )
+        return RedirectResponse(
+            _sheet_location(
+                uid, back, erro=message, focus="problem", erro_context="edit",
+            ),
             status_code=303,
         )
     finally:
@@ -1702,17 +1765,46 @@ def sheet_header(
                     erro="A folha foi alterada; confirma novamente os valores",
                 )
         # Um único ciclo do cross depois do commit integral do formulário.
-        run_cross_check(conn, uid)
+        try:
+            cross_saved = run_cross_check(conn, uid)
+        except Exception as exc:
+            print(
+                f"[header] folha {uid}: {type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            traceback.print_exc()
+            return RedirectResponse(
+                _sheet_location(
+                    uid, back,
+                    erro=("O cabeçalho foi guardado, mas não foi possível "
+                          "atualizar o cross. Os valores ficaram preservados."),
+                    focus="header-form", erro_context="edit",
+                ),
+                status_code=303,
+            )
+        if not cross_saved:
+            return RedirectResponse(
+                _sheet_location(
+                    uid, back,
+                    erro=("O cabeçalho foi guardado, mas a folha mudou durante "
+                          "o cross. Os valores ficaram preservados."),
+                    focus="header-form", erro_context="edit",
+                ),
+                status_code=303,
+            )
     finally:
         conn.close()
     return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
 @app.post("/sheet/{uid}/edit")
-def sheet_edit(uid: str, field_path: str = Form(...), value: str = Form(""),
+def sheet_edit(request: Request, uid: str, field_path: str = Form(...),
+               value: str = Form(""),
                revision: int = Form(...), actor: str = Form("operador"),
                back: str = Form("")):
     conn = _conn()
+    saved = False
+    focus = field_path
     try:
         sheet = db.get_sheet(conn, uid)
         if not sheet:
@@ -1732,6 +1824,7 @@ def sheet_edit(uid: str, field_path: str = Form(...), value: str = Form(""),
         audit_edits: list[tuple[str, object, object, str, str]] = []
         if m.group("idx") is not None:
             i = int(m.group("idx"))
+            focus = f"row-{i}"
             if i > _MAX_ROWS:
                 raise HTTPException(422, f"Linha {i} fora do limite ({_MAX_ROWS}).")
             if i < len(data["rows"]) and data["rows"][i].get("_deleted") is True:
@@ -1765,14 +1858,61 @@ def sheet_edit(uid: str, field_path: str = Form(...), value: str = Form(""),
         old_clean = str(old).strip() or None if old is not None else None
         if old_clean == value_clean:
             return RedirectResponse(_sheet_location(uid, back), status_code=303)
+        if sheet["revision"] != revision:
+            return _render_sheet(
+                request, sheet, back=back, status_code=409,
+                field_draft=(field_path, value_clean),
+                erro="A folha foi alterada; confirma novamente este valor.",
+                focus=focus, error_context="edit",
+            )
         # controlo otimista: a revisão vem do formulário — se a folha mudou
         # desde que a página foi carregada, recusa em vez de sobrescrever
         audit_edits.insert(0, (field_path, old, value_clean, "human", actor))
         if not db.save_sheet_data_with_edits(
             conn, uid, data, revision, audit_edits
         ):
-            raise HTTPException(409, "A folha mudou entretanto — recarrega a página.")
-        run_cross_check(conn, uid)
+            latest = db.get_sheet(conn, uid) or sheet
+            return _render_sheet(
+                request, latest, back=back, status_code=409,
+                field_draft=(field_path, value_clean),
+                erro="A folha foi alterada; confirma novamente este valor.",
+                focus=focus, error_context="edit",
+            )
+        saved = True
+        if not run_cross_check(conn, uid):
+            raise HTTPException(
+                409, "O valor foi guardado, mas a folha mudou durante o cross; "
+                "recarrega e confirma novamente."
+            )
+    except HTTPException as exc:
+        if not saved:
+            raise
+        return RedirectResponse(
+            _sheet_location(
+                uid, back, erro=exc.detail, focus=focus, erro_context="edit"
+            ),
+            status_code=303,
+        )
+    except Exception as exc:
+        print(
+            f"[edit] folha {uid}, campo {field_path}, guardado={saved}: "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        traceback.print_exc()
+        message = (
+            "O valor foi guardado, mas não foi possível atualizar o cross. "
+            "A edição ficou preservada; recarrega a folha."
+            if saved else
+            "Não foi possível guardar o valor. A folha foi preservada; "
+            "recarrega e tenta novamente."
+        )
+        return RedirectResponse(
+            _sheet_location(
+                uid, back, erro=message, focus=focus, erro_context="edit"
+            ),
+            status_code=303,
+        )
     finally:
         conn.close()
     return RedirectResponse(_sheet_location(uid, back), status_code=303)
@@ -1804,6 +1944,7 @@ def delete_row(uid: str, row_index: int, revision: int = Form(...),
                actor: str = Form("operador"), back: str = Form("")):
     """Retira uma linha sem destruir a transcrição/auditoria que lhe deu origem."""
     conn = _conn()
+    deleted = False
     try:
         try:
             sheet = db.get_sheet(conn, uid)
@@ -1829,12 +1970,38 @@ def delete_row(uid: str, row_index: int, revision: int = Form(...),
                 raise HTTPException(
                     409, "A folha foi alterada; confirma novamente os valores"
                 )
-            run_cross_check(conn, uid)
+            deleted = True
+            if not run_cross_check(conn, uid):
+                raise HTTPException(
+                    409, "A linha foi apagada, mas a folha mudou durante o cross."
+                )
         except HTTPException as exc:
             if exc.status_code == 404:
                 raise
             return RedirectResponse(
-                _sheet_location(uid, back, erro=exc.detail, focus=f"row-{row_index}"),
+                _sheet_location(
+                    uid, back, erro=exc.detail, focus=f"row-{row_index}",
+                    erro_context="edit",
+                ),
+                status_code=303,
+            )
+        except Exception as exc:
+            print(
+                f"[delete-row] folha {uid}, linha {row_index}: "
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            traceback.print_exc()
+            message = (
+                "A linha foi apagada, mas não foi possível atualizar o cross."
+                if deleted else
+                "Não foi possível apagar a linha; a folha ficou preservada."
+            )
+            return RedirectResponse(
+                _sheet_location(
+                    uid, back, erro=message, focus=f"row-{row_index}",
+                    erro_context="edit",
+                ),
                 status_code=303,
             )
     finally:
@@ -1845,13 +2012,42 @@ def delete_row(uid: str, row_index: int, revision: int = Form(...),
 @app.post("/sheet/{uid}/recheck")
 def recheck(uid: str, back: str = Form("")):
     conn = _conn()
+    cross_attempted = False
     try:
         sheet = db.get_sheet(conn, uid)
         if not sheet:
             raise HTTPException(404)
         if sheet["status"] == "validated":
             raise HTTPException(409, "Folha validada é imutável.")
-        run_cross_check(conn, uid)
+        cross_attempted = True
+        if not run_cross_check(conn, uid):
+            raise HTTPException(
+                409, "A folha mudou durante o cross; tenta novamente."
+            )
+    except HTTPException as exc:
+        if exc.status_code == 404 or not cross_attempted:
+            raise
+        return RedirectResponse(
+            _sheet_location(
+                uid, back, erro=exc.detail, erro_context="edit"
+            ),
+            status_code=303,
+        )
+    except Exception as exc:
+        print(
+            f"[recheck] folha {uid}: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        traceback.print_exc()
+        return RedirectResponse(
+            _sheet_location(
+                uid, back,
+                erro=("Não foi possível atualizar o cross. A folha e as "
+                      "edições ficaram preservadas."),
+                erro_context="edit",
+            ),
+            status_code=303,
+        )
     finally:
         conn.close()
     return RedirectResponse(_sheet_location(uid, back), status_code=303)
@@ -1870,6 +2066,7 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
     # registo interno fica «operador».
     actor = actor.strip() or "operador"
     conn = _conn()
+    focus: str | None = None
     try:
         before = db.get_sheet(conn, uid)
         if not before:
@@ -2004,6 +2201,20 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         except pg_store.InvalidSheetDate as exc:
             raise HTTPException(
                 422, f"Data «{exc}» não é interpretável — escreve dd/mm/aaaa.")
+        except pg_store.SheetNumberConflict as exc:
+            raise HTTPException(
+                409,
+                f"O número público {exc.sheet_no} está associado a outra folha "
+                "no histórico. A validação não foi gravada; atualiza a lista "
+                "e tenta novamente.",
+            )
+        except Exception:
+            traceback.print_exc()
+            raise HTTPException(
+                503,
+                "Não foi possível gravar a validação no histórico. Nenhuma "
+                "linha parcial foi aceite; tenta novamente.",
+            )
         if not db.mark_validated(
             conn, uid, actor, expected_revision=sheet["revision"]
         ):
@@ -2013,9 +2224,9 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
     except HTTPException as exc:
         # Os portões da validação (422/409) voltam à folha como banner: o
         # form navega para o POST, e a resposta JSON crua lê-se como crash.
-        # 404 e 5xx continuam a subir — aí não há folha para onde voltar, ou
-        # é um erro a sério e queremos o traceback.
-        if exc.status_code == 404 or exc.status_code >= 500:
+        # Só 404 sobe: todos os restantes portões voltam à folha. Os 5xx de
+        # escrita já foram registados no log antes de serem convertidos.
+        if exc.status_code == 404:
             raise
         focus = (
             "header.operador" if "operador" in str(exc.detail).lower()
@@ -2023,6 +2234,21 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         )
         return RedirectResponse(
             _sheet_location(uid, back, erro=exc.detail, focus=focus), status_code=303,
+        )
+    except Exception as exc:
+        print(
+            f"[validate] folha {uid}: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        traceback.print_exc()
+        return RedirectResponse(
+            _sheet_location(
+                uid, back,
+                erro=("Não foi possível concluir a validação. Nenhuma linha "
+                      "parcial foi aceite; tenta novamente."),
+                focus=focus,
+            ),
+            status_code=303,
         )
     finally:
         conn.close()
