@@ -60,7 +60,7 @@ def test_linha_totalmente_vazia_nao_herda_e_corta():
     ]
     ids = ident(rows)
     assert ids[1].values == {}
-    assert ids[2].values == {"modelo": "B"}, "o modelo novo abre a sequência seguinte"
+    assert ids[2].values == {}, "modelo é sempre próprio da linha, nunca identidade herdada"
 
 
 def test_campo_apagado_por_humano_nao_e_reposto():
@@ -84,7 +84,7 @@ def test_effective_row_nao_toca_no_original():
 def test_campos_transportados_sao_os_de_identidade_da_obra():
     # perfil incluído desde 19/08: escreve-se uma vez por bloco nas folhas
     # reais, e herdá-lo desempata linhas irmãs (caso AT1T515/AT2T515)
-    assert CARRY_FIELDS == ("of", "ov", "cliente", "perfil", "modelo")
+    assert CARRY_FIELDS == ("of", "ov", "cliente", "perfil")
 
 
 def test_perfil_herda_por_bloco_e_corta_com_perfil_novo():
@@ -154,10 +154,10 @@ def test_linha_so_de_aspas_nao_conta_como_conteudo():
     ]
     ids = ident(rows)
     assert ids[1].values == {}, "linha vazia — e corta o bloco como qualquer vazia"
-    assert ids[2].values == {"modelo": "B"}
+    assert ids[2].values == {}
 
 
-def test_modelo_herda_ate_outro_modelo_mesmo_com_of_e_perfil_novos():
+def test_modelo_e_quantidade_nunca_herdam():
     rows = [
         {"of": "263323", "perfil": "50x5", "modelo": "AT2T515", "qtd": "2"},
         {"qtd": "3"},
@@ -165,11 +165,10 @@ def test_modelo_herda_ate_outro_modelo_mesmo_com_of_e_perfil_novos():
         {"modelo": "NOVO", "qtd": "1"},
     ]
     ids = ident(rows)
-    assert ids[1].values["modelo"] == "AT2T515"
-    assert ids[2].values["modelo"] == "AT2T515"
-    assert ids[2].is_inherited("modelo")
-    assert ids[3].values["modelo"] == "NOVO"
-    assert not ids[3].is_inherited("modelo")
+    assert "modelo" not in ids[1].values
+    assert "modelo" not in ids[2].values
+    assert "modelo" not in ids[3].values
+    assert "qtd" not in ids[1].values
 
 
 def test_linha_eliminada_nao_fornece_nem_corta_a_heranca():
@@ -180,5 +179,20 @@ def test_linha_eliminada_nao_fornece_nem_corta_a_heranca():
     ]
     ids = ident(rows)
     assert ids[1].values == {}
-    assert ids[2].values["modelo"] == "A"
-    assert ids[2].inherited_from["modelo"] == 0
+    assert ids[2].values["of"] == "263323"
+    assert ids[2].inherited_from["of"] == 0
+
+
+def test_editar_origem_atualiza_dependentes_e_novo_valor_abre_bloco():
+    rows = [
+        {"of": "263323", "cliente": "MG GROUP ENERGY", "ov": "2508335",
+         "perfil": "100x12", "modelo": "ZE-242", "qtd": "4"},
+        {"perfil": "110x8", "modelo": "ZE-329", "qtd": "4"},
+        {"modelo": "ZE-330", "qtd": "4"},
+    ]
+    rows[0]["cliente"] = "MG GROUP ENERGY CORRIGIDO"
+    ids = ident(rows)
+    assert ids[1].values["cliente"] == "MG GROUP ENERGY CORRIGIDO"
+    assert ids[2].values["cliente"] == "MG GROUP ENERGY CORRIGIDO"
+    assert ids[1].values["perfil"] == "110x8"
+    assert ids[2].values["perfil"] == "110x8"

@@ -73,3 +73,26 @@ def test_linha_eliminada_nao_materializa_factos():
     facts = materialize_sheet(sheet, CANTONEIRAS_KANBAN)
     assert [fact["row_index"] for fact in facts["parents"]] == [0]
     assert [fact["row"]["modelo"] for fact in facts["exports"]] == ["OK"]
+
+
+def test_materializacao_usa_identidade_herdada_sem_herdar_modelo_ou_qtd():
+    sheet = {
+        "sheet_data": {"rows": [
+            {"of": "263323", "ov": "2508335", "cliente": "MG GROUP ENERGY",
+             "perfil": "100x12", "modelo": "ZE-242", "qtd": 4},
+            {"perfil": "110x8", "modelo": "ZE-329", "qtd": 2},
+            {"modelo": "ZE-330"},
+        ]},
+        "cross_check": {"rows": [
+            {"row_index": index, "cells": []} for index in range(3)
+        ]},
+    }
+    rows = [fact["row"] for fact in materialize_sheet(
+        sheet, CANTONEIRAS_KANBAN,
+    )["exports"]]
+    assert rows[2]["of"] == "263323"
+    assert rows[2]["ov"] == "2508335"
+    assert rows[2]["cliente"] == "MG GROUP ENERGY"
+    assert rows[2]["perfil"] == "110x8"
+    assert rows[2]["modelo"] == "ZE-330"
+    assert rows[2].get("qtd") is None

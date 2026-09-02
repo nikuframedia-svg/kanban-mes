@@ -1021,3 +1021,26 @@ input.cell-input.is-inherited::placeholder {
   padding: 1px 6px; font-size: 10px; line-height: 1.4;
   margin-top: 3px; border-color: var(--rule-2);
 }
+
+/* Lista do plano: a tabela aparece logo ao abrir. A barra não usa floats —
+   um input a 100% fazia o contentor seguinte colapsar para largura zero. */
+.plan-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 8px;
+}
+.sheet-modal .plan-filter {
+  width: min(320px, 100%); padding: 6px 9px;
+  font-size: 12px; font-family: var(--font-sans);
+}
+.plan-table-wrap {
+  width: 100%; min-width: 0; max-height: 52vh;
+  overflow: auto; border: 1px solid var(--rule); border-radius: 6px;
+}
+.plan-table-wrap .tbl { min-width: 760px; }
+.plan-table-wrap .tbl thead th {
+  position: sticky; top: 0; z-index: 1;
+}
+@media (max-width: 640px) {
+  .plan-toolbar { align-items: stretch; flex-direction: column; }
+  .sheet-modal .plan-filter { width: 100%; }
+}

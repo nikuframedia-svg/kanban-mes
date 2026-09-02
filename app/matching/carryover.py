@@ -17,12 +17,10 @@ from dataclasses import dataclass
 
 from . import similarity as sim
 
-# Campos que se transportam em bloco. A ordem importa para as regras abaixo:
-# a OF é a âncora, o resto acompanha-a. O perfil também se escreve uma vez por
-# bloco nas folhas reais («50x5» vale para as linhas seguintes) — herdá-lo é o
-# sinal que desempata linhas irmãs quando o modelo está ambíguo (o caso
-# AT1T515: o perfil do bloco distinguia AT2T515/50x5 de AT1T145/40x5).
-CARRY_FIELDS = ("of", "ov", "cliente", "perfil", "modelo")
+# Campos que se transportam em bloco. A OF é a âncora; cliente/OV costumam ser
+# escritos uma vez por obra e o perfil vale até aparecer outro perfil escrito.
+# Modelo e quantidade descrevem sempre uma linha concreta e nunca se herdam.
+CARRY_FIELDS = ("of", "ov", "cliente", "perfil")
 
 # Marcas de «idem» que os operadores usam em vez de deixar em branco: aspas
 # (nas várias grafias que o OCR devolve), vírgulas duplas (aspas rentes à
@@ -112,15 +110,9 @@ def resolve(rows: list[dict], content_fields: tuple[str, ...],
         if written["of"]:
             same_block = bool(block.get("of")) and sim.code_similarity(written["of"], block["of"]) >= 0.9
             if not same_block:
-                # A identidade da obra recomeça, mas o Modelo é uma sequência
-                # independente: por decisão operacional continua até aparecer
-                # outro Modelo ou uma linha totalmente vazia.
-                previous_model = block.get("modelo")
-                previous_model_source = block_source.get("modelo")
+                # Uma OF nova inicia uma nova obra e corta toda a identidade
+                # que vinha da obra anterior.
                 block, block_source = {}, {}
-                if previous_model:
-                    block["modelo"] = previous_model
-                    block_source["modelo"] = previous_model_source if previous_model_source is not None else i
 
         values: dict[str, str] = {}
         inherited: dict[str, int] = {}

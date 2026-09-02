@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from .matching import carryover
 from .matching import similarity as sim
 from .templates_spec import KanbanTemplate, field_value, is_marked
 
@@ -26,6 +27,11 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
     rows = data.get("rows") or []
     cross = sheet.get("cross_check") or {}
     cross_rows = {row.get("row_index"): row for row in cross.get("rows", [])}
+    content_fields = tuple(
+        field for field in template.row_fields
+        if field not in carryover.CARRY_FIELDS
+    )
+    identities = carryover.resolve(rows, content_fields, {})
     parents: list[dict] = []
     exports: list[dict] = []
     plan_refs: list[dict] = []
@@ -35,7 +41,8 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
                 or source_row.get("_deleted") is True
                 or not row_has_content(source_row)):
             continue
-        row = {key: value for key, value in source_row.items()
+        effective = carryover.effective_row(source_row, identities[row_index])
+        row = {key: value for key, value in effective.items()
                if not str(key).startswith("_")}
         row_cross = deepcopy(cross_rows.get(row_index) or {})
         full_profile = (

@@ -116,7 +116,13 @@ def _cell(field_name: str, written: object, *, proposal: str | None = None,
         reason=reason,
         message=message,
         sources=list(sources or ()),
-        auto_write=bool(auto_write and not protected),
+        # Uma proposta única é uma decisão resolvida pelo cruzamento, mesmo
+        # quando nasceu como ``review`` (por exemplo OCR O↔0 no operador).
+        # Só ambiguidades sem vencedor e edições humanas ficam por aplicar.
+        auto_write=bool(
+            (auto_write or (proposal is not None and status != "ambiguous"))
+            and not protected
+        ),
         human_protected=protected,
         candidates=list(candidates),
         actor=actor,

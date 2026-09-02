@@ -39,13 +39,14 @@
         referências da OF para poderes corrigir a linha.</span>
     </div>
   {% endif %}
-  <div class="muted tiny" style="margin-bottom:6px;">
-    {{ linhas | length }} referência(s){% if linhas | length >= 500 %} — a mostrar as primeiras 500{% endif %}.
-    <input type="text" class="kv-select" placeholder="filtrar…"
-           style="float:right; padding:3px 8px; font-size:12px;"
+  <div class="plan-toolbar">
+    <span class="muted tiny">{{ linhas | length }} referência(s).</span>
+    <input type="search" class="kv-select plan-filter"
+           placeholder="Filtrar a lista (opcional)…"
+           aria-label="Filtrar referências visíveis"
            oninput="filtrarPlano(this.value)">
   </div>
-  <div class="scroll-x" style="max-height:52vh; overflow-y:auto;">
+  <div class="plan-table-wrap">
     <table class="tbl" id="tabela-plano">
       <thead>
         <tr>

@@ -274,7 +274,7 @@ def plan_snapshot_info() -> dict:
     return info
 
 
-def fetch_profile_lines(of: str, perfil: str, limit: int = 500,
+def fetch_profile_lines(of: str, perfil: str, limit: int | None = None,
                         *, snapshot_id: str | None = None) -> list[dict]:
     """Todas as referências do plano para a chave OF + Perfil.
 
@@ -291,7 +291,7 @@ def fetch_profile_lines(of: str, perfil: str, limit: int = 500,
     return _fetch_canonical_lines(of, perfil, limit, snapshot_id=snapshot_id)
 
 
-def fetch_of_lines(of: str, limit: int = 500,
+def fetch_of_lines(of: str, limit: int | None = None,
                    *, snapshot_id: str | None = None) -> list[dict]:
     """Todas as referências da OF, mesmo com perfil vazio/incorreto."""
     if not of:
@@ -300,7 +300,7 @@ def fetch_of_lines(of: str, limit: int = 500,
 
 
 def _fetch_canonical_lines(of: str, perfil: str | None,
-                           limit: int, *, snapshot_id: str | None = None
+                           limit: int | None, *, snapshot_id: str | None = None
                            ) -> list[dict]:
     profile_sql = (
         "AND upper(btrim(profile_type)) = upper(btrim(%s))" if perfil else ""
@@ -312,12 +312,15 @@ def _fetch_canonical_lines(of: str, perfil: str | None,
         "WHERE source_app = 'kanban-mes' "
         "ORDER BY snapshot_loaded_at DESC, snapshot_id DESC LIMIT 1)"
     )
-    params: tuple = (
-        (snapshot_id, of, perfil, limit) if snapshot_id and perfil else
-        (snapshot_id, of, limit) if snapshot_id else
-        (of, perfil, limit) if perfil else
-        (of, limit)
-    )
+    params: list[object] = []
+    if snapshot_id:
+        params.append(snapshot_id)
+    params.append(of)
+    if perfil:
+        params.append(perfil)
+    limit_sql = "LIMIT %s" if limit is not None else ""
+    if limit is not None:
+        params.append(limit)
     return _fetch(
         f"""
         SELECT snapshot_id, plan_key, component_ref, profile_type AS perfil,
@@ -333,9 +336,9 @@ def _fetch_canonical_lines(of: str, perfil: str | None,
            {profile_sql}
          ORDER BY closed_x, remaining_quantity DESC NULLS LAST,
                   profile_type, component_ref, plan_key
-         LIMIT %s
+         {limit_sql}
         """,
-        params,
+        tuple(params),
     )
 
 

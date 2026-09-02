@@ -223,9 +223,8 @@ def test_header_cross_is_nested_and_renders_exact_labels(client):
     assert "header-field-operador cc-na" in r.text
 
 
-def test_header_cross_e_diagnostico_e_nunca_substitui_o_cabecalho(
+def test_header_cross_auto_substitui_propostas_unicas_e_fica_verde(
         client, monkeypatch):
-    """Mesmo propostas seguras esperam pelo formulário explícito."""
     from app.matching.operador import Employee
 
     monkeypatch.setattr(main, "get_employees", lambda: {
@@ -256,25 +255,29 @@ def test_header_cross_e_diagnostico_e_nunca_substitui_o_cabecalho(
     finally:
         conn.close()
 
-    assert sheet["sheet_data"]["header"] == raw["header"]
+    assert sheet["sheet_data"]["header"] == {
+        "operador": "GURPINDER SINGH", "n_operador": "3480",
+        "setor_maquina": "Ficep Rapid 20T -2",
+        "data": "17/08/2026", "turno": "M",
+    }
     header_cross = sheet["cross_check"]["header"]
     assert header_cross["source_document"]["filename"] == "18-08-2026.pdf"
     assert header_cross["source_document"]["page"] == 2
-    assert header_cross["cells"]["operador"]["status"] == "corrected"
-    assert header_cross["cells"]["operador"]["proposal"] == "GURPINDER SINGH"
-    assert header_cross["cells"]["data"]["applied"] is False
-    assert header_cross["cells"]["data"]["proposal"] == "17/08/2026"
+    assert header_cross["cells"]["operador"]["status"] == "confirmed"
+    assert header_cross["cells"]["operador"]["applied"] is True
+    assert header_cross["cells"]["data"]["applied"] is True
+    assert header_cross["cells"]["data"]["proposal"] is None
     assert header_cross["cells"]["data"]["reason"] == "assumed_prev_business_day"
-    assert header_cross["cells"]["setor_maquina"]["applied"] is False
-    assert header_cross["cells"]["setor_maquina"]["proposal"] == "Ficep Rapid 20T -2"
-    # precedência: a identidade aceite é a do resolve_operator
-    assert sheet["cross_check"]["operator"]["rule"] == "token"
+    assert header_cross["cells"]["setor_maquina"]["applied"] is True
+    assert header_cross["cells"]["setor_maquina"]["proposal"] is None
+    # Depois da canonicalização, a identidade final volta a cruzar como exata.
+    assert sheet["cross_check"]["operator"]["rule"] == "exact"
     assert sheet["cross_check"]["operator"]["pernr"] == "10003480"
 
     r = client.get(f"/sheet/{uid}")
-    assert "header-field-data cc-warn" in r.text
+    assert "header-field-data cc-match" in r.text
     assert "17/08/2026" in r.text
-    assert "substituído automaticamente" not in r.text
+    assert "substituído automaticamente" in r.text
     assert "18-08-2026.pdf" in r.text
     assert "não define a data da folha" in r.text
 
@@ -306,10 +309,10 @@ def test_plan_failure_does_not_block_header_cross(client, monkeypatch):
     import datetime as dt
     esperado = main.header_cross.previous_business_day(
         dt.datetime.now(dt.timezone.utc).date()).strftime("%d/%m/%Y")
-    assert sheet["sheet_data"]["header"]["data"] == "15-08-26"
-    assert sheet["sheet_data"]["header"]["turno"] == "m"
-    assert cross["header"]["cells"]["data"]["proposal"] == esperado
-    assert cross["header"]["cells"]["turno"]["proposal"] == "M"
+    assert sheet["sheet_data"]["header"]["data"] == esperado
+    assert sheet["sheet_data"]["header"]["turno"] == "M"
+    assert cross["header"]["cells"]["data"]["applied"] is True
+    assert cross["header"]["cells"]["turno"]["applied"] is True
     assert "Plano indisponível" in client.get(f"/sheet/{uid}").text
 
 
@@ -378,6 +381,7 @@ def test_recheck_preserva_valores_substituidos_no_payload_final(client):
 
 def test_edit_with_stale_revision_preserva_valor_para_confirmar(client):
     uid = create_sheet(client)
+    current_revision = get_revision(client, uid)
     r = client.post(f"/sheet/{uid}/edit", data={
         "field_path": "rows[0].of", "value": "OF250001",
         "revision": 999, "actor": "teste",
@@ -386,7 +390,7 @@ def test_edit_with_stale_revision_preserva_valor_para_confirmar(client):
     assert "Não foi possível guardar" in r.text
     assert "confirma novamente este valor" in r.text
     assert 'name="value"' in r.text and 'value="OF250001"' in r.text
-    assert 'name="revision" value="1"' in r.text
+    assert f'name="revision" value="{current_revision}"' in r.text
 
     # O primeiro POST não atropela a revisão nova. O formulário devolvido já
     # contém essa revisão e confirma o mesmo texto num segundo POST.
@@ -397,7 +401,7 @@ def test_edit_with_stale_revision_preserva_valor_para_confirmar(client):
         conn.close()
     assert client.post(f"/sheet/{uid}/edit", data={
         "field_path": "rows[0].of", "value": "OF250001",
-        "revision": 1, "actor": "teste",
+        "revision": current_revision, "actor": "teste",
     }).status_code == 303
 
 
@@ -477,7 +481,6 @@ def test_header_form_guarda_tudo_uma_vez_e_preserva_draft_no_conflito(
     assert 'value="Rascunho Preservado"' in conflict.text
     assert 'value="T"' in conflict.text
     assert "const headerConflict = true" in conflict.text
-    assert "let conflictPending = true" in conflict.text
 
 
 def test_header_fica_guardado_quando_o_cross_lanca_excecao(
@@ -515,7 +518,8 @@ def test_validar_guarda_o_cabecalho_visivel_sem_exigir_guardar_primeiro(
     uid = create_sheet(client)
     revision = get_revision(client, uid)
     page = client.get(f"/sheet/{uid}")
-    assert "Ao validar, estas alterações também serão guardadas." in page.text
+    assert "Guardar cabeçalho" not in page.text
+    assert 'name="header_operador" form="validate-form"' in page.text
     assert "validate.disabled" not in page.text
 
     response = client.post(f"/sheet/{uid}/validate", data={
@@ -1059,6 +1063,9 @@ def test_plano_popup_totais_so_quando_vem_do_perf_comp(client, monkeypatch):
     r = client.get(f"/sheet/{uid}/plano/0", params={"origem": "perf_comp"})
     assert r.status_code == 200
     assert "QS120" in r.text
+    assert 'class="plan-table-wrap"' in r.text
+    assert 'id="tabela-plano"' in r.text
+    assert "Filtrar a lista (opcional)" in r.text
     assert "Totais" in r.text
     assert "por fazer neste perfil" in r.text, "falta agregada (40) devia gerar aviso"
 
@@ -1067,6 +1074,21 @@ def test_plano_popup_totais_so_quando_vem_do_perf_comp(client, monkeypatch):
     assert "QS120" in r2.text
     assert "Totais" not in r2.text
     assert "por fazer neste perfil" not in r2.text
+
+
+def test_consulta_do_popup_nao_limita_as_referencias(monkeypatch):
+    seen = {}
+
+    def fake_fetch(sql, params=()):
+        seen.update(sql=sql, params=params)
+        return [{"component_ref": f"REF-{i}"} for i in range(501)]
+
+    monkeypatch.setattr(main.loaders, "_fetch", fake_fetch)
+    rows = main.loaders.fetch_profile_lines(
+        "OF250001", "50 x 5", snapshot_id="snap-all",
+    )
+    assert len(rows) == 501
+    assert "LIMIT" not in seen["sql"].upper()
 
 
 def test_perf_comp_marcado_mostra_seta_para_o_popup(client):

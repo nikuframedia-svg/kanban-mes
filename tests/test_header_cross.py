@@ -58,7 +58,7 @@ def test_operador_so_e_auto_substituido_com_identidade_inequivoca():
     assert result["cells"]["n_operador"]["auto_write"] is False
 
 
-def test_numero_de_operador_corrigido_e_apenas_proposta():
+def test_numero_de_operador_com_proposta_unica_e_auto_escrito():
     # «348O» é a leitura O↔0 real: identidade provável, número por confirmar.
     result = _check(
         _header(operador="Gurpinder", n_operador="348O"), employees=EMPLOYEES,
@@ -67,10 +67,10 @@ def test_numero_de_operador_corrigido_e_apenas_proposta():
     assert result["operator"]["candidate_pernr"] == "10003480"
     for field_name in ("operador", "n_operador"):
         assert result["cells"][field_name]["status"] == "review"
-        assert result["cells"][field_name]["auto_write"] is False
+        assert result["cells"][field_name]["auto_write"] is True
 
 
-def test_sugestao_de_operador_nunca_e_aceite_nem_auto_escrita():
+def test_sugestao_unica_de_operador_e_auto_escrita():
     for name, number in (("FLAVIO LOPES", "3480"), ("GURPINDER SINGH", "3481")):
         result = _check(
             _header(operador=name, n_operador=number), employees=EMPLOYEES,
@@ -79,7 +79,7 @@ def test_sugestao_de_operador_nunca_e_aceite_nem_auto_escrita():
         assert result["operator"]["pernr"] is None
         assert result["operator"]["candidate_pernr"] == "10003480"
         assert all(
-            not result["cells"][field]["auto_write"]
+            result["cells"][field]["auto_write"]
             for field in ("operador", "n_operador")
         )
 
@@ -181,7 +181,7 @@ def test_maquina_alias_catalogo_e_plano_so_escrevem_quando_provam_o_valor():
     )["cells"]["setor_maquina"]
     assert plan_only["status"] == "review"
     assert plan_only["proposal"] == "Ficep XP T4"
-    assert plan_only["auto_write"] is False
+    assert plan_only["auto_write"] is True
 
     multiple = _check(
         _header(), machines=CATALOG,

@@ -285,13 +285,7 @@ setTimeout(function () {
           </span>
         </div>
         {% endif %}
-        {% if not readonly %}
-        <form method="post" action="/sheet/{{ sheet.uid }}/header" id="header-form">
-          <input type="hidden" name="revision" value="{{ sheet.revision }}">
-          <input type="hidden" name="back" value="{{ back_url }}">
-          <input type="hidden" name="actor" value="operador">
-        {% endif %}
-        <div class="header-grid" id="header-fields">
+        <div class="header-grid" id="header-form">
           {% for f in t.header_fields %}
           {% set hc = header_cells.get(f) if (header_cells and not is_raw) else none %}
           {% set state_class = {'confirmed': 'cc-match',
@@ -306,7 +300,8 @@ setTimeout(function () {
               <div class="header-value">{{ header.get(f) or '' }}</div>
               {{ snap_mark('header.' ~ f) }}
             {% else %}
-              <input type="text" class="cell-input header-input" name="{{ f }}"
+              <input type="text" class="cell-input header-input"
+                     name="header_{{ f }}" form="validate-form"
                      value="{{ header.get(f) or '' }}"
                      {% if f == 'data' %}autocomplete="off"{% endif %}>
               {{ snap_mark('header.' ~ f) }}
@@ -354,15 +349,6 @@ setTimeout(function () {
           </div>
           {% endfor %}
         </div>
-        {% if not readonly %}
-          <div class="header-savebar">
-            <span class="muted tiny" id="header-dirty-message" hidden>
-              Ao validar, estas alterações também serão guardadas.
-            </span>
-            <button type="submit" class="btn primary">Guardar cabeçalho</button>
-          </div>
-        </form>
-        {% endif %}
       </div>
     </div>
 
@@ -544,13 +530,9 @@ setTimeout(function () {
           {% endif %}
           <form method="post" action="/sheet/{{ sheet.uid }}/validate" id="validate-form"
                 style="display:flex; gap:8px; align-items:center; margin-left:auto;"
-                onsubmit="syncHeaderIntoValidation(); return confirm('Validar a folha? Depois de validada fica imutável.')">
+                onsubmit="return confirm('Validar a folha? Depois de validada fica imutável.')">
             <input type="hidden" name="back" value="{{ back_url }}">
             <input type="hidden" name="revision" value="{{ sheet.revision }}">
-            {% for field in t.header_fields %}
-            <input type="hidden" name="header_{{ field }}"
-                   value="{{ header.get(field) or '' }}" data-header-copy="{{ field }}">
-            {% endfor %}
             <button type="submit" class="btn primary" id="validate-button">Validar folha</button>
           </form>
         </div>
@@ -616,45 +598,13 @@ function acceptProposal(link) {
   return false;
 }
 
-function syncHeaderIntoValidation() {
-  const headerForm = document.getElementById('header-form');
-  const validateForm = document.getElementById('validate-form');
-  if (!headerForm || !validateForm) return;
-  validateForm.querySelectorAll('[data-header-copy]').forEach(copy => {
-    const source = headerForm.elements[copy.dataset.headerCopy];
-    if (source) copy.value = source.value;
-  });
-}
-
-(function guardUnsavedHeader() {
-  const form = document.getElementById('header-form');
-  if (!form) return;
-  const initial = new FormData(form);
-  const initialValues = {};
-  for (const [key, value] of initial.entries()) {
-    if (!['revision', 'back', 'actor'].includes(key)) initialValues[key] = value;
-  }
-  const message = document.getElementById('header-dirty-message');
-  let conflictPending = {{ header_conflict | tojson }};
-  function refresh() {
-    const current = new FormData(form);
-    const dirty = conflictPending || Object.keys(initialValues).some(
-      key => String(current.get(key) || '') !== String(initialValues[key] || '')
-    );
-    if (message) message.hidden = !dirty;
-  }
-  form.addEventListener('input', refresh);
-  form.addEventListener('change', refresh);
-  refresh();
-})();
-
 (function focusValidationProblem() {
   const focus = {{ (focus or '') | tojson }};
   const headerConflict = {{ header_conflict | tojson }};
   if (!focus && !headerConflict) return;
   let input = null;
   if (focus.startsWith('header.')) {
-    input = document.querySelector('#header-form [name="' + focus.slice(7) + '"]');
+    input = document.querySelector('#header-form [name="header_' + focus.slice(7) + '"]');
   }
   if (!input && headerConflict) {
     input = document.querySelector('#header-form .header-input');

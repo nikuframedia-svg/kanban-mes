@@ -432,12 +432,45 @@ def run_cross_check(conn, uid: str, *, force_plan: bool = False) -> bool:
             assumed_date=assumed_date,
         )
 
-    header_result = check_current_header()
-
-    # Cabeçalho é só diagnóstico/proposta. Mesmo um valor confirmado sem
-    # alteração (logo sem audit no POST /header) não pode ser revertido por um
-    # cross posterior: o formulário explícito é a única porta de escrita.
     edits: list[tuple[str, object, object, str]] = []
+
+    # Materializar propostas únicas do cabeçalho até estabilizar. A última
+    # passagem descreve o valor final, por isso a UI mostra a célula verde; o
+    # primeiro valor OCR continua preservado no trilho old→new.
+    header_originals: dict[str, object] = {}
+    header_actors: dict[str, str] = {}
+    applied_header_fields: set[str] = set()
+    for _header_iteration in range(8):
+        header_result = check_current_header()
+        header_changed = False
+        for field_name, cell in header_result["cells"].items():
+            proposal = cell.get("proposal")
+            if not cell.get("auto_write") or proposal is None:
+                continue
+            old = header.get(field_name)
+            new = str(proposal).strip() or None
+            if (str(old or "").strip() or None) == new:
+                continue
+            header_originals.setdefault(field_name, old)
+            header_actors[field_name] = cell.get("actor") or "cross:header"
+            header[field_name] = new
+            applied_header_fields.add(field_name)
+            header_changed = True
+        if not header_changed:
+            break
+    else:
+        raise RuntimeError("Cross do cabeçalho não estabilizou")
+
+    for field_name in applied_header_fields:
+        edits.append((
+            f"header.{field_name}", header_originals[field_name],
+            header.get(field_name), header_actors[field_name],
+        ))
+        cell = header_result["cells"][field_name]
+        cell["applied"] = True
+        cell["message"] = (
+            "Substituído automaticamente. " + cell.get("message", "")
+        ).strip()
 
     # Fixed point: materializar pode mudar o melhor candidato. Repetimos o
     # cálculo sobre os valores finais até estabilizar, mantendo um único old→new
@@ -496,10 +529,9 @@ def run_cross_check(conn, uid: str, *, force_plan: bool = False) -> bool:
         "source_document": header_result["source_document"],
     }
     cross["plan_reference"] = plan_reference
-    if operator_match:
-        # Precedência: a identidade aceite continua a ser a do resolve_operator
-        # — as células do cabeçalho descrevem-na, não a substituem.
-        cross["operator"] = operator_match
+    final_operator = header_result.get("operator") or operator_match
+    if final_operator:
+        cross["operator"] = final_operator
 
     # Não apagar a proveniência numa revalidação sobre valores já canónicos.
     # O payload final conserva o primeiro valor substituído e o último valor
