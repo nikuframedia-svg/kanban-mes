@@ -1,0 +1,33 @@
+{
+  "uid": "8bfd9466f652",
+  "source": "frozen_original_transcription",
+  "plan_entries": 73772,
+  "snapshot_id": "mtg_6e0be54dfd0de6fc",
+  "platform": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39",
+  "python": "3.12.3",
+  "code_fingerprint": "d0f3c88a09f3ffda651f87c6374aa7d050e619ee0b99af8ef4a028f33c0a67dc",
+  "measurements": {
+    "legacy": {
+      "cold_seconds": 1.8508986681699753,
+      "warm_seconds": [
+        1.762144312262535,
+        1.7462170030921698,
+        1.7306303698569536
+      ],
+      "warm_median_seconds": 1.7462170030921698
+    },
+    "v3": {
+      "cold_seconds": 7.859613483771682,
+      "warm_seconds": [
+        1.881361024454236,
+        1.8698950484395027,
+        1.8726075999438763
+      ],
+      "warm_median_seconds": 1.8726075999438763
+    }
+  },
+  "warm_ratio": 1.072379662222906,
+  "maximum_ratio": 1.5,
+  "passed": true,
+  "scope": "single cross pass for each engine, same original rows/parameters/machine; excludes PostgreSQL I/O and history loading"
+}

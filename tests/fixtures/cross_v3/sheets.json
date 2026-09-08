@@ -1,0 +1,924 @@
+[
+  {
+    "created_at": "2026-08-07T13:50:00+00:00",
+    "evaluation_split": "development_documents",
+    "extracted_at": "2026-08-07T13:50:20+00:00",
+    "image_sha256": "65fc46ccc29829877ec4296a2b1dbd4c33638fab1f14ea0feab92adf43354db5",
+    "independent_human_edits": [],
+    "raw_extraction": {
+      "footer": {
+        "horas_trabalhadas": "7.5",
+        "metros_produzidos": "288"
+      },
+      "header": {
+        "data": "6/08",
+        "n_operador": "1659",
+        "operador": "Fabio",
+        "setor_maquina": "Rapid 20T - 1",
+        "turno": "R"
+      },
+      "rows": [
+        {
+          "cliente": "Tonnet",
+          "comp_mm": "x",
+          "modelo": null,
+          "of": "263323",
+          "ov": "2504650",
+          "perfil": "100 x 50 x 6",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "comp_mm": "x",
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perfil": "60 x 5",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "comp_mm": null,
+          "modelo": "AT 1 T 115",
+          "of": null,
+          "ov": null,
+          "perfil": "60 x 6",
+          "qtd": "1"
+        },
+        {
+          "cliente": null,
+          "comp_mm": null,
+          "modelo": "AT 1 T 116",
+          "of": null,
+          "ov": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "comp_mm": null,
+          "modelo": "AT 1 T 162",
+          "of": null,
+          "ov": null,
+          "perfil": null,
+          "qtd": "1"
+        },
+        {
+          "cliente": null,
+          "comp_mm": null,
+          "modelo": "AT 1 T 163",
+          "of": null,
+          "ov": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "comp_mm": null,
+          "modelo": "AT 2 T 566",
+          "of": null,
+          "ov": null,
+          "perfil": null,
+          "qtd": "1"
+        },
+        {
+          "cliente": null,
+          "comp_mm": null,
+          "modelo": "AT 2 T 567",
+          "of": null,
+          "ov": null,
+          "perfil": null,
+          "qtd": "2"
+        }
+      ]
+    },
+    "source_filename": "65fc46ccc2982987_06-08-2026 - Rapid20T 1_p1.png",
+    "template_name": "cantoneiras_kanban",
+    "uid": "c0b51c37d989"
+  },
+  {
+    "created_at": "2026-09-05T06:19:21+00:00",
+    "evaluation_split": "development_documents",
+    "extracted_at": "2026-09-05T06:52:01+00:00",
+    "image_sha256": "cac11f0e09a0d90cedf1a7c4619f1a269a532425ebfa621b41e0bd9bb2ed1266",
+    "independent_human_edits": [],
+    "raw_extraction": {
+      "footer": {
+        "horas_trabalhadas": "7,30",
+        "metros_produzidos": "648"
+      },
+      "header": {
+        "data": "2-9-2026",
+        "n_operador": "4183",
+        "operador": "RIPO DAMAN SHARMA",
+        "setor_maquina": "Ficep XP T4",
+        "turno": null
+      },
+      "rows": [
+        {
+          "cliente": "METALES",
+          "modelo": null,
+          "of": null,
+          "ov": "2606517",
+          "perf_comp": null,
+          "perfil": "55X4",
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8F33",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8F32",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8F9",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8F10",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8F7",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8F8",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8F17",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8F18",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": "265574",
+          "ov": null,
+          "perf_comp": null,
+          "perfil": "50X4",
+          "qtd": "6"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8C130",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "6"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8T43",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "1"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8C131",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "6"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8T42",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "1"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8C132",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8C134",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "D8F12",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        }
+      ]
+    },
+    "source_filename": "cac11f0e09a0d90c_02-09-2026_p9.png",
+    "template_name": "cantoneiras_kanban",
+    "uid": "8bfd9466f652"
+  },
+  {
+    "created_at": "2026-09-05T06:19:21+00:00",
+    "evaluation_split": "development_documents",
+    "extracted_at": "2026-09-05T06:54:42+00:00",
+    "image_sha256": "c404275607ae22b4206b013deb50e89fecd7e29ba1d21ff0fc248656c5de923a",
+    "independent_human_edits": [],
+    "raw_extraction": {
+      "footer": {
+        "horas_trabalhadas": "7,5",
+        "metros_produzidos": "304"
+      },
+      "header": {
+        "data": "02 / 09 / 2020",
+        "n_operador": "2592",
+        "operador": "Davinder K",
+        "setor_maquina": "Ficep XP T6",
+        "turno": "M"
+      },
+      "rows": [
+        {
+          "cliente": "METALSEC",
+          "modelo": null,
+          "of": null,
+          "ov": "2606517",
+          "perf_comp": "x",
+          "perfil": "L60x4",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "x",
+          "perfil": "L60x5",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "x",
+          "perfil": "L70x6",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": "L40x3",
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "1"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "8"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "1"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        }
+      ]
+    },
+    "source_filename": "c404275607ae22b4_02-09-2026_p17.png",
+    "template_name": "cantoneiras_kanban",
+    "uid": "8ec5f79856a1"
+  },
+  {
+    "created_at": "2026-08-26T13:46:41+00:00",
+    "evaluation_split": "diagnostic_2026_08_20",
+    "extracted_at": "2026-08-26T14:18:05+00:00",
+    "image_sha256": "ee31c20b1d41635ef2c9a2047a57e811cca215503547785449b44434e607478f",
+    "independent_human_edits": [],
+    "raw_extraction": {
+      "footer": {
+        "horas_trabalhadas": "6.5H",
+        "metros_produzidos": "436"
+      },
+      "header": {
+        "data": "20.08.2026",
+        "n_operador": "4048",
+        "operador": "TAIMOOR",
+        "setor_maquina": "Ficep XP T4",
+        "turno": null
+      },
+      "rows": [
+        {
+          "cliente": "METALSEC",
+          "modelo": null,
+          "of": "265300",
+          "ov": null,
+          "perf_comp": null,
+          "perfil": "L40x3",
+          "qtd": "02"
+        },
+        {
+          "cliente": null,
+          "modelo": "A6RF93",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "02"
+        },
+        {
+          "cliente": null,
+          "modelo": "A6RF90",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "04"
+        },
+        {
+          "cliente": null,
+          "modelo": "A6RF9",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "08"
+        },
+        {
+          "cliente": null,
+          "modelo": "A6RF89",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "04"
+        },
+        {
+          "cliente": null,
+          "modelo": "A6RF88",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "04"
+        },
+        {
+          "cliente": null,
+          "modelo": "A6RF87",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "04"
+        },
+        {
+          "cliente": null,
+          "modelo": "A6RF86",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "08"
+        },
+        {
+          "cliente": null,
+          "modelo": "A6RF8",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "08"
+        },
+        {
+          "cliente": null,
+          "modelo": "A6RF7",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "08"
+        },
+        {
+          "cliente": null,
+          "modelo": "A6RF190",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "04"
+        }
+      ]
+    },
+    "source_filename": "ee31c20b1d41635e_20-08-2026_p17.png",
+    "template_name": "cantoneiras_kanban",
+    "uid": "095aec277844"
+  },
+  {
+    "created_at": "2026-08-26T13:46:41+00:00",
+    "evaluation_split": "diagnostic_2026_08_20",
+    "extracted_at": "2026-08-26T14:19:02+00:00",
+    "image_sha256": "8d42e4d081efa114be3aa0464eac73306cc36ffdd9968c526e4316f999e16209",
+    "independent_human_edits": [],
+    "raw_extraction": {
+      "footer": {
+        "horas_trabalhadas": "7.5h",
+        "metros_produzidos": "394"
+      },
+      "header": {
+        "data": "20 / 08 / 2026",
+        "n_operador": "3567",
+        "operador": "PARGAT SINGH",
+        "setor_maquina": "Ficep XP T6",
+        "turno": null
+      },
+      "rows": [
+        {
+          "cliente": "METALSEC",
+          "modelo": null,
+          "of": null,
+          "ov": "2606517",
+          "perf_comp": null,
+          "perfil": "100x100x7",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": "65x65x5",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": "2606517",
+          "perf_comp": null,
+          "perfil": "70x70x6",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": "80x80x6",
+          "qtd": null
+        }
+      ]
+    },
+    "source_filename": "8d42e4d081efa114_20-08-2026_p21.png",
+    "template_name": "cantoneiras_kanban",
+    "uid": "1799668b06d7"
+  },
+  {
+    "created_at": "2026-08-31T12:18:02+00:00",
+    "evaluation_split": "held_out_2026_08_27",
+    "extracted_at": "2026-08-31T12:40:13+00:00",
+    "image_sha256": "72f2765d829e3c1a4240889686d3226adacf55e10dd8d5478b45a6e65b880e91",
+    "independent_human_edits": [],
+    "raw_extraction": {
+      "footer": {
+        "horas_trabalhadas": "11",
+        "metros_produzidos": "516"
+      },
+      "header": {
+        "data": "27/08/2026",
+        "n_operador": "3480",
+        "operador": "Gurpinder Singh",
+        "setor_maquina": "Rapid 20T - 1",
+        "turno": "M"
+      },
+      "rows": [
+        {
+          "cliente": "MGROUP",
+          "modelo": null,
+          "of": "265362",
+          "ov": "2508335",
+          "perf_comp": "X",
+          "perfil": "75X6",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "X",
+          "perfil": "200X20",
+          "qtd": null
+        },
+        {
+          "cliente": "FALTAS",
+          "modelo": "H92 HS 121 DT",
+          "of": "265715",
+          "ov": "2509448",
+          "perf_comp": null,
+          "perfil": "60X6",
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "H92 HS 121 GT",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": "H92 HS 125 DT",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "1"
+        },
+        {
+          "cliente": null,
+          "modelo": "H92 HS 125 GT",
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "1"
+        },
+        {
+          "cliente": "RTE",
+          "modelo": null,
+          "of": "264786",
+          "ov": "2512019",
+          "perf_comp": "X",
+          "perfil": "60X6",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "X",
+          "perfil": "60X5",
+          "qtd": null
+        },
+        {
+          "cliente": "FALTAS",
+          "modelo": null,
+          "of": "264324",
+          "ov": "2401300",
+          "perf_comp": "X",
+          "perfil": "55X5",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "X",
+          "perfil": "65X5",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "X",
+          "perfil": "90X7",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "X",
+          "perfil": "50X4",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "X",
+          "perfil": "45X4",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "X",
+          "perfil": "60X4",
+          "qtd": null
+        },
+        {
+          "cliente": "FALTAS",
+          "modelo": null,
+          "of": null,
+          "ov": "263771",
+          "perf_comp": "X",
+          "perfil": "50X3",
+          "qtd": null
+        }
+      ]
+    },
+    "source_filename": "72f2765d829e3c1a_27-08-2026_p16.png",
+    "template_name": "cantoneiras_kanban",
+    "uid": "02e4058ad2f9"
+  },
+  {
+    "created_at": "2026-08-31T12:18:02+00:00",
+    "evaluation_split": "held_out_2026_08_27",
+    "extracted_at": "2026-08-31T12:42:21+00:00",
+    "image_sha256": "4a77454ea1e3d04de79f0a3f07bdbc5c2a54974ab9fc8f819930c38240f301ff",
+    "independent_human_edits": [],
+    "raw_extraction": {
+      "footer": {
+        "horas_trabalhadas": "11:30",
+        "metros_produzidos": "438"
+      },
+      "header": {
+        "data": "27/8/26",
+        "n_operador": "3204",
+        "operador": "RAHUL JASWAL",
+        "setor_maquina": "Rapid 25",
+        "turno": "M"
+      },
+      "rows": [
+        {
+          "cliente": "METALOGALVA",
+          "modelo": null,
+          "of": null,
+          "ov": "2504650",
+          "perf_comp": null,
+          "perfil": "110x10",
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": null,
+          "qtd": "2"
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "x",
+          "perfil": "100x10",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "x",
+          "perfil": "60x6",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "x",
+          "perfil": "100x8",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "x",
+          "perfil": "90x7",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "x",
+          "perfil": "60x8",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": "x",
+          "perfil": "65x7",
+          "qtd": null
+        },
+        {
+          "cliente": null,
+          "modelo": null,
+          "of": null,
+          "ov": null,
+          "perf_comp": null,
+          "perfil": "80x8",
+          "qtd": "1"
+        },
+        {
+          "cliente": "TECPOLES",
+          "modelo": null,
+          "of": null,
+          "ov": "2601327",
+          "perf_comp": null,
+          "perfil": "90x7",
+          "qtd": "26"
+        }
+      ]
+    },
+    "source_filename": "4a77454ea1e3d04d_27-08-2026_p23.png",
+    "template_name": "cantoneiras_kanban",
+    "uid": "0b5cb0b66c71"
+  }
+]

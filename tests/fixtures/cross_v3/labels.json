@@ -1,0 +1,880 @@
+{
+  "applicable": [
+    {
+      "row_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "uid": "c0b51c37d989"
+    },
+    {
+      "row_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "uid": "8bfd9466f652"
+    },
+    {
+      "row_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "row_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "uid": "095aec277844"
+    },
+    {
+      "row_indices": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "uid": "1799668b06d7"
+    },
+    {
+      "row_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "row_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "uid": "0b5cb0b66c71"
+    }
+  ],
+  "method": "Visual inspection of original photographs, never sheet_data or matcher outputs. Blank identity cells continue the written physical block. Raw rows retain OCR segmentation; duplicated fragments point at the same physical row. Ambiguous model glyphs are unlabelled.",
+  "notes": {
+    "02e4058ad2f9": "Last row contains 263771 in the OV column; ambiguous order role is not labelled as an OF. The visible profile remains evaluable.",
+    "095aec277844": "OCR emitted 11 rows for 10 physical rows, splitting the first row.",
+    "0b5cb0b66c71": "The original OCR omitted both written OFs and all model codes; those are independently labelled from the photograph.",
+    "1799668b06d7": "Four physical full-profile marks and written OFs are absent from original OCR. Labels record the photo; observations remain unchanged.",
+    "8bfd9466f652": "OCR emitted 17 rows for 15 physical rows, splitting header identity from first model in two profile blocks.",
+    "8ec5f79856a1": "Model column omitted by OCR; ambiguous 5/S handwritten model glyphs are not used as exact model labels."
+  },
+  "rows": [
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "263323",
+      "perfil": "L100X50X6",
+      "physical_row_index": 0,
+      "row_index": 0,
+      "uid": "c0b51c37d989"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "263323",
+      "perfil": "L60X60X5",
+      "physical_row_index": 1,
+      "row_index": 1,
+      "uid": "c0b51c37d989"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "AT1T115",
+      "of": "263323",
+      "perfil": "L60X60X6",
+      "physical_row_index": 2,
+      "row_index": 2,
+      "uid": "c0b51c37d989"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "AT1T116",
+      "of": "263323",
+      "perfil": "L60X60X6",
+      "physical_row_index": 3,
+      "row_index": 3,
+      "uid": "c0b51c37d989"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "AT1T162",
+      "of": "263323",
+      "perfil": "L60X60X6",
+      "physical_row_index": 4,
+      "row_index": 4,
+      "uid": "c0b51c37d989"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "AT1T163",
+      "of": "263323",
+      "perfil": "L60X60X6",
+      "physical_row_index": 5,
+      "row_index": 5,
+      "uid": "c0b51c37d989"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "AT2T566",
+      "of": "263323",
+      "perfil": "L60X60X6",
+      "physical_row_index": 6,
+      "row_index": 6,
+      "uid": "c0b51c37d989"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "AT2T567",
+      "of": "263323",
+      "perfil": "L60X60X6",
+      "physical_row_index": 7,
+      "row_index": 7,
+      "uid": "c0b51c37d989"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8F33",
+      "of": "265574",
+      "perfil": "L55X55X4",
+      "physical_row_index": 0,
+      "row_index": 0,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8F33",
+      "of": "265574",
+      "perfil": "L55X55X4",
+      "physical_row_index": 0,
+      "row_index": 1,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8F32",
+      "of": "265574",
+      "perfil": "L55X55X4",
+      "physical_row_index": 1,
+      "row_index": 2,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8F9",
+      "of": "265574",
+      "perfil": "L55X55X4",
+      "physical_row_index": 2,
+      "row_index": 3,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8F10",
+      "of": "265574",
+      "perfil": "L55X55X4",
+      "physical_row_index": 3,
+      "row_index": 4,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8F7",
+      "of": "265574",
+      "perfil": "L55X55X4",
+      "physical_row_index": 4,
+      "row_index": 5,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8F8",
+      "of": "265574",
+      "perfil": "L55X55X4",
+      "physical_row_index": 5,
+      "row_index": 6,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8F17",
+      "of": "265574",
+      "perfil": "L55X55X4",
+      "physical_row_index": 6,
+      "row_index": 7,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8F18",
+      "of": "265574",
+      "perfil": "L55X55X4",
+      "physical_row_index": 7,
+      "row_index": 8,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8C130",
+      "of": "265574",
+      "perfil": "L50X50X4",
+      "physical_row_index": 8,
+      "row_index": 9,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8C130",
+      "of": "265574",
+      "perfil": "L50X50X4",
+      "physical_row_index": 8,
+      "row_index": 10,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8T43",
+      "of": "265574",
+      "perfil": "L50X50X4",
+      "physical_row_index": 9,
+      "row_index": 11,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8C131",
+      "of": "265574",
+      "perfil": "L50X50X4",
+      "physical_row_index": 10,
+      "row_index": 12,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8T42",
+      "of": "265574",
+      "perfil": "L50X50X4",
+      "physical_row_index": 11,
+      "row_index": 13,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8C132",
+      "of": "265574",
+      "perfil": "L50X50X4",
+      "physical_row_index": 12,
+      "row_index": 14,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8C134",
+      "of": "265574",
+      "perfil": "L50X50X4",
+      "physical_row_index": 13,
+      "row_index": 15,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "D8F12",
+      "of": "265574",
+      "perfil": "L50X50X4",
+      "physical_row_index": 14,
+      "row_index": 16,
+      "uid": "8bfd9466f652"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L60X60X4",
+      "physical_row_index": 0,
+      "row_index": 0,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L60X60X5",
+      "physical_row_index": 1,
+      "row_index": 1,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L70X70X6",
+      "physical_row_index": 2,
+      "row_index": 2,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 3,
+      "row_index": 3,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 4,
+      "row_index": 4,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 5,
+      "row_index": 5,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 6,
+      "row_index": 6,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 7,
+      "row_index": 7,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 8,
+      "row_index": 8,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 9,
+      "row_index": 9,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 10,
+      "row_index": 10,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 11,
+      "row_index": 11,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 12,
+      "row_index": 12,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 13,
+      "row_index": 13,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265575",
+      "perfil": "L40X40X3",
+      "physical_row_index": 14,
+      "row_index": 14,
+      "uid": "8ec5f79856a1"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF93",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 0,
+      "row_index": 0,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF93",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 0,
+      "row_index": 1,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF90",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 1,
+      "row_index": 2,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF9",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 2,
+      "row_index": 3,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF89",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 3,
+      "row_index": 4,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF88",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 4,
+      "row_index": 5,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF87",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 5,
+      "row_index": 6,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF86",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 6,
+      "row_index": 7,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF8",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 7,
+      "row_index": 8,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF7",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 8,
+      "row_index": 9,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A6RF190",
+      "of": "265300",
+      "perfil": "L40X40X3",
+      "physical_row_index": 9,
+      "row_index": 10,
+      "uid": "095aec277844"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265301",
+      "perfil": "L100X100X7",
+      "physical_row_index": 0,
+      "row_index": 0,
+      "uid": "1799668b06d7"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265301",
+      "perfil": "L65X65X5",
+      "physical_row_index": 1,
+      "row_index": 1,
+      "uid": "1799668b06d7"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265350",
+      "perfil": "L70X70X6",
+      "physical_row_index": 2,
+      "row_index": 2,
+      "uid": "1799668b06d7"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265350",
+      "perfil": "L80X80X6",
+      "physical_row_index": 3,
+      "row_index": 3,
+      "uid": "1799668b06d7"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265362",
+      "perfil": "L75X75X6",
+      "physical_row_index": 0,
+      "row_index": 0,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "265362",
+      "perfil": "L200X200X20",
+      "physical_row_index": 1,
+      "row_index": 1,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "H92HS121DT",
+      "of": "265715",
+      "perfil": "L60X60X6",
+      "physical_row_index": 2,
+      "row_index": 2,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "H92HS121GT",
+      "of": "265715",
+      "perfil": "L60X60X6",
+      "physical_row_index": 3,
+      "row_index": 3,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "H92HS125DT",
+      "of": "265715",
+      "perfil": "L60X60X6",
+      "physical_row_index": 4,
+      "row_index": 4,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "H92HS125GT",
+      "of": "265715",
+      "perfil": "L60X60X6",
+      "physical_row_index": 5,
+      "row_index": 5,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264786",
+      "perfil": "L60X60X6",
+      "physical_row_index": 6,
+      "row_index": 6,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264786",
+      "perfil": "L60X60X5",
+      "physical_row_index": 7,
+      "row_index": 7,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264324",
+      "perfil": "L55X55X5",
+      "physical_row_index": 8,
+      "row_index": 8,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264324",
+      "perfil": "L65X65X5",
+      "physical_row_index": 9,
+      "row_index": 9,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264324",
+      "perfil": "L90X90X7",
+      "physical_row_index": 10,
+      "row_index": 10,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264324",
+      "perfil": "L50X50X4",
+      "physical_row_index": 11,
+      "row_index": 11,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264324",
+      "perfil": "L45X45X4",
+      "physical_row_index": 12,
+      "row_index": 12,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264324",
+      "perfil": "L60X60X4",
+      "physical_row_index": 13,
+      "row_index": 13,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": null,
+      "perfil": "L50X50X3",
+      "physical_row_index": 14,
+      "row_index": 14,
+      "uid": "02e4058ad2f9"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A31S413",
+      "of": "264154",
+      "perfil": "L110X110X10",
+      "physical_row_index": 0,
+      "row_index": 0,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A31S414",
+      "of": "264154",
+      "perfil": "L110X110X10",
+      "physical_row_index": 1,
+      "row_index": 1,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A31S507",
+      "of": "264154",
+      "perfil": "L110X110X10",
+      "physical_row_index": 2,
+      "row_index": 2,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A31S508",
+      "of": "264154",
+      "perfil": "L110X110X10",
+      "physical_row_index": 3,
+      "row_index": 3,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A31S509",
+      "of": "264154",
+      "perfil": "L110X110X10",
+      "physical_row_index": 4,
+      "row_index": 4,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264154",
+      "perfil": "L100X100X10",
+      "physical_row_index": 5,
+      "row_index": 5,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264154",
+      "perfil": "L60X60X6",
+      "physical_row_index": 6,
+      "row_index": 6,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264154",
+      "perfil": "L100X100X8",
+      "physical_row_index": 7,
+      "row_index": 7,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264154",
+      "perfil": "L90X90X7",
+      "physical_row_index": 8,
+      "row_index": 8,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264154",
+      "perfil": "L60X60X8",
+      "physical_row_index": 9,
+      "row_index": 9,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": null,
+      "of": "264154",
+      "perfil": "L65X65X7",
+      "physical_row_index": 10,
+      "row_index": 10,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "A31S524",
+      "of": "264154",
+      "perfil": "L80X80X8",
+      "physical_row_index": 11,
+      "row_index": 11,
+      "uid": "0b5cb0b66c71"
+    },
+    {
+      "label_source": "independent_visual_source_photo",
+      "modelo": "EA8FP24",
+      "of": "264529",
+      "perfil": "L90X90X7",
+      "physical_row_index": 12,
+      "row_index": 12,
+      "uid": "0b5cb0b66c71"
+    }
+  ]
+}

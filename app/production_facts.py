@@ -26,6 +26,7 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
     data = sheet.get("sheet_data") or {}
     rows = data.get("rows") or []
     cross = sheet.get("cross_check") or {}
+    is_v3 = cross.get("engine") == "cross-v3"
     cross_rows = {row.get("row_index"): row for row in cross.get("rows", [])}
     content_fields = tuple(
         field for field in template.row_fields
@@ -41,7 +42,9 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
                 or source_row.get("_deleted") is True
                 or not row_has_content(source_row)):
             continue
-        effective = carryover.effective_row(source_row, identities[row_index])
+        if is_v3 and cross_rows.get(row_index, {}).get("row_kind") in {"activity", "empty", "deleted"}:
+            continue
+        effective = source_row if is_v3 else carryover.effective_row(source_row, identities[row_index])
         row = {key: value for key, value in effective.items()
                if not str(key).startswith("_")}
         row_cross = deepcopy(cross_rows.get(row_index) or {})

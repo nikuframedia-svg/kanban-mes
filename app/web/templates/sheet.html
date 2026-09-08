@@ -443,9 +443,32 @@ setTimeout(function () {
                   {% if cr %}
                     {% if cr.mode == 'strong' %}<span class="pill ok">certeza alta</span>
                     {% elif cr.mode == 'weak_guess' %}<span class="pill warn">incerta</span>
+                    {% elif cr.mode == 'activity' %}<span class="pill neutral">atividade</span>
+                    {% elif cr.mode == 'empty' %}<span class="pill neutral">vazia</span>
+                    {% elif cr.mode == 'explicit' %}<span class="pill info">seleção explícita</span>
                     {% elif cr.mode == 'no_match' %}<span class="pill crit">fora do plano</span>
                     {% else %}<span class="pill neutral">{{ cr.mode }}</span>{% endif %}
-                    <div class="proposal">P = {{ '%.0f' | format(cr.p_correct * 100) }}%{% if cr.matched_plan_key and not is_marked(field_value(row, 'perf_comp')) %} · {{ cr.matched_plan_key }}{% endif %}</div>
+                    <div class="proposal">Estimativa = {{ '%.0f' | format(cr.p_correct * 100) }}%{% if cr.matched_plan_key and not is_marked(field_value(row, 'perf_comp')) %} · {{ cr.matched_plan_key }}{% endif %}</div>
+                    {% if cr.get('substituted') %}<div><span class="pill warn">Substituído</span></div>{% endif %}
+                    {% if cr.get('low_evidence') %}<div><span class="pill warn">Pouca evidência</span></div>{% endif %}
+                    {% if cr.get('engine') or cr.get('evidence_source') %}
+                    <details class="tiny" style="margin-top:6px;">
+                      <summary>Origem e alternativas</summary>
+                      {% for field, change in (cr.get('replaced_values') or {}).items() %}
+                        <div>{{ (t.field_labels or {}).get(field, field) }}:
+                          {{ change.before or 'vazio' }} → {{ change.after or 'vazio' }}
+                          · {{ 'edição humana' if change.get('source') == 'human' else 'OCR original' }}</div>
+                      {% endfor %}
+                      {% for alternative in cr.get('alternatives') or [] %}
+                        <div>OF {{ alternative.of }} · {{ alternative.perfil }} · {{ alternative.modelo }}
+                          · estimativa {{ '%.0f' | format(alternative.confidence_reference * 100) }}%</div>
+                      {% endfor %}
+                      {% if cr.get('historical_context') %}
+                        <div>Desempate: planeamento de {{ cr.historical_context.loaded_at[:10] }}
+                          {% if cr.historical_context.approximate_future %}· aproximação posterior à folha{% endif %}</div>
+                      {% endif %}
+                    </details>
+                    {% endif %}
                   {% else %}
                     <span class="pill neutral">—</span>
                   {% endif %}

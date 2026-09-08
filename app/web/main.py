@@ -36,6 +36,7 @@ from fastapi.templating import Jinja2Templates
 
 from .. import db, imaging, pg_store, production_facts
 from ..config import settings
+from ..health import STARTUP_HEALTH
 from ..matching import carryover, header_cross, loaders, operador
 from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
@@ -80,6 +81,11 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title="Kanban MES", lifespan=_lifespan)
 app.mount("/static", NoCacheStaticFiles(directory=str(_STATIC_DIR)), name="static")
+@app.get("/health")
+def health():
+    return dict(STARTUP_HEALTH)
+
+
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["css_version"] = hashlib.sha1(
     (_STATIC_DIR / "design.css").read_bytes()
@@ -246,6 +252,12 @@ def make_scorer(template_name: str) -> Scorer:
     return Scorer(index, CrossParams.load(), active_primary=active)
 
 
+def make_fresh_scorer(template_name: str) -> Scorer:
+    template = get_template(template_name)
+    index = getattr(loaders, template.index_loader)()
+    return Scorer(index, CrossParams.load())
+
+
 _header_machine_cache: tuple[float, list] | None = None
 
 
@@ -355,7 +367,177 @@ def resolve_operator(conn, uid: str, sheet: dict) -> dict | None:
     ))
 
 
-def run_cross_check(conn, uid: str, *, force_plan: bool = False) -> bool:
+_HISTORY_AUTO = object()
+
+
+def run_cross_check(conn, uid: str, *, force_plan: bool = False, scorer_override: Scorer | None = None,
+                    engine_override: str | None = None,
+                    historical_context_override=_HISTORY_AUTO) -> bool:
+    engine = engine_override or settings.cross_engine
+    sheet = db.get_sheet(conn, uid)
+    if not sheet or not sheet.get("sheet_data") or sheet["status"] in {"pending", "validated"}:
+        return False
+    if engine == "v3" and sheet["template_name"] == "cantoneiras_kanban":
+        if force_plan and scorer_override is None:
+            scorer_override = make_fresh_scorer(sheet["template_name"])
+
+        return _run_cross_check_v3(
+            conn, uid, scorer_override=scorer_override,
+            historical_context_override=historical_context_override,
+        )
+    if engine not in {"legacy", "v3"}:
+        raise ValueError(f"Motor cross desconhecido: {engine}")
+    return _run_cross_check_legacy(conn, uid, force_plan=force_plan)
+
+
+def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
+                         historical_context_override=_HISTORY_AUTO) -> bool:
+    from ..matching.evidence import IDENTITY_FIELDS, build_evidence
+    from ..matching.history import load_history_context
+    from ..matching.v3 import check_sheet_v3
+
+    base = db.get_sheet(conn, uid)
+    if not base or not base.get("sheet_data") or base["status"] == "validated":
+        return False
+    template = get_template(base["template_name"])
+    evidence = build_evidence(base, db.evidence_edits(conn, base))
+    data = copy.deepcopy(base["sheet_data"])
+    rows = data.get("rows") or []
+    observed_header = evidence.data.get("header") or {}
+    source_document = _source_document(base)
+    assumed_date = _assumed_sheet_date(base)
+    scorer = None
+    plan_reference = {"status": "not_applicable"}
+    if template.index_loader:
+        try:
+            scorer = scorer_override or Scorer(get_index(template.index_loader), CrossParams.load())
+            if not scorer.index.entries:
+                scorer = None
+        except Exception:
+            scorer = None
+        plan_reference = (
+            {"status": "available", "snapshot_id": scorer.index.snapshot_id}
+            if scorer else {"status": "no_reference", "message": "Plano indisponível; dados conservados."}
+        )
+    history = None
+    if scorer is not None:
+        if historical_context_override is _HISTORY_AUTO:
+            sheet_date = observed_header.get("data") or assumed_date
+            history = load_history_context(scorer.index, sheet_date)
+        else:
+            history = historical_context_override
+        cross = check_sheet_v3(
+            evidence.data, scorer.params, index=scorer.index,
+            historical_context=history, explicit_bindings=evidence.explicit_bindings,
+            provenance=evidence.provenance,
+        )
+    else:
+        if template.index_loader:
+            from ..matching.refs import PlanIndex
+            cross = check_sheet_v3(evidence.data, index=PlanIndex([], loaders.CANTONEIRAS_SPEC))
+        else:
+            cross = {"rows": [], "summary": {}, "review_order": []}
+    cross.update({
+        "version": "cross-v3", "engine_version": "cross-v3",
+        "evidence_fingerprint": evidence.provenance["fingerprint"],
+        "provenance": evidence.provenance,
+        "snapshot_id": scorer.index.snapshot_id if scorer else None,
+        "plan_reference": plan_reference,
+        "historical_context": history.to_dict() if history is not None else {"status": "unavailable"},
+    })
+    edits = []
+
+    def apply_value(path, container, key, new, actor):
+        old = container.get(key)
+        # Identity projection uses the exact canonical candidate, including
+        # empty values. Production values are never routed through here.
+        if old != new:
+            container[key] = new
+            edits.append((path, old, new, actor))
+
+    sources = evidence.provenance["field_sources"]
+    for rc in cross.get("rows", []):
+        i = rc["row_index"]
+        if i >= len(rows):
+            continue
+        rc["selected_snapshot_id"] = cross["snapshot_id"]
+        rc["replaced_values"] = {}
+        if scorer is not None and rc.get("mode") in {"activity", "empty"}:
+            # Undo an old engine's identity fill on non-production rows.
+            # These observations have no eligible plan identity to project.
+            for key in IDENTITY_FIELDS:
+                observed = evidence.data["rows"][i].get(key)
+                apply_value(f"rows[{i}].{key}", rows[i], key, observed, "cross:v3:observation")
+        if is_marked(field_value(rows[i], "perf_comp")) or rc.get("binding_status") in {"stale", "reselected"}:
+            if "_plan_binding" in rows[i]:
+                old = rows[i].pop("_plan_binding")
+                edits.append((f"rows[{i}]._plan_binding", old, None, "cross:v3"))
+        for cell in rc.get("cells", []):
+            key = cell["field"]
+            if key not in IDENTITY_FIELDS or not cell.get("auto_write"):
+                continue
+            path = f"rows[{i}].{key}"
+            new = cell.get("proposal")
+            before = (evidence.data.get("rows") or [])[i].get(key)
+            apply_value(path, rows[i], key, new, "cross:v3")
+            if before != new:
+                cell["applied"] = True
+                cell["message"] = "Substituído automaticamente. " + cell.get("message", "")
+                rc["replaced_values"][key] = {
+                    "before": before, "after": new, **sources.get(path, {"source": "raw_extraction"}),
+                }
+            # Result metadata describes the observation and the applied
+            # choice; it is not recomputed from the materialized values.
+            cell["auto_write"] = False
+
+    employees = None
+    if any(str(observed_header.get(key) or "").strip() for key in ("operador", "n_operador")):
+        try:
+            employees = get_employees()
+        except Exception:
+            pass
+    plan_machines = _plan_header_machines(cross, scorer)
+    machines = _load_header_machines() if (
+        observed_header.get("setor_maquina") or plan_machines or header_cross.template_machine(template)
+    ) else []
+    human_header = {
+        path.split(".", 1)[1] for path, source in sources.items()
+        if path.startswith("header.") and source["source"] == "human"
+    }
+    header_result = header_cross.check_header(
+        observed_header, template, human_fields=human_header, employees=employees,
+        machines=machines, plan_machines=plan_machines, source_document=source_document,
+        assumed_date=assumed_date,
+    )
+    header = data.setdefault("header", {})
+    for key, cell in header_result["cells"].items():
+        if cell.get("auto_write") and cell.get("proposal") is not None:
+            new = str(cell["proposal"])
+            apply_value(f"header.{key}", header, key, new, cell.get("actor") or "cross:header")
+            cell["applied"] = observed_header.get(key) != new
+            cell["auto_write"] = False
+    # Header dependency is downstream only; it never reopens row inference.
+    final_header = header_cross.check_header(
+        header, template, human_fields=human_header, employees=employees,
+        machines=machines, plan_machines=plan_machines, source_document=source_document,
+        assumed_date=assumed_date,
+    )
+    for key, cell in final_header["cells"].items():
+        observed_cell = header_result["cells"].get(key) or {}
+        if observed_cell.get("applied"):
+            cell["applied"] = True
+            cell["message"] = "Substituído automaticamente. " + cell.get("message", "")
+        cell["observed_written"] = observed_header.get(key)
+    cross["header"] = {"cells": final_header["cells"], "source_document": final_header["source_document"]}
+    cross["operator"] = final_header["operator"]
+    expected = base["revision"]
+    cross["data_revision"] = cross["materialized_revision"] = expected + bool(edits)
+    if edits:
+        return db.apply_cross_corrections(conn, uid, data, cross, expected, edits)
+    return db.save_cross_check(conn, uid, cross, expected_revision=expected)
+
+
+def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False) -> bool:
     sheet = db.get_sheet(conn, uid)
     if not sheet or not sheet["sheet_data"]:
         return False
@@ -1375,6 +1557,10 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     if field_draft is not None:
         sheet = _with_field_draft(sheet, *field_draft)
     template = get_template(sheet["template_name"])
+    stored_cross = sheet.get("cross_check") or {}
+    if (sheet["status"] != "validated" and stored_cross.get("engine") == "cross-v3"
+            and stored_cross.get("data_revision") != sheet["revision"]):
+        sheet = {**sheet, "cross_check": None}
     raw = sheet.get("raw_extraction") or {}
     raw_rows = [r for r in (raw.get("rows") or []) if isinstance(r, dict)]
     has_ocr = bool(sheet.get("image_path")) and any(
@@ -1683,7 +1869,8 @@ def sheet_reference(
             raise HTTPException(409, "A folha foi alterada; reabre Referências.")
         if audit:
             saved = True
-            if not run_cross_check(conn, uid, force_plan=True):
+            if not run_cross_check(conn, uid, force_plan=True,
+                                   scorer_override=Scorer(index, CrossParams.load()) if settings.cross_engine == "v3" else None):
                 raise HTTPException(
                     409,
                     "A referência foi guardada, mas a folha mudou durante o cross.",
@@ -2177,7 +2364,7 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                 raise HTTPException(
                     409, "A folha mudou durante o cross-check; tenta novamente."
                 )
-            if cross.get("fixed_point") is False:
+            if cross.get("engine") != "cross-v3" and cross.get("fixed_point") is False:
                 raise HTTPException(
                     422, "O cross-check não estabilizou; revê a identidade das linhas."
                 )
@@ -2196,6 +2383,8 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                 ):
                     continue
                 row_cross = cross_rows.get(row_index) or {}
+                if cross.get("engine") == "cross-v3" and row_cross.get("row_kind") in {"empty", "activity"}:
+                    continue
                 if row_cross.get("binding_stale"):
                     raise HTTPException(
                         422,

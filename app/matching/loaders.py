@@ -257,11 +257,9 @@ _CANTONEIRAS_SNAPSHOT = (
 def plan_snapshot_info() -> dict:
     """Identidade e idade do plano de cantoneiras em uso."""
     rows = _fetch(
-        "SELECT snapshot_id, max(snapshot_loaded_at) AS loaded_at, "
-        "max(source_filename) AS source_filename "
-        "FROM analytics_mtg.kanban_plan_lines "
-        "WHERE source_app = 'kanban-mes' GROUP BY snapshot_id "
-        "ORDER BY loaded_at DESC, snapshot_id DESC LIMIT 1"
+        "SELECT snapshot_id, loaded_at, source_filename FROM audit_mtg.snapshots "
+        "WHERE snapshot_id LIKE %s ORDER BY loaded_at DESC, snapshot_id DESC LIMIT 1",
+        (_CANTONEIRAS_LIKE,),
     )
     if not rows:
         return {}
