@@ -65,7 +65,8 @@ class PlanIndex:
         for f in spec.identity_fields:
             # O lado do plano já vem canónico (L45X45X4); é o lado escrito que
             # precisa de ser trazido para esta forma — ver normalize_written.
-            norm_fn = sim.normalize_code if f.kind == "code" else sim.compact
+            norm_fn = (sim.normalize_code if f.kind == "code" else
+                       sim.normalize_profile if f.kind == "profile" else sim.compact)
             values = [norm_fn(e.get(f.entry_key)) for e in entries]
             self._norm[f.name] = values
             self._freq[f.name] = Counter(v for v in values if v)

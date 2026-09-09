@@ -117,7 +117,7 @@ def load_cantoneiras_index(snapshot_id: str | None = None) -> PlanIndex:
         SELECT snapshot_id, snapshot_loaded_at, plan_key,
                production_order_no AS of, sales_order_no AS ov,
                customer_name AS cliente, customer_name AS cliente_nome,
-               component_ref AS modelo, profile_type AS perfil,
+               component_ref AS modelo, profile_type AS perfil, material_description,
                length_mm AS comp_mm, quantity_planned AS qtd_planeada,
                quantity_made AS qtd_feita,
                remaining_quantity AS qtd_restante,

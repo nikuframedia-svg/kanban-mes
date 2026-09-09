@@ -146,7 +146,7 @@ async def _attach_watermark(request: Request, call_next):
     if path.startswith("/static/") or path.endswith("/photo"):
         return await call_next(request)
     watermark = 0
-    if request.method == "GET":
+    if request.method == "GET" and path in {"/", "/estado"}:
         try:
             conn = _conn()
             try:
@@ -387,7 +387,7 @@ def run_cross_check(conn, uid: str, *, force_plan: bool = False, scorer_override
         )
     if engine not in {"legacy", "v3"}:
         raise ValueError(f"Motor cross desconhecido: {engine}")
-    return _run_cross_check_legacy(conn, uid, force_plan=force_plan)
+    return _run_cross_check_legacy(conn, uid, force_plan=force_plan, scorer_override=scorer_override)
 
 
 def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
@@ -537,7 +537,7 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
     return db.save_cross_check(conn, uid, cross, expected_revision=expected)
 
 
-def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False) -> bool:
+def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_override: Scorer | None = None) -> bool:
     sheet = db.get_sheet(conn, uid)
     if not sheet or not sheet["sheet_data"]:
         return False
@@ -566,7 +566,7 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False) -> bool
             if force_plan:
                 with _index_lock:
                     _index_cache.pop(template.index_loader, None)
-            scorer = make_scorer(base["template_name"])
+            scorer = scorer_override or make_scorer(base["template_name"])
             plan_reference = {"status": "available"}
         except Exception:
             # O plano é uma fonte independente. Uma indisponibilidade não pode
@@ -1255,161 +1255,45 @@ def sheet_csv(uid: str):
     })
 
 
-@app.get("/export/cpis")
-def export_cpis(de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
-    """A tabela plana da Metalogalva 2 («MigracaoNikufraCPIS_….xlsx»).
-
-    Fonte: o staging local (todas as folhas de produção com data) — funciona
-    com o Postgres em baixo e cobre também o que ainda está em revisão;
-    `?validadas=1` restringe ao que já foi validado. Filtros `de`/`ate` em
-    ISO (aaaa-mm-dd) e `operador` por nome.
-    """
-    conn = _conn()
+def _export_response(request: Request, kind: str, de="", ate="", operador="", validadas=0):
+    from . import export_routes, export_source
     try:
-        sheets = db.list_sheets(conn, status="validated" if validadas else None)
-        cpis_rows: list[dict] = []
-        for meta in sheets:
-            if "paragens" in meta["template_name"]:
-                continue
-            sheet = db.get_sheet(conn, meta["uid"])
-            if not sheet or not sheet.get("sheet_data"):
-                continue
-            header = sheet["sheet_data"].get("header") or {}
-            if operador and str(header.get("operador") or "").strip() != operador:
-                continue
-            try:
-                iso = pg_store.normalize_sheet_date(header.get("data"))
-            except pg_store.InvalidSheetDate:
-                iso = None
-            if de and (not iso or iso < de):
-                continue
-            if ate and (not iso or iso > ate):
-                continue
-            cross = sheet.get("cross_check") or {}
-            op = cross.get("operator")
-            template = get_template(sheet["template_name"])
-            for fact in production_facts.materialize_sheet(sheet, template)["exports"]:
-                i, row, row_cross = fact["row_index"], fact["row"], fact["cross"]
-                cpis_rows.append(
-                    (iso or "9999", str(header.get("operador") or ""),
-                     meta.get("sheet_no") or meta["uid"], i,
-                     str(fact.get("plan_key") or ""),
-                     cpis_export.cpis_row_for(sheet, row, row_cross, op)))
-    finally:
-        conn.close()
-    # ordenação do original: data, operador, folha, linha
-    cpis_rows.sort(key=lambda t: t[:5])
-    content = cpis_export.build_cpis_workbook([t[5] for t in cpis_rows])
-    filename = cpis_export.cpis_filename_for(de or None, ate or None, bool(validadas))
-    return Response(
-        content,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+        sheets = export_routes.export_sheets(_conn, de, ate, operador,
+                                             drafts=kind == "cpis" and not validadas)
+        if kind == "technical":
+            content = export_routes.technical_workbook(sheets)
+            filename = "producao_mes.xlsx"
+        else:
+            content = export_routes.workbook(kind, sheets)
+            filename = (cpis_export.basedados_filename_for(de or None, ate or None)
+                        if kind == "basedados" else cpis_export.cpis_filename_for(de or None, ate or None, bool(validadas)))
+    except export_source.IncompleteExport as exc:
+        return templates.TemplateResponse(request, "export_error.html",
+            {"message": str(exc), "problems": exc.problems}, status_code=422)
+    except pg_store.InvalidSheetDate:
+        return templates.TemplateResponse(request, "export_error.html",
+            {"message": "O período indicado não tem datas válidas.", "problems": []}, status_code=422)
+    except Exception:
+        traceback.print_exc()
+        return templates.TemplateResponse(request, "export_error.html",
+            {"message": "Não foi possível ler o histórico validado. Tenta exportar novamente.", "problems": []}, status_code=503)
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.get("/export/cpis")
+def export_cpis(request: Request, de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
+    return _export_response(request, "cpis", de, ate, operador, validadas)
 
 
 @app.get("/export/basedados")
-def export_basedados(de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
-    """A tabela plana no formato Modelo_BaseDados_PerfisCantoneiras.xlsx
-    (11 colunas), comum aos dois setores kanban. Filtros de período/operador
-    como no CPIS, mas SÓ folhas validadas: a BaseDados é o registo oficial e
-    uma folha por rever ainda pode mudar. O query param `validadas` continua a
-    ser aceite (links/bookmarks antigos), mas é ignorado."""
-    del validadas
-    conn = _conn()
-    try:
-        sheets = db.list_sheets(conn, status="validated")
-        bd_rows: list[tuple] = []
-        for meta in sheets:
-            if "paragens" in meta["template_name"]:
-                continue
-            sheet = db.get_sheet(conn, meta["uid"])
-            if not sheet or not sheet.get("sheet_data"):
-                continue
-            header = sheet["sheet_data"].get("header") or {}
-            if operador and str(header.get("operador") or "").strip() != operador:
-                continue
-            try:
-                iso = pg_store.normalize_sheet_date(header.get("data"))
-            except pg_store.InvalidSheetDate:
-                iso = None
-            if de and (not iso or iso < de):
-                continue
-            if ate and (not iso or iso > ate):
-                continue
-            cross = sheet.get("cross_check") or {}
-            op = cross.get("operator")
-            template = get_template(sheet["template_name"])
-            for fact in production_facts.materialize_sheet(sheet, template)["exports"]:
-                i, row, row_cross = fact["row_index"], fact["row"], fact["cross"]
-                bd_rows.append(
-                    (iso or "9999", str(header.get("operador") or ""),
-                     meta.get("sheet_no") or meta["uid"], i,
-                     str(fact.get("plan_key") or ""),
-                     cpis_export.basedados_row_for(sheet, row, row_cross, op)))
-    finally:
-        conn.close()
-    bd_rows.sort(key=lambda t: t[:5])
-    content = cpis_export.build_basedados_workbook([t[5] for t in bd_rows])
-    filename = cpis_export.basedados_filename_for(de or None, ate or None)
-    return Response(
-        content,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+def export_basedados(request: Request, de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
+    return _export_response(request, "basedados", de, ate, operador, 1)
 
 
 @app.get("/export.xlsx")
-def export_xlsx():
-    """Todas as linhas de produção validadas (Postgres) num Excel."""
-    import openpyxl
-    import psycopg
-
-    try:
-        with psycopg.connect(pg_store._dsn(), connect_timeout=5) as pconn:
-            pconn.read_only = True
-            with pconn.cursor() as cur:
-                cur.execute(
-                    "WITH facts AS ("
-                    " SELECT s.source_app, s.sheet_no, p.sheet_uid, p.row_index, "
-                    " p.sheet_date, p.family, p.operator_name, p.machine, "
-                    " p.production_order, p.sales_order, p.customer_name, p.model_ref, "
-                    " p.matched_plan_key, p.match_confidence, p.quantity, p.length_mm, "
-                    " p.width_mm, p.thickness_mm, p.hours_worked, p.plan_snapshot_id, "
-                    " p.validated_at "
-                    " FROM mes_kanban.production_records p "
-                    " JOIN mes_kanban.validated_sheets s ON s.sheet_uid = p.sheet_uid "
-                    " WHERE NOT EXISTS (SELECT 1 FROM mes_kanban.production_record_plan_refs r "
-                    "                   WHERE r.production_record_id = p.id) "
-                    " UNION ALL "
-                    " SELECT s.source_app, s.sheet_no, p.sheet_uid, p.row_index, "
-                    " p.sheet_date, p.family, p.operator_name, p.machine, "
-                    " p.production_order, p.sales_order, p.customer_name, r.component_ref, "
-                    " r.plan_key, p.match_confidence, r.assumed_quantity, r.length_mm, "
-                    " p.width_mm, p.thickness_mm, p.hours_worked, r.plan_snapshot_id, "
-                    " p.validated_at "
-                    " FROM mes_kanban.production_record_plan_refs r "
-                    " JOIN mes_kanban.production_records p ON p.id = r.production_record_id "
-                    " JOIN mes_kanban.validated_sheets s ON s.sheet_uid = p.sheet_uid "
-                    " WHERE r.assumed_quantity > 0"
-                    ") SELECT * FROM facts "
-                    "ORDER BY sheet_date DESC, source_app, sheet_no, row_index, model_ref")
-                cols = [d.name for d in cur.description]
-                rows = cur.fetchall()
-    except Exception as exc:
-        raise HTTPException(503, f"Postgres indisponível: {exc}")
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "producao"
-    ws.append(cols)
-    for r in rows:
-        ws.append([str(v) if v is not None and not isinstance(v, (int, float)) else v
-                   for v in r])
-    buf = io.BytesIO()
-    wb.save(buf)
-    return Response(buf.getvalue(),
-                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": 'attachment; filename="producao_mes.xlsx"'})
+def export_xlsx(request: Request):
+    return _export_response(request, "technical", validadas=1)
 
 
 def _safe_back(back: str | None) -> str | None:
@@ -1420,6 +1304,13 @@ def _safe_back(back: str | None) -> str | None:
             or "\\" in back or any(ord(ch) < 32 for ch in back)):
         return None
     return back
+
+
+def _safe_history_back(back: str | None) -> str | None:
+    safe = _safe_back(back)
+    if not safe or urlsplit(safe).path != "/":
+        return None
+    return safe
 
 
 def _sheet_location(uid: str, back: str | None = None, **query: object) -> str:
@@ -1573,7 +1464,7 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     cross_rows = {}
     if view_mode == "final" and sheet["cross_check"]:
         cross_rows = {
-            r["row_index"]: {**r, "cells_by_field": {c["field"]: c for c in r["cells"]}}
+            r["row_index"]: {**r, "cells_by_field": {c["field"]: c for c in r.get("cells", [])}}
             for r in sheet["cross_check"]["rows"]
         }
     diverged = _diverged_map(sheet) if view_mode == "final" else {}
@@ -1649,7 +1540,7 @@ def _totais_plano(linhas: list) -> dict:
     """
     totais: dict = {"planeada": None, "feita": None, "falta": None,
                     "excesso": None,
-                    "parcial": len(linhas) >= 500}
+                    "parcial": False}
     colunas = {"planeada": "quantity_planned", "feita": "quantity_made",
                "falta": "remaining_quantity", "excesso": "excesso"}
     for chave, col in colunas.items():
@@ -1661,17 +1552,7 @@ def _totais_plano(linhas: list) -> dict:
 
 @app.get("/sheet/{uid}/plano/{row_index}", response_class=HTMLResponse)
 def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str = ""):
-    """As referências do plano para a chave OF + Perfil de uma linha.
-
-    Recebe a linha e não a chave: é o servidor que resolve a OF (incluindo a
-    herdada da linha de cima) e a forma canónica do perfil. Se fosse o template
-    a montar `?of=&perfil=`, teria de conhecer as convenções do plano e podia
-    perguntar por uma chave diferente daquela com que o motor cruzou.
-
-    `origem=perf_comp` = o clique veio da marca de perfil completo, que afirma
-    «fiz a quantidade toda»: o pop-up junta os totais e avisa se o plano ainda
-    mostra falta.
-    """
+    from . import plan_review
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -1679,85 +1560,15 @@ def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str =
         conn.close()
     if not sheet:
         raise HTTPException(404)
-    template = get_template(sheet["template_name"])
-    rows = (sheet["sheet_data"] or {}).get("rows") or []
-    if row_index < 0 or row_index >= len(rows):
+    rows = (sheet.get("sheet_data") or {}).get("rows") or []
+    if not 0 <= row_index < len(rows) or rows[row_index].get("_deleted") is True:
         raise HTTPException(404)
-    if rows[row_index].get("_deleted") is True:
-        raise HTTPException(404)
-
-    perf_comp_marked = is_marked(field_value(rows[row_index], "perf_comp"))
-    row_number = sum(
-        row.get("_deleted") is not True for row in rows[:row_index + 1]
-    )
-    ctx: dict = {"row_index": row_index, "row_number": row_number,
-                 "of": None, "perfil": None,
-                 "linhas": [], "perfis": [], "erro": None, "plano": {},
-                 "origem_perf_comp": perf_comp_marked or origem == "perf_comp", "totais": None,
-                 "sheet": sheet, "editable": sheet["status"] != "validated",
-                 "current_model": rows[row_index].get("modelo"),
-                 "current_binding": (
-                     {} if perf_comp_marked
-                     else (rows[row_index].get("_plan_binding") or {})
-                 ),
-                 "showing_all_of": False}
     try:
-        if template.index_loader:
-            with _index_lock:
-                _index_cache.pop(template.index_loader, None)
-        index = get_index(template.index_loader) if template.index_loader else None
-        if index is None:
-            ctx["erro"] = "Esta folha não cruza com o plano."
-            return templates.TemplateResponse(request, "_plano_perfil.html", ctx)
-
-        content = tuple(f.name for f in index.spec.identity_fields
-                        if f.name not in carryover.CARRY_FIELDS)
-        identities = carryover.resolve(rows, content, {})
-        eff = carryover.effective_row(rows[row_index], identities[row_index])
-        escrito = str(eff.get("perfil") or "").strip()
-        of_escrita = str(eff.get("of") or "").strip()
-        # A OF no plano leva prefixo; procurar pela forma que lá existe.
-        of = next(
-            (index.entries[i]["of"] for i in index.exact_matches("of", of_escrita)),
-            of_escrita,
-        ) if of_escrita else ""
-        perfil = index.normalize_written("perfil", escrito) if escrito else ""
-        ctx.update({"of": of, "perfil": perfil, "perfil_escrito": escrito,
-                    "herdou_of": identities[row_index].is_inherited("of")})
-        if not of:
-            ctx["erro"] = "Esta linha não tem OF — escreve-a (ou herda-a da linha de cima)."
-        else:
-            ctx["plano"] = loaders.plan_snapshot_info()
-            if (index.snapshot_id and ctx["plano"].get("snapshot_id")
-                    and str(index.snapshot_id) != str(ctx["plano"]["snapshot_id"])):
-                ctx["erro"] = "O planeamento mudou; fecha e reabre Referências."
-                return templates.TemplateResponse(request, "_plano_perfil.html", ctx)
-            if perfil:
-                ctx["linhas"] = loaders.fetch_profile_lines(
-                    of, perfil, snapshot_id=index.snapshot_id
-                )
-            if ctx["linhas"]:
-                ctx["totais"] = _totais_plano(ctx["linhas"])
-            else:
-                # Perfil vazio/incorreto: mostram-se as referências completas
-                # da OF, não apenas chips com nomes de perfil.
-                ctx["linhas"] = loaders.fetch_of_lines(
-                    of, snapshot_id=index.snapshot_id
-                )
-                ctx["showing_all_of"] = True
-                if ctx["linhas"]:
-                    ctx["totais"] = _totais_plano(ctx["linhas"])
-            # A query das linhas foi fixada ao snapshot do índice. Uma última
-            # sonda impede mostrar como atual uma fotografia substituída a
-            # meio do pedido.
-            latest = loaders.plan_snapshot_info() or {}
-            if (index.snapshot_id and latest.get("snapshot_id")
-                    and str(index.snapshot_id) != str(latest["snapshot_id"])):
-                ctx["linhas"] = []
-                ctx["totais"] = None
-                ctx["erro"] = "O planeamento mudou; fecha e reabre Referências."
-    except Exception as exc:  # Postgres em baixo não pode rebentar a revisão
-        ctx["erro"] = f"Não foi possível ler o plano: {exc}"
+        ctx = plan_review.context(sheet, row_index, get_template(sheet["template_name"]),
+                                  _safe_back(request.query_params.get("back")) or "/")
+    except Exception:
+        return templates.TemplateResponse(request, "_plan_error.html",
+            {"message": "Não foi possível consultar estas referências. Confirma o planeamento e tenta novamente."}, status_code=503)
     return templates.TemplateResponse(request, "_plano_perfil.html", ctx)
 
 
@@ -2274,7 +2085,7 @@ def recheck(uid: str, back: str = Form("")):
 
 @app.post("/sheet/{uid}/validate")
 def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
-             revision: int | None = Form(None),
+             history_back: str = Form(""), revision: int | None = Form(None),
              header_operador: str | None = Form(None),
              header_n_operador: str | None = Form(None),
              header_setor_maquina: str | None = Form(None),
@@ -2473,7 +2284,7 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         )
     finally:
         conn.close()
-    destination = _safe_back(back) or "/"
+    destination = _safe_history_back(back) or _safe_history_back(history_back) or "/"
     return RedirectResponse(
         _with_query(
             destination,
@@ -2482,3 +2293,8 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         ),
         status_code=303,
     )
+
+
+from . import plan_picker  # noqa: E402
+plan_picker.register(app, _conn, lambda loader: get_index(loader),
+                     lambda *args, **kwargs: run_cross_check(*args, **kwargs), _sheet_location)

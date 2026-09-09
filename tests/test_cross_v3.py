@@ -154,3 +154,21 @@ def test_reused_exact_component_code_outweighs_rare_glyph_confusion():
     entries += [entry('copy'+str(i), modelo='D8F17', of='OF'+str(700000+i)) for i in range(40)]
     result = run([{'modelo':'D8F17', 'qtd':'2'}], entries)['rows'][0]
     assert next(c for c in result['cells'] if c['field']=='modelo')['proposal'] == 'D8F17'
+
+
+@pytest.mark.parametrize("engine", ["v3", "legacy"])
+def test_full_profile_does_not_merge_decimal_thickness(engine):
+    from app.matching.cross_check import check_sheet
+    from app.matching.scorer import Scorer
+    from app.web.plan_review import same_profile
+    items = [entry("THIN", perfil="L60X60X2.9"),
+             entry("THICK", perfil="L60X60X29", qtd_restante=100)]
+    index = PlanIndex(items, CANTONEIRAS_SPEC, snapshot_id="S")
+    assert index.exact_matches("perfil", "60x2,9") == [0]
+    assert same_profile("60x2,9", "L60X60X2.9")
+    assert not same_profile("60x2,9", "L60X60X29")
+    data = {"rows": [{"of": "265574", "perfil": "L60X60X2.9", "perf_comp": "X"}]}
+    cross = (check_sheet_v3(data, index=index) if engine == "v3"
+             else check_sheet(data["rows"], Scorer(index, CrossParams.load())))
+    assert [r["plan_key"] for r in cross["rows"][0]["plan_refs"]] == ["THIN"]
+    assert cross["rows"][0]["full_profile_quantity"] == 5

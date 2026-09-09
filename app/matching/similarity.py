@@ -96,23 +96,14 @@ def normalize_profile(value: str | None, known: object = None) -> str:
     guarda estaríamos a adivinhar — a maioria das cantoneiras tem abas iguais,
     mas não todas.
     """
-    base = compact(value)
-    if not base:
-        return ""
-    m = _PROFILE_PARTS.match(base)
-    if not m:
+    from .angle_geometry import profile_key
+    from .geometry import profile_key as literal_key
+
+    base = literal_key(value)
+    candidate = profile_key(value)
+    if known is not None and candidate not in known:
         return base
-    letters, digits = m.group(1), m.group(2)
-    parts = [p for p in digits.split("X") if p]
-    if len(parts) == 3:
-        cand = f"{letters or 'L'}{parts[0]}X{parts[1]}X{parts[2]}"
-    elif len(parts) == 2:
-        cand = f"{letters or 'L'}{parts[0]}X{parts[0]}X{parts[1]}"
-    else:
-        return base
-    if known is not None and cand not in known:
-        return base
-    return cand
+    return candidate
 
 
 def client_tokens(value: str | None) -> tuple[str, ...]:

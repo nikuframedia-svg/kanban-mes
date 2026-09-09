@@ -934,4 +934,6 @@ def check_sheet_v3(sheet_data: dict, params: CrossParams | None = None, *, index
     ).encode()).hexdigest()
     if historical_context is not None and hasattr(historical_context, "to_dict"):
         result["historical_context"] = historical_context.to_dict()
+    from .full_profile import attach_plan_facts
+    attach_plan_facts(result, index, source_rows, precision=2)
     return _json(result)

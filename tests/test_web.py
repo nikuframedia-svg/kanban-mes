@@ -33,6 +33,23 @@ def client(tmp_path, monkeypatch):
     )
 
     stored_calls: list[dict] = []
+    from copy import deepcopy
+    from app.web import export_source
+
+    def archive(de="", ate="", operador=""):
+        result = []
+        for call in stored_calls:
+            sheet = deepcopy(call["sheet"])
+            header = sheet["sheet_data"]["header"]
+            date = pg_store.normalize_sheet_date(header.get("data"))
+            if (de and date < de) or (ate and date > ate):
+                continue
+            if operador and header.get("operador") != operador:
+                continue
+            sheet["status"] = "validated"
+            result.append(sheet)
+        return result
+    monkeypatch.setattr(export_source, "load_validated_sheets", archive)
 
     def fake_store(sheet, template, edit_count, actor):
         stored_calls.append({"sheet": sheet, "template": template,
@@ -518,7 +535,7 @@ def test_validar_guarda_o_cabecalho_visivel_sem_exigir_guardar_primeiro(
     uid = create_sheet(client)
     revision = get_revision(client, uid)
     page = client.get(f"/sheet/{uid}")
-    assert "Guardar cabeçalho" not in page.text
+    assert 'id="save-header"' in page.text, "guardar separadamente é opcional"
     assert 'name="header_operador" form="validate-form"' in page.text
     assert "validate.disabled" not in page.text
 
@@ -1017,7 +1034,8 @@ def test_historico_filters(client):
     assert client.get("/?status=pending").status_code == 200
     assert client.get("/?status=validated").status_code == 200
     html = client.get("/?status=pending&operador=Maria").text
-    assert "sessionStorage" not in html and "queue_filters" not in html
+    assert "/static/history.js" in html
+    assert 'data-history-key="kanban-mes:history"' in html
 
 
 def test_sheet_pdf_downloads(client):
@@ -1045,35 +1063,26 @@ def _linhas_plano_fake():
     ]
 
 
-def test_plano_popup_totais_so_quando_vem_do_perf_comp(client, monkeypatch):
-    """O mesmo pop-up serve dois cliques: da célula do perfil (lista simples)
-    e da marca PERF. COMP. (que afirma «fiz tudo» — leva totais e, se o plano
-    ainda mostra falta, um aviso)."""
-    monkeypatch.setattr(
-        main.loaders, "plan_snapshot_info",
-        lambda: {"snapshot_id": "test-snapshot", "age_hours": 5.0},
-    )
-    monkeypatch.setattr(main.loaders, "fetch_profile_lines",
-                        lambda of, perfil, *, snapshot_id=None: _linhas_plano_fake())
-    monkeypatch.setattr(main.loaders, "fetch_profiles_in_of", lambda of: [])
-    uid = create_sheet(client)
-    edit(client, uid, "rows[0].of", "250001")
-    edit(client, uid, "rows[0].perfil", "50 x 5")
-
-    r = client.get(f"/sheet/{uid}/plano/0", params={"origem": "perf_comp"})
-    assert r.status_code == 200
-    assert "QS120" in r.text
-    assert 'class="plan-table-wrap"' in r.text
-    assert 'id="tabela-plano"' in r.text
-    assert "Filtrar a lista (opcional)" in r.text
-    assert "Totais" in r.text
-    assert "por fazer neste perfil" in r.text, "falta agregada (40) devia gerar aviso"
-
-    r2 = client.get(f"/sheet/{uid}/plano/0")
-    assert r2.status_code == 200
-    assert "QS120" in r2.text
-    assert "Totais" not in r2.text
-    assert "por fazer neste perfil" not in r2.text
+def test_popup_consulta_leve_e_sem_producao_inventada(client, monkeypatch):
+    from app.web import plan_review
+    conn = db.connect()
+    try:
+        uid = db.create_sheet(conn, "serrote_kanban" if "mtg2" in main.pg_store.SOURCE_APP else "cantoneiras_kanban")
+        assert db.set_extraction(conn, uid, {"header": {}, "rows": [{"of": "256000", "perfil": "100x10", "qtd": "1"}], "footer": {}})
+    finally:
+        conn.close()
+    monkeypatch.setattr(main.loaders, "plan_snapshot_info", lambda: {"snapshot_id": "snap-1", "age_hours": 5.0})
+    monkeypatch.setattr(main, "get_index", lambda *_: pytest.fail("popup must not build an index"))
+    monkeypatch.setattr(plan_review, "fetch_order", lambda sid, of: [{
+        "plan_key": "P1", "component_ref": "REF-A", "profile_type": "100x10",
+        "length_mm": 1350., "quantity_planned": 5., "quantity_made": 0., "remaining_quantity": 5.,
+    }])
+    response = client.get(f"/sheet/{uid}/plano/0?origem=perf_comp")
+    assert response.status_code == 200
+    assert "REF-A" in response.text
+    assert 'id="tabela-plano"' in response.text
+    assert "Totais" not in response.text, "query string cannot assert production"
+    assert "por fazer neste perfil" not in response.text
 
 
 def test_consulta_do_popup_nao_limita_as_referencias(monkeypatch):

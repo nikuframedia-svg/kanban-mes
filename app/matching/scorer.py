@@ -98,7 +98,7 @@ class Scorer:
                 else sim.code_similarity(written, truth)
             )
         elif f.kind == "profile":
-            similarity = 1.0 if written == truth else sim.code_similarity(written, truth)
+            similarity = sim.ratio(written, truth)
         else:
             similarity = sim.text_similarity(written_raw and str(written_raw), truth)
         w = self.value_weight(f, truth)

@@ -1,0 +1,49 @@
+<div class="sheet-header-inline" id="header-form">
+  {% for f in t.header_fields %}
+    {% set hc = header_cells.get(f) if header_cells and not is_raw else none %}
+    {% set color = {'confirmed':'cc-match', 'corrected':'cc-match', 'review':'cc-warn', 'ambiguous':'cc-warn', 'missing':'cc-na', 'no_reference':'cc-na'}.get(hc.status, 'cc-na') if hc else '' %}
+    <label class="hb-field header-field-{{ f }} {{ color }}">
+      <span class="lbl">{{ header_labels.get(f, (t.field_labels or {}).get(f, f)) }}{% if f in ('operador','data') %} *{% endif %}</span>
+      {% if readonly %}
+        <span class="header-value mono">{{ header.get(f) or '—' }}</span>
+      {% else %}
+        <input class="cell-input header-input" type="text" name="header_{{ f }}" form="validate-form"
+               value="{{ header.get(f) or '' }}" aria-label="{{ header_labels.get(f, f) }}"
+               {% if f in ('operador','data') %}required{% endif %}
+               {% if f == 'data' %}placeholder="dd/mm/aaaa"{% endif %}>
+      {% endif %}
+    </label>
+  {% endfor %}
+  {% set ofs = [] %}
+  {% for indexed in active_rows %}{% set of = indexed[1].get('of') %}{% if of and of not in ofs %}{% set _ = ofs.append(of) %}{% endif %}{% endfor %}
+  {% if ofs %}<div class="hb-field sheet-ofs"><span class="lbl">OFs</span><div>{% for of in ofs %}<span class="pill neutral mono">{{ strip_ref(of) }}</span> {% endfor %}</div></div>{% endif %}
+</div>
+{% if not readonly %}
+<div class="header-save-actions">
+  <button type="button" class="btn ghost" id="save-header" onclick="guardarCabecalho()">Guardar cabeçalho</button>
+</div>
+{% endif %}
+{% if header_cells or operator %}
+<details class="header-audit">
+  <summary>Conferência do cabeçalho</summary>
+  {% if operator and not is_raw %}
+    {% set accepted = operator.accepted if operator.accepted is defined else operator.confident %}
+    <div class="alert {{ 'ok' if accepted else 'warn' }}">
+      {% if accepted and operator.pernr %}<span><strong>Operador confirmado:</strong> {{ operator.pernr }} · {{ operator.name }}</span>
+      {% elif operator.candidate_pernr or operator.pernr %}<span><strong>Sugestão não aplicada:</strong> {{ operator.candidate_name or operator.name }} — confirma manualmente.</span>
+      {% else %}<span>Operador sem correspondência segura.</span>{% endif %}
+    </div>
+  {% endif %}
+  {% for f in t.header_fields %}
+    {% set hc = header_cells.get(f) if header_cells and not is_raw else none %}
+    {% if hc %}<div class="header-check-message"><b>{{ header_labels.get(f, f) }}:</b> {{ hc.message }}</div>
+      {% if hc.applied %}<div class="header-applied">✓ substituído automaticamente</div>{% endif %}
+      {% if hc.human_protected %}<div class="header-protected">Edição humana preservada</div>{% endif %}
+      {% if hc.proposal and (header.get(f) or '') != hc.proposal %}<div class="header-proposal">Devia ser: {% if readonly %}{{ hc.proposal }}{% else %}<a href="#" data-proposal="{{ hc.proposal }}" data-header-field="{{ f }}" onclick="return acceptHeaderProposal(this)">{{ hc.proposal }}</a>{% endif %}</div>{% endif %}
+      {% if hc.candidates %}<div>{{ hc.candidates | join(', ') }}</div>{% endif %}
+      {% if hc.sources %}<div class="header-sources">Fontes: {{ hc.sources | join(', ') }}</div>{% endif %}
+    {% endif %}
+    {{ snap_mark('header.' ~ f) }}
+  {% endfor %}
+</details>
+{% endif %}

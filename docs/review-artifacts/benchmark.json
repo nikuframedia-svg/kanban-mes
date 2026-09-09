@@ -1,0 +1,52 @@
+{
+  "source_app": "kanban-mes",
+  "measured_at": "2026-09-09T12:27:39.907774+00:00",
+  "repetitions": 20,
+  "index_builds": 0,
+  "timings_ms": {
+    "snapshot": {
+      "median": 6.57,
+      "p95": 7.11,
+      "max": 7.41
+    },
+    "order_query": {
+      "median": 16.37,
+      "p95": 21.81,
+      "max": 48.15
+    },
+    "http_review_largest_group": {
+      "median": 30.82,
+      "p95": 38.0,
+      "max": 40.47
+    },
+    "http_alternating_groups": {
+      "median": 31.49,
+      "p95": 54.3,
+      "max": 57.98
+    },
+    "http_validated_offline": {
+      "median": 5.71,
+      "p95": 6.84,
+      "max": 6.86
+    }
+  },
+  "snapshot_id": "mtg_59e59d5a2cf4e36a",
+  "largest_groups": [
+    {
+      "production_order_no": "OF260825",
+      "profile_type": "L55X55X5",
+      "n": 263
+    },
+    {
+      "production_order_no": "OF260760",
+      "profile_type": "L55X55X5",
+      "n": 246
+    },
+    {
+      "production_order_no": "OF265360",
+      "profile_type": "L55X55X5",
+      "n": 227
+    }
+  ],
+  "frozen_plan_queries": 0
+}

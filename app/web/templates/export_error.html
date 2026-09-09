@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Exportação — dados por confirmar{% endblock %}
+{% block content %}
+<div class="page-h"><div><div class="page-eyebrow">Exportação</div><h1 class="page-title">Dados por confirmar</h1></div></div>
+<div class="page-content">
+  <div class="alert warn" role="alert">{{ message }}</div>
+  {% if problems %}
+  <p>Estas linhas precisam das referências e quantidades do planeamento usado na produção. O histórico validado foi conservado.</p>
+  <div class="card scroll-x"><table class="tbl"><thead><tr><th>Folha</th><th>Linha</th><th>Motivo</th></tr></thead><tbody>
+    {% for p in problems %}<tr><td class="mono">{{ p.sheet_no or p.uid }}</td><td>{{ p.row }}</td><td>{{ p.reason }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% endif %}
+  <p><a class="btn" href="/">Voltar ao histórico</a></p>
+</div>
+{% endblock %}

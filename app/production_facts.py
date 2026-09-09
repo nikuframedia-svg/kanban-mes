@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from .matching.full_profile import plan_identity
 from .matching import carryover
 from .matching import similarity as sim
 from .templates_spec import KanbanTemplate, field_value, is_marked
@@ -92,9 +93,13 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
                     "qtd": quantity,
                     "perf_comp": None,
                 }
+                for field, key in (("of", "production_order_no"), ("ov", "sales_order_no"), ("cliente", "customer_name")):
+                    if key in ref:
+                        child_row[field] = ref[key]
                 child_cross = {
                     **row_cross,
                     "matched_plan_key": ref.get("plan_key"),
+                    "plan_identity": plan_identity(ref, ref.get("snapshot_id") or cross.get("snapshot_id")),
                     "plan_length_mm": length,
                     "line_meters": (
                         round(quantity * length / 1000.0, 2)
