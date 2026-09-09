@@ -421,7 +421,8 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
             if truth and truth in index.variants_for(f.name, efectivo):
                 similarity = 1.0
             else:
-                similarity = sim.code_similarity(
+                compare = sim.ratio if f.kind == "profile" else sim.code_similarity
+                similarity = compare(
                     index.normalize_written(f.name, efectivo), truth
                 )
         else:
@@ -652,9 +653,13 @@ def check_sheet(rows: list[dict], scorer: Scorer,
             key=lambda check: -check.review_priority,
         )
     ]
-    return {
+    result = {
         "snapshot_id": scorer.index.snapshot_id,
         "summary": summary,
         "review_order": review_order,
         "rows": [asdict(c) for c in checks],
     }
+
+    from .full_profile import attach_plan_facts
+    attach_plan_facts(result, scorer.index, rows, precision=2)
+    return result

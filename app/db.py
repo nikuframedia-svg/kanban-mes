@@ -12,6 +12,7 @@ import json
 import sqlite3
 import threading
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +32,8 @@ CREATE TABLE IF NOT EXISTS sheets (
     error_message   TEXT,
     image_rotation  INTEGER NOT NULL DEFAULT 0,  -- quartos de volta CW pedidos por humano
     revision        INTEGER NOT NULL DEFAULT 0,
+    extraction_generation INTEGER NOT NULL DEFAULT 0,
+    evidence_event_floor INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL,
     extracted_at    TEXT,
     validated_at    TEXT,
@@ -63,13 +66,15 @@ CREATE TABLE IF NOT EXISTS ingested_files (
 # elas (estão no SCHEMA); as antigas precisam de ALTER, e o SQLite não tem
 # "ADD COLUMN IF NOT EXISTS". A escada por user_version corre uma vez por
 # ficheiro de base; o try/except cobre a corrida entre processos.
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 5
 _MIGRATIONS = (
     (1, "ALTER TABLE sheets ADD COLUMN image_rotation INTEGER NOT NULL DEFAULT 0"),
     # v2: ingested_files já nasce no SCHEMA (CREATE TABLE IF NOT EXISTS corre
     # em todas as ligações); a versão sobe só para o registo ficar honesto.
     (2, "SELECT 1"),
     (3, "ALTER TABLE sheets ADD COLUMN sheet_no INTEGER"),
+    (4, "ALTER TABLE sheets ADD COLUMN extraction_generation INTEGER NOT NULL DEFAULT 0"),
+    (5, "ALTER TABLE sheets ADD COLUMN evidence_event_floor INTEGER NOT NULL DEFAULT 0"),
 )
 _migrated: set[str] = set()
 _migrate_lock = threading.Lock()
@@ -207,7 +212,7 @@ def mark_pending(conn: sqlite3.Connection, uid: str) -> bool:
 def set_template(conn: sqlite3.Connection, uid: str, template_name: str) -> bool:
     """Reclassificação isolada, apenas enquanto a folha continua pendente."""
     cur = conn.execute(
-        "UPDATE sheets SET template_name = ? WHERE uid = ? AND status = 'pending'",
+        "UPDATE sheets SET template_name = ?, revision = revision + 1, cross_check = NULL WHERE uid = ? AND status = 'pending'",
         (template_name, uid),
     )
     conn.commit()
@@ -236,7 +241,9 @@ def set_extraction(conn: sqlite3.Connection, uid: str, extraction: dict,
         template_name = row["template_name"]
     cur = conn.execute(
         "UPDATE sheets SET template_name = ?, raw_extraction = ?, sheet_data = ?, "
-        "status = 'extracted', "
+        "status = 'extracted', cross_check = NULL, "
+        "extraction_generation = extraction_generation + 1, "
+        "evidence_event_floor = (SELECT COALESCE(MAX(id), 0) FROM edits WHERE sheet_uid = sheets.uid), "
         "extracted_at = ?, revision = revision + 1 WHERE uid = ? AND status = 'pending'",
         (template_name, json.dumps(extraction, ensure_ascii=False, default=str),
          json.dumps(extraction, ensure_ascii=False, default=str), now_iso(), uid),
@@ -326,7 +333,7 @@ def save_sheet_data(conn: sqlite3.Connection, uid: str, sheet_data: dict,
                     expected_revision: int) -> bool:
     """Escrita com controlo otimista de concorrência: falha se a revisão mudou."""
     cur = conn.execute(
-        "UPDATE sheets SET sheet_data = ?, status = 'in_review', revision = revision + 1 "
+        "UPDATE sheets SET sheet_data = ?, cross_check = NULL, status = 'in_review', revision = revision + 1 "
         "WHERE uid = ? AND revision = ? AND status != 'validated'",
         (json.dumps(sheet_data, ensure_ascii=False, default=str), uid, expected_revision),
     )
@@ -343,6 +350,7 @@ def save_sheet_data_with_edits(
     *,
     cross_check: dict | None = None,
     write_cross: bool = False,
+    guard: Callable[[sqlite3.Connection], bool] | None = None,
 ) -> bool:
     """Grava dados, auditoria e opcionalmente o cross no mesmo commit CAS.
 
@@ -352,6 +360,9 @@ def save_sheet_data_with_edits(
     """
     try:
         conn.execute("BEGIN IMMEDIATE")
+        if guard is not None and not guard(conn):
+            conn.rollback()
+            return False
         data_json = json.dumps(sheet_data, ensure_ascii=False, default=str)
         if write_cross:
             cur = conn.execute(
@@ -364,7 +375,7 @@ def save_sheet_data_with_edits(
             )
         else:
             cur = conn.execute(
-                "UPDATE sheets SET sheet_data = ?, status = 'in_review', "
+                "UPDATE sheets SET sheet_data = ?, cross_check = NULL, status = 'in_review', "
                 "revision = revision + 1 "
                 "WHERE uid = ? AND revision = ? AND status != 'validated'",
                 (data_json, uid, expected_revision),
@@ -380,8 +391,8 @@ def save_sheet_data_with_edits(
                 (
                     uid,
                     path,
-                    None if old is None else str(old),
-                    None if new is None else str(new),
+                    _edit_value(old),
+                    _edit_value(new),
                     source,
                     actor,
                     edited_at,
@@ -440,14 +451,37 @@ def save_cross_check(conn: sqlite3.Connection, uid: str, cross: dict,
     return cur.rowcount == 1
 
 
+def _edit_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list, bool)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return str(value)
+
+
+def evidence_edits(conn: sqlite3.Connection, sheet: dict) -> list[dict]:
+    """Human observations belonging to this extraction, in stable event order.
+
+    Pre-V3 rows have no explicit generation boundary. Their extraction time
+    supplies a documented legacy boundary; all new OCR generations use IDs.
+    """
+    events = conn.execute(
+        "SELECT * FROM edits WHERE sheet_uid = ? AND source = 'human' AND id > ? ORDER BY id",
+        (sheet["uid"], sheet.get("evidence_event_floor", 0)),
+    ).fetchall()
+    if not sheet.get("extraction_generation") and sheet.get("extracted_at"):
+        events = [event for event in events if event["edited_at"] >= sheet["extracted_at"]]
+    return [dict(event) for event in events]
+
+
 def record_edit(conn: sqlite3.Connection, uid: str, field_path: str,
                 old_value: object, new_value: object, source: str, actor: str | None) -> None:
     conn.execute(
         "INSERT INTO edits (sheet_uid, field_path, old_value, new_value, source, actor, edited_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (uid, field_path,
-         None if old_value is None else str(old_value),
-         None if new_value is None else str(new_value),
+         _edit_value(old_value),
+         _edit_value(new_value),
          source, actor, now_iso()),
     )
     conn.commit()

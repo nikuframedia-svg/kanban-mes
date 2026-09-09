@@ -76,6 +76,8 @@ class Settings:
     port: int = field(default_factory=lambda: int(_env("MES_PORT", "8100")))
     admin_token: str = field(default_factory=lambda: _env("MES_ADMIN_TOKEN"))
 
+    cross_engine: str = field(default_factory=lambda: _env("MES_CROSS_ENGINE", "legacy").lower())
+
     @property
     def sqlite_path(self) -> Path:
         return self.data_dir / "app.db"

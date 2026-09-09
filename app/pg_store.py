@@ -310,7 +310,7 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 i, row, cr = fact["row_index"], fact["row"], fact["cross"]
                 cells = {c["field"]: c for c in cr.get("cells", [])}
                 cols: dict[str, object] = {}
-                extra: dict[str, object] = {}
+                extra: dict[str, object] = {"plan_identity": cr["plan_identity"]} if cr.get("plan_identity") else {}
                 for f, value in row.items():
                     if value is None or str(value).strip() == "":
                         continue
@@ -389,7 +389,7 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                             ref.get("overproduction_before"),
                             ref.get("assumed_quantity"),
                             ref.get("remaining_rule"),
-                            json.dumps({"source_app": SOURCE_APP}, ensure_ascii=False),
+                            json.dumps({"source_app": SOURCE_APP, "plan_identity": ref}, ensure_ascii=False, default=str),
                         ),
                     )
                 n += 1

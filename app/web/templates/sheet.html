@@ -25,7 +25,9 @@
 {% endfor %}
 {% set footer = data.get('footer') or {} %}
 
-<div class="page-h">
+{% from "_review_cells.html" import snap_mark, edit_cell with context %}
+
+<div class="page-h review-heading">
   <div>
     <div class="page-eyebrow">Revisão · {{ t.label }}</div>
     <h1 class="page-title">Folha {{ sheet.sheet_no or sheet.uid[:8] }}</h1>
@@ -37,6 +39,7 @@
          href="/sheet/{{ sheet.uid }}?view=raw{% if back_url %}&back={{ back_url|urlencode }}{% endif %}">OCR cru</a>
     </div>
     {% endif %}
+    {% include "_sheet_header.html" %}
   </div>
   <div style="display:flex; gap:8px; align-items:center;">
     {% if is_raw %}
@@ -53,7 +56,7 @@
   </div>
 </div>
 
-<div class="page-content">
+<div class="page-content review-content">
 
 {% if stored %}
 <div class="alert ok" style="margin-bottom:14px;">
@@ -203,155 +206,6 @@ setTimeout(function () {
        original do OCR mostra-se SEMPRE por baixo da célula — com a
        substituição automática total, é a única memória visível do que estava
        no papel segundo a leitura. Nunca muda a cor da célula. #}
-    {% macro snap_mark(field_path) %}
-      {%- set orig = diverged.get(field_path) if diverged else none -%}
-      {%- if orig is not none -%}
-        <div class="ocr-original">OCR: {{ orig if orig else '(vazio)' }}</div>
-      {%- endif -%}
-    {% endmacro %}
-
-    {% macro edit_cell(field_path, value, cell=None, numeric=False) %}
-      {%- set herdado = cell.inherited if (cell and cell.inherited_from is not none and not value) else none -%}
-      {% if readonly %}
-        <div>{{ value if value is not none else '' }}{{ snap_mark(field_path) }}</div>
-        {% if herdado %}<div class="inherited" title="Vem da linha {{ cell.inherited_from + 1 }}">{{ herdado }}</div>{% endif %}
-        {% if cell and cell.proposal and cell.status in ('snapped', 'very_different', 'alias') %}
-          <div class="proposal">plano: {{ cell.proposal }}</div>
-        {% endif %}
-      {% else %}
-        <form method="post" action="/sheet/{{ sheet.uid }}/edit">
-          <input type="hidden" name="back" value="{{ back_url }}">
-          <input type="hidden" name="field_path" value="{{ field_path }}">
-          <input type="hidden" name="revision" value="{{ sheet.revision }}">
-          <input type="hidden" name="actor" value="operador">
-          {# O valor herdado vai como placeholder, não como value: o browser não
-             submete placeholders, portanto é impossível gravá-lo sem querer. #}
-          <input type="text" class="cell-input{% if herdado %} is-inherited{% endif %}" name="value"
-                 value="{{ value if value is not none else '' }}"
-                 {% if herdado %}placeholder="{{ herdado }}"
-                 title="Herdado da linha {{ cell.inherited_from + 1 }} — já vale para o cruzamento; só escreves se quiseres OUTRO valor"{% endif %}
-                 {% if numeric %}inputmode="decimal"{% endif %}
-                 onchange="this.form.submit()">
-        </form>{{ snap_mark(field_path) }}
-        {% if cell and cell.status == 'over_limit' %}
-          {# Sem link de aceitar: o plano diz o que estava previsto, não o que
-             foi produzido — copiar o número do plano falsificaria o registo. #}
-          <div class="proposal">plano: {{ '%g' | format(cell.plan_limit) }}</div>
-        {% elif cell and cell.proposal and cell.status in ('snapped', 'very_different', 'alias') and (cell.written or '') != cell.proposal and not herdado %}
-          {# O valor vai num data-attribute (autoescape normal e seguro), NUNCA
-             interpolado dentro do onclick: o tojson do Jinja não escapa
-             aspas duplas e o atributo fechava no primeiro «"» — o clique
-             ficou morto desde sempre, e era injetável a partir do plano. #}
-          {# p_field baixo = palpite entre linhas irmãs da mesma obra, não uma
-             correção — a percentagem diz ao revisor o peso que isto tem. #}
-          <div class="proposal">
-            plano: <a href="#" data-proposal="{{ cell.proposal }}"
-                      onclick="return acceptProposal(this)">{{ cell.proposal }}</a>{% if cell.p_correct < 0.5 %} <span class="muted" title="palpite entre várias linhas da obra — vê «refs»">· {{ '%.0f' | format(cell.p_correct * 100) }}%</span>{% endif %}
-          </div>
-        {% endif %}
-      {% endif %}
-    {% endmacro %}
-
-    <div class="card" style="margin-bottom:14px;">
-      <div class="card-h">
-        <span class="card-h-title">Cabeçalho da folha</span>
-        <span class="card-h-sub">operador e data obrigatórios</span>
-      </div>
-      <div class="card-b">
-        {% if operator and not is_raw %}
-        {# O número é o que vem escrito de forma fiável nos kanbans; o nome não.
-           Por isso o nome mostrado é o do SAP, e diz-se de onde veio. #}
-        <div class="alert {{ 'ok' if operator.confident else 'warn' }}"
-             style="margin-bottom:12px; padding:8px 12px;">
-          <span>
-            {% if operator.pernr %}
-              <b class="mono">{{ operator.pernr }}</b> · <b>{{ operator.name }}</b>
-              <span class="muted tiny">(nº {{ operator.cod }})</span>
-              {% if operator.rule == 'corrigido' %}
-                <span class="muted tiny">— o nº escrito ({{ operator.written_name }}) não existe na
-                lista; este é o único parecido. Confirma.</span>
-              {% elif operator.rule == 'so_numero' %}
-                <span class="muted tiny">— o nº bate mas o nome lido era
-                «{{ operator.written_name }}». Confirma qual está certo.</span>
-              {% elif operator.changed_name %}
-                <span class="muted tiny">— nome da lista de colaboradores
-                (lido: «{{ operator.written_name }}»)</span>
-              {% endif %}
-            {% else %}
-              <b>{{ operator.written_name or '—' }}</b>
-              <span class="muted tiny">— sem correspondência na lista de colaboradores.
-              {% if operator.rule == 'sem_numero' %}Falta o nº do operador.{% endif %}</span>
-            {% endif %}
-          </span>
-        </div>
-        {% endif %}
-        <div class="header-grid" id="header-form">
-          {% for f in t.header_fields %}
-          {% set hc = header_cells.get(f) if (header_cells and not is_raw) else none %}
-          {% set state_class = {'confirmed': 'cc-match',
-                                'corrected': 'cc-warn',
-                                'review': 'cc-no-match',
-                                'ambiguous': 'cc-no-match',
-                                'missing': 'cc-na',
-                                'no_reference': 'cc-na'}.get(hc.status, 'cc-na') if hc else '' %}
-          <div class="field header-field header-field-{{ f }} {{ state_class }}">
-            <span class="lbl">{{ header_labels.get(f, (t.field_labels or {}).get(f, f)) }}{% if f in ('operador', 'data') %} *{% endif %}</span>
-            {% if readonly %}
-              <div class="header-value">{{ header.get(f) or '' }}</div>
-              {{ snap_mark('header.' ~ f) }}
-            {% else %}
-              <input type="text" class="cell-input header-input"
-                     name="header_{{ f }}" form="validate-form"
-                     value="{{ header.get(f) or '' }}"
-                     {% if f == 'data' %}autocomplete="off"{% endif %}>
-              {{ snap_mark('header.' ~ f) }}
-            {% endif %}
-            {% if hc %}
-            <div class="header-check-message">
-              <span class="pill {{ 'ok' if hc.status == 'confirmed' else ('warn' if hc.status == 'corrected' else ('crit' if hc.status in ('review', 'ambiguous') else 'neutral')) }}">
-                {{ {'confirmed': 'confere', 'corrected': 'corrigido',
-                    'review': 'rever', 'ambiguous': 'ambíguo',
-                    'missing': 'em falta', 'no_reference': 'sem referência'}.get(hc.status, hc.status) }}
-              </span>
-              <span>{{ hc.message }}</span>
-            </div>
-            {% if hc.applied %}
-              <div class="header-applied">✓ substituído automaticamente</div>
-            {% endif %}
-            {% if hc.human_protected %}
-              <div class="header-protected">Edição humana preservada</div>
-            {% endif %}
-            {% if hc.proposal and (header.get(f) or '') != hc.proposal %}
-              <div class="header-proposal">
-                Devia ser:
-                {% if readonly %}
-                  <strong>{{ hc.proposal }}</strong>
-                {% else %}
-                  <a href="#" data-proposal="{{ hc.proposal }}"
-                     onclick="return acceptProposal(this)">{{ hc.proposal }}</a>
-                {% endif %}
-              </div>
-            {% elif hc.candidates %}
-              <div class="header-proposal">Possíveis: {{ hc.candidates | join(', ') }}</div>
-            {% endif %}
-            {% if hc.sources %}
-              <div class="header-sources">
-                Fontes:
-                {% for src in hc.sources %}
-                  {{ {'employees': 'colaboradores', 'template': 'template',
-                      'plan': 'plano', 'machine_catalog': 'máquinas',
-                      'written_date': 'data escrita',
-                      'assumed_date': 'dia útil anterior'}.get(src.kind, src.kind) }}{% if src.value %} · {{ src.value }}{% endif %}{{ ';' if not loop.last }}
-                {% endfor %}
-              </div>
-            {% endif %}
-            {% endif %}
-          </div>
-          {% endfor %}
-        </div>
-      </div>
-    </div>
-
     <div class="card" style="margin-bottom:14px;">
       <div class="card-h">
         <span class="card-h-title">{{ 'Paragens da máquina' if not t.index_loader else 'Linhas de produção' }}</span>
@@ -390,6 +244,13 @@ setTimeout(function () {
                 <td class="muted mono">
                   <div class="row-number-actions">
                     <span>{{ visible_i }}</span>
+                    {% if not readonly and t.index_loader %}
+                    <button type="button" class="btn ghost row-of-wand-btn" title="Corrigir linha via OF"
+                            aria-label="Corrigir linha {{ visible_i }} via OF"
+                            data-uid="{{ sheet.uid }}" data-row="{{ i }}" data-of="{{ row.get('of') or '' }}"
+                            data-revision="{{ sheet.revision }}" data-back="{{ back_url }}"
+                            onclick="abrirEditorOF(this)">✎</button>
+                    {% endif %}
                     {% if not readonly %}
                     <form method="post" action="/sheet/{{ sheet.uid }}/rows/{{ i }}/delete"
                           onsubmit="return confirm('Apagar a linha {{ visible_i }}?');">
@@ -443,9 +304,32 @@ setTimeout(function () {
                   {% if cr %}
                     {% if cr.mode == 'strong' %}<span class="pill ok">certeza alta</span>
                     {% elif cr.mode == 'weak_guess' %}<span class="pill warn">incerta</span>
+                    {% elif cr.mode == 'activity' %}<span class="pill neutral">atividade</span>
+                    {% elif cr.mode == 'empty' %}<span class="pill neutral">vazia</span>
+                    {% elif cr.mode == 'explicit' %}<span class="pill info">seleção explícita</span>
                     {% elif cr.mode == 'no_match' %}<span class="pill crit">fora do plano</span>
                     {% else %}<span class="pill neutral">{{ cr.mode }}</span>{% endif %}
-                    <div class="proposal">P = {{ '%.0f' | format(cr.p_correct * 100) }}%{% if cr.matched_plan_key and not is_marked(field_value(row, 'perf_comp')) %} · {{ cr.matched_plan_key }}{% endif %}</div>
+                    <div class="proposal">Estimativa = {{ '%.0f' | format(cr.p_correct * 100) }}%{% if cr.matched_plan_key and not is_marked(field_value(row, 'perf_comp')) %} · {{ cr.matched_plan_key }}{% endif %}</div>
+                    {% if cr.get('substituted') %}<div><span class="pill warn">Substituído</span></div>{% endif %}
+                    {% if cr.get('low_evidence') %}<div><span class="pill warn">Pouca evidência</span></div>{% endif %}
+                    {% if cr.get('engine') or cr.get('evidence_source') %}
+                    <details class="tiny" style="margin-top:6px;">
+                      <summary>Origem e alternativas</summary>
+                      {% for field, change in (cr.get('replaced_values') or {}).items() %}
+                        <div>{{ (t.field_labels or {}).get(field, field) }}:
+                          {{ change.before or 'vazio' }} → {{ change.after or 'vazio' }}
+                          · {{ 'edição humana' if change.get('source') == 'human' else 'OCR original' }}</div>
+                      {% endfor %}
+                      {% for alternative in cr.get('alternatives') or [] %}
+                        <div>OF {{ alternative.of }} · {{ alternative.perfil }} · {{ alternative.modelo }}
+                          · estimativa {{ '%.0f' | format(alternative.confidence_reference * 100) }}%</div>
+                      {% endfor %}
+                      {% if cr.get('historical_context') %}
+                        <div>Desempate: planeamento de {{ cr.historical_context.loaded_at[:10] }}
+                          {% if cr.historical_context.approximate_future %}· aproximação posterior à folha{% endif %}</div>
+                      {% endif %}
+                    </details>
+                    {% endif %}
                   {% else %}
                     <span class="pill neutral">—</span>
                   {% endif %}
@@ -533,6 +417,7 @@ setTimeout(function () {
                 onsubmit="return confirm('Validar a folha? Depois de validada fica imutável.')">
             <input type="hidden" name="back" value="{{ back_url }}">
             <input type="hidden" name="revision" value="{{ sheet.revision }}">
+            <input type="hidden" name="history_back" value="">
             <button type="submit" class="btn primary" id="validate-button">Validar folha</button>
           </form>
         </div>
@@ -546,54 +431,19 @@ setTimeout(function () {
 
 {# Pop-up das referências do perfil. Fica fora da tabela de propósito: dentro
    de uma célula ficaria preso ao overflow do scroll horizontal. #}
-<div class="sheet-bg" id="plano-modal" style="display:none; align-items:center; justify-content:center;"
-     onclick="if (event.target === this) fecharPlano()">
-  <div class="sheet-modal" style="max-width:860px; width:92%; border-radius:12px;
-                                  max-height:82vh; overflow:auto;">
-    <div id="plano-modal-body"><div class="muted">A carregar…</div></div>
-    <div style="display:flex; justify-content:flex-end; margin-top:12px;">
-      <button type="button" class="btn" onclick="fecharPlano()">Fechar</button>
-    </div>
-  </div>
-</div>
+{% include "_review_dialogs.html" %}
 
 {% endblock %}
 {% block scripts %}
+<script src="/static/review.js?v={{ css_version }}" defer></script>
 <script>
-function abrirPlano(url) {
-  // fetch puro, sem depender do htmx: o pop-up é caminho crítico da revisão,
-  // e uma falha tem de aparecer NO modal — «A carregar…» eterno é invisível.
-  const body = document.getElementById('plano-modal-body');
-  body.innerHTML = '<div class="muted">A carregar…</div>';
-  document.getElementById('plano-modal').style.display = 'flex';
-  fetch(url)
-    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-    .then(html => {
-      body.innerHTML = html;
-      // os <script> injetados por innerHTML não correm — re-executá-los
-      body.querySelectorAll('script').forEach(old => {
-        const s = document.createElement('script');
-        s.textContent = old.textContent;
-        old.replaceWith(s);
-      });
-    })
-    .catch(e => {
-      body.innerHTML = '<div class="alert crit"><span>Não foi possível carregar as ' +
-        'referências (' + e.message + '). Fecha e tenta outra vez.</span></div>';
-    });
-}
-function fecharPlano() {
-  document.getElementById('plano-modal').style.display = 'none';
-}
-document.addEventListener('keydown', e => { if (e.key === 'Escape') fecharPlano(); });
-
 function acceptProposal(link) {
   const td = link.closest('td, .field');
   const input = td.querySelector('input[name=value], input.header-input');
   if (input) {
     input.value = link.dataset.proposal;
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    if (!input.classList.contains('header-input')) input.form.submit();
+    if (!input.classList.contains('header-input')) input.form.requestSubmit();
   }
   return false;
 }

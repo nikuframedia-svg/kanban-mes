@@ -1,0 +1,6230 @@
+{
+  "corpus_version": "cantoneiras-cross-v3-real-2026-09-08-v2",
+  "baseline": "legacy_fixed_point_rows_only",
+  "evidence": "raw+human",
+  "baseline_commit": "ca557f0",
+  "baseline_source_sha256": "ec48b15ee94ab28ec817bf751e27abe37c361c278fbfd32e8f0a02f789659213",
+  "v3_source_sha256": {
+    "app/matching/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/matching/angle_geometry.py": "e8cdd61ef69524f4a152947f8ea069c4b72877c7944fef0d3259e9090bbf67cb",
+    "app/matching/carryover.py": "656be5c22243fc935bfdeaff231d41e58671dc3fa9a212ef9f553bc7c7097f7d",
+    "app/matching/channel.py": "0d02142d3c85da51bb96d2984ee113c5aa154e394533e9f82b9e28816a46773f",
+    "app/matching/cross_check.py": "824336395d346c83479914c5479c9058b4214e76f7bb881392e81c455c92ca85",
+    "app/matching/evidence.py": "c0ea4efd6764a2e322db9d40418ff4f785d3d1eb0331600cdb212a8d6fe4457c",
+    "app/matching/full_profile.py": "b3a94d04c263c4704e11ebb8aa02b5488d1a85dcfc9908ed0e0f9c8c405c2030",
+    "app/matching/geometry.py": "46d7e94a07a3f80c46be5edb8238d26c3a10c633e88445d555536594df145023",
+    "app/matching/header_cross.py": "5999be97c7d7708ccb45b34ae89658f89de476f87e978360d43fde257cee61c7",
+    "app/matching/history.py": "737abfcdfa0daacd4703715c6cb9b90a38a8fad177fe19db7bfe17effc3ad1c5",
+    "app/matching/loaders.py": "8be1714ab9604a4f28ff7ab2470089f3be0b227a6181b5a3f92e0160402e48e3",
+    "app/matching/operador.py": "c578d1f5a4aac1bfe0f781b0829dd992b363e0aadad3fce7ab467c893500388d",
+    "app/matching/params.py": "1f766b034340132a2a44af1eb79680ac337556859f801435b71abd7d3f8e4d72",
+    "app/matching/refs.py": "fe889a6b0b025325bfcff7e8bf07883225f850a4a84fdb0f034843e4f9842738",
+    "app/matching/scorer.py": "8920d2765047c3136837830016527e0da813f10ac3800d11ee1e12b918f38d1f",
+    "app/matching/similarity.py": "772dd145f08c1e323d14cc7cfbde8c63ca991752cdc3fdf9ed2e670140a163e5",
+    "app/matching/v3.py": "263ac652f870b101802ab593e8491aacb63c985bcab467a84bb7299a0d6fd666",
+    "app/templates_spec.py": "1f9a3b68b2906a8eefef8999100a0836009d30ce6b0dfcfdc524b9036e1aa4e6",
+    "scripts/benchmark_cross_v3.py": "47d9807670343473775d81d6805877b15e6c4332a485c24f2ad1086dd464d51f"
+  },
+  "current_snapshot_id": "mtg_6e0be54dfd0de6fc",
+  "plan_entries": 73772,
+  "plan_age_days": 0,
+  "index_seconds": 0.1742,
+  "observable_of_labels": 82,
+  "observable_model_labels": 45,
+  "of_profile_groups_absent_from_snapshot": [
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 8,
+      "of": "264324",
+      "perfil": "L55X55X5"
+    }
+  ],
+  "coverage_exclusions": [],
+  "metrics": {
+    "legacy": {
+      "applicable_rows": 83,
+      "matched_rows": 83,
+      "of_correct": 49,
+      "of_evaluable": 82,
+      "model_correct": 35,
+      "model_evaluable": 45,
+      "of_and_model_correct": 35,
+      "candidate_of_recovered": null,
+      "candidate_model_recovered": null,
+      "geometry_correct": 35,
+      "geometry_evaluable": 45,
+      "confidence_summary": {
+        "of": {
+          "count": 0,
+          "min": null,
+          "max": null,
+          "mean": null,
+          "at_least_0_95": 0
+        },
+        "profile": {
+          "count": 0,
+          "min": null,
+          "max": null,
+          "mean": null,
+          "at_least_0_95": 0
+        },
+        "model": {
+          "count": 0,
+          "min": null,
+          "max": null,
+          "mean": null,
+          "at_least_0_95": 0
+        },
+        "reference": {
+          "count": 83,
+          "min": 0.943428,
+          "max": 0.999933,
+          "mean": 0.990223,
+          "at_least_0_95": 82
+        }
+      },
+      "seconds": 17.8613,
+      "mean_ms_per_applicable_row": 215.197
+    },
+    "v3": {
+      "applicable_rows": 83,
+      "matched_rows": 83,
+      "of_correct": 44,
+      "of_evaluable": 82,
+      "model_correct": 35,
+      "model_evaluable": 45,
+      "of_and_model_correct": 35,
+      "candidate_of_recovered": 82,
+      "candidate_model_recovered": 45,
+      "geometry_correct": 35,
+      "geometry_evaluable": 45,
+      "confidence_summary": {
+        "of": {
+          "count": 83,
+          "min": 0.00441,
+          "max": 0.999907,
+          "mean": 0.194074,
+          "at_least_0_95": 3
+        },
+        "profile": {
+          "count": 83,
+          "min": 0.009791,
+          "max": 0.999957,
+          "mean": 0.426418,
+          "at_least_0_95": 7
+        },
+        "model": {
+          "count": 83,
+          "min": 0.000436,
+          "max": 0.767876,
+          "mean": 0.055231,
+          "at_least_0_95": 0
+        },
+        "reference": {
+          "count": 83,
+          "min": 0.000178,
+          "max": 0.767786,
+          "mean": 0.03355,
+          "at_least_0_95": 0
+        }
+      },
+      "seconds": 20.9554,
+      "mean_ms_per_applicable_row": 252.475
+    }
+  },
+  "evaluation_splits": {
+    "development_documents": {
+      "legacy": {
+        "documents": 3,
+        "applicable_rows": 40,
+        "matched_rows": 40,
+        "of_correct": 24,
+        "of_evaluable": 40,
+        "of_and_model_correct": 21,
+        "model_evaluable": 23,
+        "of_and_profile_correct": 23,
+        "profile_correct": 27,
+        "profile_evaluable": 40
+      },
+      "v3": {
+        "documents": 3,
+        "applicable_rows": 40,
+        "matched_rows": 40,
+        "of_correct": 25,
+        "of_evaluable": 40,
+        "of_and_model_correct": 21,
+        "model_evaluable": 23,
+        "of_and_profile_correct": 25,
+        "profile_correct": 40,
+        "profile_evaluable": 40
+      }
+    },
+    "diagnostic_2026_08_20": {
+      "legacy": {
+        "documents": 2,
+        "applicable_rows": 15,
+        "matched_rows": 15,
+        "of_correct": 11,
+        "of_evaluable": 15,
+        "of_and_model_correct": 10,
+        "model_evaluable": 11,
+        "of_and_profile_correct": 11,
+        "profile_correct": 15,
+        "profile_evaluable": 15
+      },
+      "v3": {
+        "documents": 2,
+        "applicable_rows": 15,
+        "matched_rows": 15,
+        "of_correct": 11,
+        "of_evaluable": 15,
+        "of_and_model_correct": 10,
+        "model_evaluable": 11,
+        "of_and_profile_correct": 11,
+        "profile_correct": 15,
+        "profile_evaluable": 15
+      }
+    },
+    "held_out_2026_08_27": {
+      "legacy": {
+        "documents": 2,
+        "applicable_rows": 28,
+        "matched_rows": 28,
+        "of_correct": 14,
+        "of_evaluable": 27,
+        "of_and_model_correct": 4,
+        "model_evaluable": 11,
+        "of_and_profile_correct": 13,
+        "profile_correct": 14,
+        "profile_evaluable": 28
+      },
+      "v3": {
+        "documents": 2,
+        "applicable_rows": 28,
+        "matched_rows": 28,
+        "of_correct": 8,
+        "of_evaluable": 27,
+        "of_and_model_correct": 4,
+        "model_evaluable": 11,
+        "of_and_profile_correct": 8,
+        "profile_correct": 28,
+        "profile_evaluable": 28
+      }
+    }
+  },
+  "historical_contexts": {
+    "8bfd9466f652": {
+      "snapshot_id": "mtg_6399058a64e06229",
+      "loaded_at": "2026-09-01T06:17:46.870959+00:00",
+      "sheet_date": "2026-09-02",
+      "approximate_future": false,
+      "distance_days": 1,
+      "reason": "nearest_observed_snapshot",
+      "provenance": "frozen_snapshot",
+      "role": "equal_evidence_tiebreak_only",
+      "eligible_current_count": 73466,
+      "matched_current_count": 73424,
+      "ambiguous_identity_count": 0
+    },
+    "095aec277844": {
+      "snapshot_id": "mtg_6399058a64e06229",
+      "loaded_at": "2026-09-01T06:17:46.870959+00:00",
+      "sheet_date": "2026-08-20",
+      "approximate_future": true,
+      "distance_days": 12,
+      "reason": "nearest_future_approximation",
+      "provenance": "frozen_snapshot",
+      "role": "equal_evidence_tiebreak_only",
+      "eligible_current_count": 73466,
+      "matched_current_count": 73424,
+      "ambiguous_identity_count": 0
+    },
+    "02e4058ad2f9": {
+      "snapshot_id": "mtg_6399058a64e06229",
+      "loaded_at": "2026-09-01T06:17:46.870959+00:00",
+      "sheet_date": "2026-08-27",
+      "approximate_future": true,
+      "distance_days": 5,
+      "reason": "nearest_future_approximation",
+      "provenance": "frozen_snapshot",
+      "role": "equal_evidence_tiebreak_only",
+      "eligible_current_count": 73466,
+      "matched_current_count": 73424,
+      "ambiguous_identity_count": 0
+    },
+    "0b5cb0b66c71": {
+      "snapshot_id": "mtg_6399058a64e06229",
+      "loaded_at": "2026-09-01T06:17:46.870959+00:00",
+      "sheet_date": "2026-08-27",
+      "approximate_future": true,
+      "distance_days": 5,
+      "reason": "nearest_future_approximation",
+      "provenance": "frozen_snapshot",
+      "role": "equal_evidence_tiebreak_only",
+      "eligible_current_count": 73466,
+      "matched_current_count": 73424,
+      "ambiguous_identity_count": 0
+    }
+  },
+  "metric_notes": {
+    "candidate_recovery": "V3 full candidate pool before selection; model requires the independently labeled OF and model in the same candidate. Legacy pool unavailable.",
+    "geometry": "Canonical plan geometry for independently labeled OF/model with one unambiguous geometry. These are not independent visual geometry labels.",
+    "confidence": "Informational estimates, not calibrated probabilities. Diagnostic and held-out document/date groups are reported separately."
+  },
+  "reference_divergences": [
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 8,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53316",
+        "of": "264324",
+        "modelo": "DLR584",
+        "perfil": "L55X55X4",
+        "length_mm": 1935,
+        "mode": "strong",
+        "confidence": 0.9803882141369562,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9803882141369562
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:54015",
+        "of": "264325",
+        "modelo": "DLA6032",
+        "perfil": "L55X55X5",
+        "length_mm": 2247,
+        "mode": "weak_guess",
+        "confidence": 0.6711512888136354,
+        "candidates_evaluated": 20431,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.6711512888136354,
+          "profile": 0.7555145841205341,
+          "model": 0.04058482303326931,
+          "reference": 0.034820178492483214
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 9,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53419",
+        "of": "264324",
+        "modelo": "DLR5823E",
+        "perfil": "L65X65X5",
+        "length_mm": 3030,
+        "mode": "strong",
+        "confidence": 0.9813391614583703,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9813391614583703
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:54069",
+        "of": "264325",
+        "modelo": "DLA6042D",
+        "perfil": "L65X65X5",
+        "length_mm": 3850,
+        "mode": "weak_guess",
+        "confidence": 0.008371668616891911,
+        "candidates_evaluated": 18135,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.008371668616891911,
+          "profile": 0.48911408960247843,
+          "model": 0.0033885575594828476,
+          "reference": 0.001236824505416482
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 10,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53552",
+        "of": "264324",
+        "modelo": "DLR672",
+        "perfil": "L90X90X7",
+        "length_mm": 6310,
+        "mode": "strong",
+        "confidence": 0.9781541770533115,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9781541770533115
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:54177",
+        "of": "264325",
+        "modelo": "DLA6014D",
+        "perfil": "L90X90X7",
+        "length_mm": 5133,
+        "mode": "weak_guess",
+        "confidence": 0.005912012890907283,
+        "candidates_evaluated": 13491,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.005912012890907283,
+          "profile": 0.48896469835072787,
+          "model": 0.0022830153469535703,
+          "reference": 0.0009332039890680226
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 11,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53223",
+        "of": "264324",
+        "modelo": "DLR5825",
+        "perfil": "L50X50X4",
+        "length_mm": 1508,
+        "mode": "strong",
+        "confidence": 0.9842480582399263,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9842480582399263
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:20925",
+        "of": "261461",
+        "modelo": "D32C33",
+        "perfil": "L50X50X4",
+        "length_mm": 1480,
+        "mode": "weak_guess",
+        "confidence": 0.004410184342523088,
+        "candidates_evaluated": 18466,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004410184342523088,
+          "profile": 0.48854961832061067,
+          "model": 0.0012845444912743236,
+          "reference": 0.0005004327165837131
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 12,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53193",
+        "of": "264324",
+        "modelo": "DLR603",
+        "perfil": "L45X45X4",
+        "length_mm": 926,
+        "mode": "strong",
+        "confidence": 0.9757665921773726,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9757665921773726
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:20893",
+        "of": "261461",
+        "modelo": "D32C105",
+        "perfil": "L45X45X4",
+        "length_mm": 1859,
+        "mode": "weak_guess",
+        "confidence": 0.004583085113564828,
+        "candidates_evaluated": 25807,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004583085113564828,
+          "profile": 0.48854961832061067,
+          "model": 0.0010564830620475734,
+          "reference": 0.0003559292330862547
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 13,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53352",
+        "of": "264324",
+        "modelo": "DLR5841",
+        "perfil": "L60X60X4",
+        "length_mm": 2037,
+        "mode": "strong",
+        "confidence": 0.9812330904885922,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9812330904885922
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:20971",
+        "of": "261461",
+        "modelo": "D32C20",
+        "perfil": "L60X60X4",
+        "length_mm": 1195,
+        "mode": "weak_guess",
+        "confidence": 0.004864957885277462,
+        "candidates_evaluated": 9415,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004864957885277462,
+          "profile": 0.48831664282308057,
+          "model": 0.0017083510807999738,
+          "reference": 0.0005939013730028174
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 14,
+      "observed_label": {},
+      "of_evaluable": false,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53223",
+        "of": "264324",
+        "modelo": "DLR5825",
+        "perfil": "L50X50X4",
+        "length_mm": 1508,
+        "mode": "strong",
+        "confidence": 0.9842480582399263,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9842480582399263
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:20914",
+        "of": "261461",
+        "modelo": "D32F39",
+        "perfil": "L50X50X3",
+        "length_mm": 1656,
+        "mode": "weak_guess",
+        "confidence": 0.013288019857459879,
+        "candidates_evaluated": 18323,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.013288019857459879,
+          "profile": 0.34443268842945435,
+          "model": 0.002842139983932966,
+          "reference": 0.0007790600291354788
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 0,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S413"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:56859",
+        "of": "264219",
+        "modelo": "W061604",
+        "perfil": "L110X110X12",
+        "length_mm": 4540,
+        "mode": "strong",
+        "confidence": 0.9994003189221301,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9994003189221301
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7404",
+        "of": "257403",
+        "modelo": "A25S309",
+        "perfil": "L110X110X10",
+        "length_mm": 4410,
+        "mode": "weak_guess",
+        "confidence": 0.008532386450922523,
+        "candidates_evaluated": 15726,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.08540608758593296,
+          "profile": 0.796421510925608,
+          "model": 0.010697378427299703,
+          "reference": 0.008532386450922523
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 1,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S414"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:56859",
+        "of": "264219",
+        "modelo": "W061604",
+        "perfil": "L110X110X12",
+        "length_mm": 4540,
+        "mode": "strong",
+        "confidence": 0.9994003189221301,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9994003189221301
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7404",
+        "of": "257403",
+        "modelo": "A25S309",
+        "perfil": "L110X110X10",
+        "length_mm": 4410,
+        "mode": "weak_guess",
+        "confidence": 0.00017809142717677438,
+        "candidates_evaluated": 15726,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.006920415224913495,
+          "profile": 0.009791397667836797,
+          "model": 0.00043579714823536504,
+          "reference": 0.00017809142717677438
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 2,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S507"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:56859",
+        "of": "264219",
+        "modelo": "W061604",
+        "perfil": "L110X110X12",
+        "length_mm": 4540,
+        "mode": "strong",
+        "confidence": 0.9994003189221301,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9994003189221301
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7404",
+        "of": "257403",
+        "modelo": "A25S309",
+        "perfil": "L110X110X10",
+        "length_mm": 4410,
+        "mode": "weak_guess",
+        "confidence": 0.00017809142717677438,
+        "candidates_evaluated": 15726,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.006920415224913495,
+          "profile": 0.009791397667836797,
+          "model": 0.00043579714823536504,
+          "reference": 0.00017809142717677438
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 3,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S508"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:56859",
+        "of": "264219",
+        "modelo": "W061604",
+        "perfil": "L110X110X12",
+        "length_mm": 4540,
+        "mode": "strong",
+        "confidence": 0.9994003189221301,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9994003189221301
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7404",
+        "of": "257403",
+        "modelo": "A25S309",
+        "perfil": "L110X110X10",
+        "length_mm": 4410,
+        "mode": "weak_guess",
+        "confidence": 0.00017809142717677438,
+        "candidates_evaluated": 15726,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.006920415224913495,
+          "profile": 0.009791397667836797,
+          "model": 0.00043579714823536504,
+          "reference": 0.00017809142717677438
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 4,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S509"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:56859",
+        "of": "264219",
+        "modelo": "W061604",
+        "perfil": "L110X110X12",
+        "length_mm": 4540,
+        "mode": "strong",
+        "confidence": 0.9994003189221301,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9994003189221301
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7404",
+        "of": "257403",
+        "modelo": "A25S309",
+        "perfil": "L110X110X10",
+        "length_mm": 4410,
+        "mode": "weak_guess",
+        "confidence": 0.00017809142717677438,
+        "candidates_evaluated": 15726,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.006920415224913495,
+          "profile": 0.009791397667836797,
+          "model": 0.00043579714823536504,
+          "reference": 0.00017809142717677438
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 5,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47397",
+        "of": "263324",
+        "modelo": "AS2249",
+        "perfil": "L150X100X10",
+        "length_mm": 450,
+        "mode": "strong",
+        "confidence": 0.9763822212523392,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9763822212523392
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7389",
+        "of": "257403",
+        "modelo": "A35S113",
+        "perfil": "L100X100X10",
+        "length_mm": 3239,
+        "mode": "weak_guess",
+        "confidence": 0.019868834646280413,
+        "candidates_evaluated": 16583,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.019868834646280413,
+          "profile": 0.48063834780567943,
+          "model": 0.0047156452121694965,
+          "reference": 0.00250342264815177
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 6,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:21916",
+        "of": "261754",
+        "modelo": "A7S506",
+        "perfil": "L60X60X63",
+        "length_mm": 2254,
+        "mode": "strong",
+        "confidence": 0.9840203669749278,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9840203669749278
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7629",
+        "of": "257403",
+        "modelo": "A35H29",
+        "perfil": "L60X60X6",
+        "length_mm": 2505,
+        "mode": "weak_guess",
+        "confidence": 0.01520223876719345,
+        "candidates_evaluated": 15454,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.01520223876719345,
+          "profile": 0.4806947541368384,
+          "model": 0.002087702889704964,
+          "reference": 0.0011481474629472968
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 7,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:31202",
+        "of": "262608",
+        "modelo": "A7S303",
+        "perfil": "L100X100X12",
+        "length_mm": 4320,
+        "mode": "strong",
+        "confidence": 0.9902695375946701,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9902695375946701
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7372",
+        "of": "257403",
+        "modelo": "A25S615",
+        "perfil": "L100X100X8",
+        "length_mm": 3049,
+        "mode": "weak_guess",
+        "confidence": 0.018323260609910488,
+        "candidates_evaluated": 16327,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.018323260609910488,
+          "profile": 0.4804692082111437,
+          "model": 0.006377102217350825,
+          "reference": 0.0031849411998892737
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 8,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47423",
+        "of": "263324",
+        "modelo": "AS1111",
+        "perfil": "L90X90X10",
+        "length_mm": 3239,
+        "mode": "strong",
+        "confidence": 0.980704180833349,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.980704180833349
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7370",
+        "of": "257403",
+        "modelo": "A25S618",
+        "perfil": "L90X90X7",
+        "length_mm": 3484,
+        "mode": "weak_guess",
+        "confidence": 0.01110195585237868,
+        "candidates_evaluated": 19733,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.01110195585237868,
+          "profile": 0.4806947541368384,
+          "model": 0.0043303910778719765,
+          "reference": 0.0016982891478245438
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 9,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:21861",
+        "of": "261755",
+        "modelo": "A30S622",
+        "perfil": "L60X60X8",
+        "length_mm": 2334,
+        "mode": "strong",
+        "confidence": 0.9862589381990284,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9862589381990284
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7348",
+        "of": "257403",
+        "modelo": "A25S517",
+        "perfil": "L60X60X8",
+        "length_mm": 2274,
+        "mode": "weak_guess",
+        "confidence": 0.05871980503189735,
+        "candidates_evaluated": 13268,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.05871980503189735,
+          "profile": 0.4807511737089202,
+          "model": 0.022536823166269596,
+          "reference": 0.011499028646505935
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 10,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:21860",
+        "of": "261755",
+        "modelo": "A30S621",
+        "perfil": "L60X60X7",
+        "length_mm": 3397,
+        "mode": "strong",
+        "confidence": 0.9897388342133918,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9897388342133918
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7357",
+        "of": "257403",
+        "modelo": "A25S607",
+        "perfil": "L65X65X7",
+        "length_mm": 1841,
+        "mode": "weak_guess",
+        "confidence": 0.02076342069245197,
+        "candidates_evaluated": 15648,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.02076342069245197,
+          "profile": 0.474183838851586,
+          "model": 0.005690943951982661,
+          "reference": 0.0033823956874454984
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 11,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S524"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47689",
+        "of": "263324",
+        "modelo": "AT1T182",
+        "perfil": "L80X80X10",
+        "length_mm": 5094,
+        "mode": "strong",
+        "confidence": 0.9977893616428332,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9977893616428332
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7368",
+        "of": "257403",
+        "modelo": "A25S519",
+        "perfil": "L80X80X8",
+        "length_mm": 4004,
+        "mode": "weak_guess",
+        "confidence": 0.0020903014300397136,
+        "candidates_evaluated": 16131,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.013298355886860081,
+          "profile": 0.47232472324723246,
+          "model": 0.0037998051857692844,
+          "reference": 0.0020903014300397136
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 12,
+      "observed_label": {
+        "of": "264529",
+        "modelo": "EA8FP24"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:25256",
+        "of": "262298",
+        "modelo": "A12C109",
+        "perfil": "L90X90X6",
+        "length_mm": 3370,
+        "mode": "strong",
+        "confidence": 0.9947092613627145,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9947092613627145
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:25258",
+        "of": "262298",
+        "modelo": "A12C4",
+        "perfil": "L90X90X7",
+        "length_mm": 409,
+        "mode": "weak_guess",
+        "confidence": 0.003580537119823401,
+        "candidates_evaluated": 15675,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.017806268793482204,
+          "profile": 0.8176802079589546,
+          "model": 0.0118026570749272,
+          "reference": 0.003580537119823401
+        }
+      }
+    },
+    {
+      "uid": "1799668b06d7",
+      "row_index": 0,
+      "observed_label": {
+        "of": "265301"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64322",
+        "of": "265288",
+        "modelo": "DLT702D",
+        "perfil": "L100X100X7",
+        "length_mm": 7858,
+        "mode": "strong",
+        "confidence": 0.9978727554546295,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9978727554546295
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:60204",
+        "of": "264932",
+        "modelo": "A4RA24",
+        "perfil": "L100X100X7",
+        "length_mm": 2865,
+        "mode": "weak_guess",
+        "confidence": 0.014760358412203146,
+        "candidates_evaluated": 4921,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.06729645842369761,
+          "profile": 0.809681554923742,
+          "model": 0.03330058656889321,
+          "reference": 0.014760358412203146
+        }
+      }
+    },
+    {
+      "uid": "1799668b06d7",
+      "row_index": 1,
+      "observed_label": {
+        "of": "265301"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64341",
+        "of": "265289",
+        "modelo": "DLA464",
+        "perfil": "L65X65X5",
+        "length_mm": 2151,
+        "mode": "strong",
+        "confidence": 0.9972452760528435,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9972452760528435
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69110",
+        "of": "265299",
+        "modelo": "A4RF1",
+        "perfil": "L65X65X5",
+        "length_mm": 4135,
+        "mode": "weak_guess",
+        "confidence": 0.0011969496486298199,
+        "candidates_evaluated": 14867,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.007564872102687229,
+          "profile": 0.4905389221556886,
+          "model": 0.0034531248419284893,
+          "reference": 0.0011969496486298199
+        }
+      }
+    },
+    {
+      "uid": "1799668b06d7",
+      "row_index": 2,
+      "observed_label": {
+        "of": "265350"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64483",
+        "of": "265286",
+        "modelo": "DLT151D",
+        "perfil": "L70X70X6",
+        "length_mm": 4870,
+        "mode": "strong",
+        "confidence": 0.9927071943142207,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9927071943142207
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69115",
+        "of": "265299",
+        "modelo": "A4RF40",
+        "perfil": "L70X70X6",
+        "length_mm": 4229,
+        "mode": "weak_guess",
+        "confidence": 0.009397341129693025,
+        "candidates_evaluated": 11339,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.054702396553056705,
+          "profile": 0.8130917191997378,
+          "model": 0.020996293889299328,
+          "reference": 0.009397341129693025
+        }
+      }
+    },
+    {
+      "uid": "1799668b06d7",
+      "row_index": 3,
+      "observed_label": {
+        "of": "265350"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64315",
+        "of": "265288",
+        "modelo": "DLT476AD",
+        "perfil": "L80X80X6",
+        "length_mm": 5291,
+        "mode": "strong",
+        "confidence": 0.996533411250932,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.996533411250932
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69126",
+        "of": "265299",
+        "modelo": "A4RB12",
+        "perfil": "L80X80X6",
+        "length_mm": 98,
+        "mode": "weak_guess",
+        "confidence": 0.0009820874537368716,
+        "candidates_evaluated": 7894,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.006130488403558557,
+          "profile": 0.4904214559386973,
+          "model": 0.002527343561999514,
+          "reference": 0.0009820874537368716
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 0,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F33"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64331",
+        "of": "265289",
+        "modelo": "DLA488D",
+        "perfil": "L55X55X4",
+        "length_mm": 1974,
+        "mode": "strong",
+        "confidence": 0.9978148267021267,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9978148267021267
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69779",
+        "of": "265574",
+        "modelo": "D8F10",
+        "perfil": "L55X55X4",
+        "length_mm": 2745,
+        "mode": "weak_guess",
+        "confidence": 0.01043502486066426,
+        "candidates_evaluated": 16755,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.09152086746534259,
+          "profile": 0.8310925192439914,
+          "model": 0.021640560419739753,
+          "reference": 0.01043502486066426
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 0,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64304",
+        "of": "265288",
+        "modelo": "DLT714",
+        "perfil": "L60X60X4",
+        "length_mm": 3810,
+        "mode": "strong",
+        "confidence": 0.9640575383110286,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9640575383110286
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69104",
+        "of": "265299",
+        "modelo": "A4RC1",
+        "perfil": "L60X60X4",
+        "length_mm": 5060,
+        "mode": "weak_guess",
+        "confidence": 0.04891418040980616,
+        "candidates_evaluated": 4739,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.04891418040980616,
+          "profile": 0.8250699862104404,
+          "model": 0.012426384294292618,
+          "reference": 0.0063168074469500575
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 1,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64306",
+        "of": "265288",
+        "modelo": "DLT715D",
+        "perfil": "L60X60X5",
+        "length_mm": 2545,
+        "mode": "strong",
+        "confidence": 0.9640698960120262,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9640698960120262
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69106",
+        "of": "265299",
+        "modelo": "A4RB34",
+        "perfil": "L60X60X5",
+        "length_mm": 2611,
+        "mode": "weak_guess",
+        "confidence": 0.008695098393020146,
+        "candidates_evaluated": 4744,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.008695098393020146,
+          "profile": 0.4919529185683401,
+          "model": 0.002854267883075362,
+          "reference": 0.001189412141179969
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 2,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64483",
+        "of": "265286",
+        "modelo": "DLT151D",
+        "perfil": "L70X70X6",
+        "length_mm": 4870,
+        "mode": "strong",
+        "confidence": 0.9858891355595889,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9858891355595889
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69115",
+        "of": "265299",
+        "modelo": "A4RF40",
+        "perfil": "L70X70X6",
+        "length_mm": 4229,
+        "mode": "weak_guess",
+        "confidence": 0.01335681210461097,
+        "candidates_evaluated": 11339,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.01335681210461097,
+          "profile": 0.4918347742555235,
+          "model": 0.006006234988078445,
+          "reference": 0.0022473340341621108
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 3,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.0005222752431334066,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.013869888526188897,
+          "profile": 0.490656444657403,
+          "model": 0.00142125695187574,
+          "reference": 0.0005222752431334066
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 4,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 5,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 6,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 7,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 8,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 9,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 10,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 11,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 12,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 13,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 14,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "c0b51c37d989",
+      "row_index": 1,
+      "observed_label": {
+        "of": "263323"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47778",
+        "of": "263323",
+        "modelo": "AT1T199",
+        "perfil": "L60X40X5",
+        "length_mm": 775,
+        "mode": "strong",
+        "confidence": 0.9825268525814748,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9825268525814748
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47930",
+        "of": "263323",
+        "modelo": "AEH18",
+        "perfil": "L60X60X5",
+        "length_mm": 1419,
+        "mode": "weak_guess",
+        "confidence": 0.009614526949312478,
+        "candidates_evaluated": 9814,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.009614526949312478,
+          "profile": 0.48479109953840693,
+          "model": 0.0031146038879320504,
+          "reference": 0.0012453125959599092
+        }
+      }
+    }
+  ],
+  "rows": [
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 0,
+      "observed_label": {
+        "of": "265362"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68064",
+        "of": "265362",
+        "modelo": "ZE-2101L",
+        "perfil": "L75X75X6",
+        "length_mm": 2111,
+        "mode": "strong",
+        "confidence": 0.9640945514682838,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9640945514682838
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68064",
+        "of": "265362",
+        "modelo": "ZE-2101L",
+        "perfil": "L75X75X6",
+        "length_mm": 2111,
+        "mode": "weak_guess",
+        "confidence": 0.9529533918759726,
+        "candidates_evaluated": 9943,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.9529533918759726,
+          "profile": 0.9850267430981999,
+          "model": 0.0963477037397593,
+          "reference": 0.0945276783120152
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 1,
+      "observed_label": {
+        "of": "265362"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68102",
+        "of": "265362",
+        "modelo": "ZE-1548",
+        "perfil": "L200X200X20",
+        "length_mm": 120,
+        "mode": "strong",
+        "confidence": 0.9434280644572776,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9434280644572776
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68102",
+        "of": "265362",
+        "modelo": "ZE-1548",
+        "perfil": "L200X200X20",
+        "length_mm": 120,
+        "mode": "weak_guess",
+        "confidence": 0.024910844838297055,
+        "candidates_evaluated": 8112,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.024910844838297055,
+          "profile": 0.48876074534354336,
+          "model": 0.01656840544753754,
+          "reference": 0.006177685246676586
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 2,
+      "observed_label": {
+        "of": "265715",
+        "modelo": "H92HS121DT"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69252",
+        "of": "265715",
+        "modelo": "H92HS121DT",
+        "perfil": "L60X60X6",
+        "length_mm": 272,
+        "mode": "strong",
+        "confidence": 0.9999332130264146,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9999332130264146
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69252",
+        "of": "265715",
+        "modelo": "H92HS121DT",
+        "perfil": "L60X60X6",
+        "length_mm": 272,
+        "mode": "strong",
+        "confidence": 0.7677861203328595,
+        "candidates_evaluated": 8348,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.9999072429025803,
+          "profile": 0.9999565730691093,
+          "model": 0.7678756509208794,
+          "reference": 0.7677861203328595
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 3,
+      "observed_label": {
+        "of": "265715",
+        "modelo": "H92HS121GT"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69253",
+        "of": "265715",
+        "modelo": "H92HS121GT",
+        "perfil": "L60X60X6",
+        "length_mm": 272,
+        "mode": "strong",
+        "confidence": 0.9999332130264146,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9999332130264146
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69253",
+        "of": "265715",
+        "modelo": "H92HS121GT",
+        "perfil": "L60X60X6",
+        "length_mm": 272,
+        "mode": "weak_guess",
+        "confidence": 0.08268427116013932,
+        "candidates_evaluated": 8348,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.4194089813003485,
+          "profile": 0.46896380101817653,
+          "model": 0.1157344882866211,
+          "reference": 0.08268427116013932
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 4,
+      "observed_label": {
+        "of": "265715",
+        "modelo": "H92HS125DT"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69254",
+        "of": "265715",
+        "modelo": "H92HS125DT",
+        "perfil": "L60X60X6",
+        "length_mm": 199,
+        "mode": "strong",
+        "confidence": 0.9999332130264146,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9999332130264146
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69254",
+        "of": "265715",
+        "modelo": "H92HS125DT",
+        "perfil": "L60X60X6",
+        "length_mm": 199,
+        "mode": "weak_guess",
+        "confidence": 0.081939987733169,
+        "candidates_evaluated": 8343,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.410479650776566,
+          "profile": 0.4687085310515074,
+          "model": 0.11501109166132559,
+          "reference": 0.081939987733169
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 5,
+      "observed_label": {
+        "of": "265715",
+        "modelo": "H92HS125GT"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69255",
+        "of": "265715",
+        "modelo": "H92HS125GT",
+        "perfil": "L60X60X6",
+        "length_mm": 199,
+        "mode": "strong",
+        "confidence": 0.9999332130264146,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9999332130264146
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69255",
+        "of": "265715",
+        "modelo": "H92HS125GT",
+        "perfil": "L60X60X6",
+        "length_mm": 199,
+        "mode": "weak_guess",
+        "confidence": 0.04504462769463641,
+        "candidates_evaluated": 8343,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.34809388518782153,
+          "profile": 0.435358657320283,
+          "model": 0.06586866482296069,
+          "reference": 0.04504462769463641
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 6,
+      "observed_label": {
+        "of": "264786"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:60144",
+        "of": "264786",
+        "modelo": "C4HN1005DHRT",
+        "perfil": "L60X60X6",
+        "length_mm": 671,
+        "mode": "strong",
+        "confidence": 0.9831889282412012,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9831889282412012
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:60144",
+        "of": "264786",
+        "modelo": "C4HN1005DHRT",
+        "perfil": "L60X60X6",
+        "length_mm": 671,
+        "mode": "weak_guess",
+        "confidence": 0.9580602527767601,
+        "candidates_evaluated": 8460,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.9580602527767601,
+          "profile": 0.9855236304366062,
+          "model": 0.05585725589242071,
+          "reference": 0.05542024174709832
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 7,
+      "observed_label": {
+        "of": "264786"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:60134",
+        "of": "264786",
+        "modelo": "C4HN1002HT",
+        "perfil": "L60X60X5",
+        "length_mm": 824,
+        "mode": "strong",
+        "confidence": 0.9817854468363176,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9817854468363176
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:60134",
+        "of": "264786",
+        "modelo": "C4HN1002HT",
+        "perfil": "L60X60X5",
+        "length_mm": 824,
+        "mode": "weak_guess",
+        "confidence": 0.004911462399677935,
+        "candidates_evaluated": 8513,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004911462399677935,
+          "profile": 0.4887733349287217,
+          "model": 0.0016223867213736684,
+          "reference": 0.0006562899896184919
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 8,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53316",
+        "of": "264324",
+        "modelo": "DLR584",
+        "perfil": "L55X55X4",
+        "length_mm": 1935,
+        "mode": "strong",
+        "confidence": 0.9803882141369562,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9803882141369562
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:54015",
+        "of": "264325",
+        "modelo": "DLA6032",
+        "perfil": "L55X55X5",
+        "length_mm": 2247,
+        "mode": "weak_guess",
+        "confidence": 0.6711512888136354,
+        "candidates_evaluated": 20431,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.6711512888136354,
+          "profile": 0.7555145841205341,
+          "model": 0.04058482303326931,
+          "reference": 0.034820178492483214
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 9,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53419",
+        "of": "264324",
+        "modelo": "DLR5823E",
+        "perfil": "L65X65X5",
+        "length_mm": 3030,
+        "mode": "strong",
+        "confidence": 0.9813391614583703,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9813391614583703
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:54069",
+        "of": "264325",
+        "modelo": "DLA6042D",
+        "perfil": "L65X65X5",
+        "length_mm": 3850,
+        "mode": "weak_guess",
+        "confidence": 0.008371668616891911,
+        "candidates_evaluated": 18135,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.008371668616891911,
+          "profile": 0.48911408960247843,
+          "model": 0.0033885575594828476,
+          "reference": 0.001236824505416482
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 10,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53552",
+        "of": "264324",
+        "modelo": "DLR672",
+        "perfil": "L90X90X7",
+        "length_mm": 6310,
+        "mode": "strong",
+        "confidence": 0.9781541770533115,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9781541770533115
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:54177",
+        "of": "264325",
+        "modelo": "DLA6014D",
+        "perfil": "L90X90X7",
+        "length_mm": 5133,
+        "mode": "weak_guess",
+        "confidence": 0.005912012890907283,
+        "candidates_evaluated": 13491,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.005912012890907283,
+          "profile": 0.48896469835072787,
+          "model": 0.0022830153469535703,
+          "reference": 0.0009332039890680226
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 11,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53223",
+        "of": "264324",
+        "modelo": "DLR5825",
+        "perfil": "L50X50X4",
+        "length_mm": 1508,
+        "mode": "strong",
+        "confidence": 0.9842480582399263,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9842480582399263
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:20925",
+        "of": "261461",
+        "modelo": "D32C33",
+        "perfil": "L50X50X4",
+        "length_mm": 1480,
+        "mode": "weak_guess",
+        "confidence": 0.004410184342523088,
+        "candidates_evaluated": 18466,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004410184342523088,
+          "profile": 0.48854961832061067,
+          "model": 0.0012845444912743236,
+          "reference": 0.0005004327165837131
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 12,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53193",
+        "of": "264324",
+        "modelo": "DLR603",
+        "perfil": "L45X45X4",
+        "length_mm": 926,
+        "mode": "strong",
+        "confidence": 0.9757665921773726,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9757665921773726
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:20893",
+        "of": "261461",
+        "modelo": "D32C105",
+        "perfil": "L45X45X4",
+        "length_mm": 1859,
+        "mode": "weak_guess",
+        "confidence": 0.004583085113564828,
+        "candidates_evaluated": 25807,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004583085113564828,
+          "profile": 0.48854961832061067,
+          "model": 0.0010564830620475734,
+          "reference": 0.0003559292330862547
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 13,
+      "observed_label": {
+        "of": "264324"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53352",
+        "of": "264324",
+        "modelo": "DLR5841",
+        "perfil": "L60X60X4",
+        "length_mm": 2037,
+        "mode": "strong",
+        "confidence": 0.9812330904885922,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9812330904885922
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:20971",
+        "of": "261461",
+        "modelo": "D32C20",
+        "perfil": "L60X60X4",
+        "length_mm": 1195,
+        "mode": "weak_guess",
+        "confidence": 0.004864957885277462,
+        "candidates_evaluated": 9415,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004864957885277462,
+          "profile": 0.48831664282308057,
+          "model": 0.0017083510807999738,
+          "reference": 0.0005939013730028174
+        }
+      }
+    },
+    {
+      "uid": "02e4058ad2f9",
+      "row_index": 14,
+      "observed_label": {},
+      "of_evaluable": false,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:53223",
+        "of": "264324",
+        "modelo": "DLR5825",
+        "perfil": "L50X50X4",
+        "length_mm": 1508,
+        "mode": "strong",
+        "confidence": 0.9842480582399263,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9842480582399263
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:20914",
+        "of": "261461",
+        "modelo": "D32F39",
+        "perfil": "L50X50X3",
+        "length_mm": 1656,
+        "mode": "weak_guess",
+        "confidence": 0.013288019857459879,
+        "candidates_evaluated": 18323,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.013288019857459879,
+          "profile": 0.34443268842945435,
+          "model": 0.002842139983932966,
+          "reference": 0.0007790600291354788
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 0,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF93"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68231",
+        "of": "265300",
+        "modelo": "A6RB22",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "strong",
+        "confidence": 0.9924712184563341,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9924712184563341
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68231",
+        "of": "265300",
+        "modelo": "A6RB22",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.01589439993460975,
+        "candidates_evaluated": 10452,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.7667533559243412,
+          "profile": 0.9744569016980907,
+          "model": 0.016563548640972498,
+          "reference": 0.01589439993460975
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 1,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF93"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68278",
+        "of": "265300",
+        "modelo": "A6RF93",
+        "perfil": "L40X40X3",
+        "length_mm": 2626,
+        "mode": "strong",
+        "confidence": 0.994108248602327,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.994108248602327
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68278",
+        "of": "265300",
+        "modelo": "A6RF93",
+        "perfil": "L40X40X3",
+        "length_mm": 2626,
+        "mode": "weak_guess",
+        "confidence": 0.05889271808049552,
+        "candidates_evaluated": 10452,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.37174685065743746,
+          "profile": 0.40991281089650544,
+          "model": 0.11036247413353571,
+          "reference": 0.05889271808049552
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 2,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF90"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68275",
+        "of": "265300",
+        "modelo": "A6RF90",
+        "perfil": "L40X40X3",
+        "length_mm": 1465,
+        "mode": "strong",
+        "confidence": 0.9939960354351512,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9939960354351512
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68275",
+        "of": "265300",
+        "modelo": "A6RF90",
+        "perfil": "L40X40X3",
+        "length_mm": 1465,
+        "mode": "weak_guess",
+        "confidence": 0.058531985899048,
+        "candidates_evaluated": 10452,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.31389359988025967,
+          "profile": 0.45046495974325923,
+          "model": 0.11474495261836751,
+          "reference": 0.058531985899048
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 3,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF9"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68274",
+        "of": "265300",
+        "modelo": "A6RF9",
+        "perfil": "L40X40X3",
+        "length_mm": 1918,
+        "mode": "strong",
+        "confidence": 0.9959501255542806,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9959501255542806
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68274",
+        "of": "265300",
+        "modelo": "A6RF9",
+        "perfil": "L40X40X3",
+        "length_mm": 1918,
+        "mode": "weak_guess",
+        "confidence": 0.05127552523939049,
+        "candidates_evaluated": 10452,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.31475028622578616,
+          "profile": 0.37329831678875836,
+          "model": 0.09391482692832827,
+          "reference": 0.05127552523939049
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 4,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF89"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68273",
+        "of": "265300",
+        "modelo": "A6RF89",
+        "perfil": "L40X40X3",
+        "length_mm": 1465,
+        "mode": "strong",
+        "confidence": 0.9941200428803634,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9941200428803634
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68273",
+        "of": "265300",
+        "modelo": "A6RF89",
+        "perfil": "L40X40X3",
+        "length_mm": 1465,
+        "mode": "weak_guess",
+        "confidence": 0.056374353658672174,
+        "candidates_evaluated": 10452,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.31389359988025967,
+          "profile": 0.4093302308954109,
+          "model": 0.10821014708806666,
+          "reference": 0.056374353658672174
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 5,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF88"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68272",
+        "of": "265300",
+        "modelo": "A6RF88",
+        "perfil": "L40X40X3",
+        "length_mm": 1430,
+        "mode": "strong",
+        "confidence": 0.9942046940032857,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9942046940032857
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68272",
+        "of": "265300",
+        "modelo": "A6RF88",
+        "perfil": "L40X40X3",
+        "length_mm": 1430,
+        "mode": "weak_guess",
+        "confidence": 0.05444398228131573,
+        "candidates_evaluated": 10452,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.3121865529750567,
+          "profile": 0.37150350471422816,
+          "model": 0.10581887133727884,
+          "reference": 0.05444398228131573
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 6,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF87"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68271",
+        "of": "265300",
+        "modelo": "A6RF87",
+        "perfil": "L40X40X3",
+        "length_mm": 1430,
+        "mode": "strong",
+        "confidence": 0.9946204385495203,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9946204385495203
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68271",
+        "of": "265300",
+        "modelo": "A6RF87",
+        "perfil": "L40X40X3",
+        "length_mm": 1430,
+        "mode": "weak_guess",
+        "confidence": 0.055382008500026156,
+        "candidates_evaluated": 10454,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.3608215179446013,
+          "profile": 0.3611677470321449,
+          "model": 0.10118875615358312,
+          "reference": 0.055382008500026156
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 7,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF86"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68270",
+        "of": "265300",
+        "modelo": "A6RF86",
+        "perfil": "L40X40X3",
+        "length_mm": 971,
+        "mode": "strong",
+        "confidence": 0.9944882005324429,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9944882005324429
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68270",
+        "of": "265300",
+        "modelo": "A6RF86",
+        "perfil": "L40X40X3",
+        "length_mm": 971,
+        "mode": "weak_guess",
+        "confidence": 0.05737030650906919,
+        "candidates_evaluated": 10454,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.3699919408364869,
+          "profile": 0.38494838686785704,
+          "model": 0.10564374694748829,
+          "reference": 0.05737030650906919
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 8,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF8"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68269",
+        "of": "265300",
+        "modelo": "A6RF8",
+        "perfil": "L40X40X3",
+        "length_mm": 1830,
+        "mode": "strong",
+        "confidence": 0.9959632812661948,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9959632812661948
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68269",
+        "of": "265300",
+        "modelo": "A6RF8",
+        "perfil": "L40X40X3",
+        "length_mm": 1830,
+        "mode": "weak_guess",
+        "confidence": 0.0473515648531541,
+        "candidates_evaluated": 10452,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.3160193840455967,
+          "profile": 0.33341740026963373,
+          "model": 0.08452881214474134,
+          "reference": 0.0473515648531541
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 9,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF7"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68268",
+        "of": "265300",
+        "modelo": "A6RF7",
+        "perfil": "L40X40X3",
+        "length_mm": 1832,
+        "mode": "strong",
+        "confidence": 0.9953762087766992,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9953762087766992
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68268",
+        "of": "265300",
+        "modelo": "A6RF7",
+        "perfil": "L40X40X3",
+        "length_mm": 1832,
+        "mode": "weak_guess",
+        "confidence": 0.0510323245798196,
+        "candidates_evaluated": 10452,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.3160193840455967,
+          "profile": 0.32879901081859625,
+          "model": 0.09179369117404719,
+          "reference": 0.0510323245798196
+        }
+      }
+    },
+    {
+      "uid": "095aec277844",
+      "row_index": 10,
+      "observed_label": {
+        "of": "265300",
+        "modelo": "A6RF190"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68267",
+        "of": "265300",
+        "modelo": "A6RF190",
+        "perfil": "L40X40X3",
+        "length_mm": 1010,
+        "mode": "strong",
+        "confidence": 0.993296362874108,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993296362874108
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68267",
+        "of": "265300",
+        "modelo": "A6RF190",
+        "perfil": "L40X40X3",
+        "length_mm": 1010,
+        "mode": "weak_guess",
+        "confidence": 0.03479556753442042,
+        "candidates_evaluated": 10452,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.3043734186312455,
+          "profile": 0.4082688751741566,
+          "model": 0.07722829350995768,
+          "reference": 0.03479556753442042
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 0,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S413"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:56859",
+        "of": "264219",
+        "modelo": "W061604",
+        "perfil": "L110X110X12",
+        "length_mm": 4540,
+        "mode": "strong",
+        "confidence": 0.9994003189221301,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9994003189221301
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7404",
+        "of": "257403",
+        "modelo": "A25S309",
+        "perfil": "L110X110X10",
+        "length_mm": 4410,
+        "mode": "weak_guess",
+        "confidence": 0.008532386450922523,
+        "candidates_evaluated": 15726,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.08540608758593296,
+          "profile": 0.796421510925608,
+          "model": 0.010697378427299703,
+          "reference": 0.008532386450922523
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 1,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S414"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:56859",
+        "of": "264219",
+        "modelo": "W061604",
+        "perfil": "L110X110X12",
+        "length_mm": 4540,
+        "mode": "strong",
+        "confidence": 0.9994003189221301,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9994003189221301
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7404",
+        "of": "257403",
+        "modelo": "A25S309",
+        "perfil": "L110X110X10",
+        "length_mm": 4410,
+        "mode": "weak_guess",
+        "confidence": 0.00017809142717677438,
+        "candidates_evaluated": 15726,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.006920415224913495,
+          "profile": 0.009791397667836797,
+          "model": 0.00043579714823536504,
+          "reference": 0.00017809142717677438
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 2,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S507"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:56859",
+        "of": "264219",
+        "modelo": "W061604",
+        "perfil": "L110X110X12",
+        "length_mm": 4540,
+        "mode": "strong",
+        "confidence": 0.9994003189221301,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9994003189221301
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7404",
+        "of": "257403",
+        "modelo": "A25S309",
+        "perfil": "L110X110X10",
+        "length_mm": 4410,
+        "mode": "weak_guess",
+        "confidence": 0.00017809142717677438,
+        "candidates_evaluated": 15726,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.006920415224913495,
+          "profile": 0.009791397667836797,
+          "model": 0.00043579714823536504,
+          "reference": 0.00017809142717677438
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 3,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S508"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:56859",
+        "of": "264219",
+        "modelo": "W061604",
+        "perfil": "L110X110X12",
+        "length_mm": 4540,
+        "mode": "strong",
+        "confidence": 0.9994003189221301,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9994003189221301
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7404",
+        "of": "257403",
+        "modelo": "A25S309",
+        "perfil": "L110X110X10",
+        "length_mm": 4410,
+        "mode": "weak_guess",
+        "confidence": 0.00017809142717677438,
+        "candidates_evaluated": 15726,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.006920415224913495,
+          "profile": 0.009791397667836797,
+          "model": 0.00043579714823536504,
+          "reference": 0.00017809142717677438
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 4,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S509"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:56859",
+        "of": "264219",
+        "modelo": "W061604",
+        "perfil": "L110X110X12",
+        "length_mm": 4540,
+        "mode": "strong",
+        "confidence": 0.9994003189221301,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9994003189221301
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7404",
+        "of": "257403",
+        "modelo": "A25S309",
+        "perfil": "L110X110X10",
+        "length_mm": 4410,
+        "mode": "weak_guess",
+        "confidence": 0.00017809142717677438,
+        "candidates_evaluated": 15726,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.006920415224913495,
+          "profile": 0.009791397667836797,
+          "model": 0.00043579714823536504,
+          "reference": 0.00017809142717677438
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 5,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47397",
+        "of": "263324",
+        "modelo": "AS2249",
+        "perfil": "L150X100X10",
+        "length_mm": 450,
+        "mode": "strong",
+        "confidence": 0.9763822212523392,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9763822212523392
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7389",
+        "of": "257403",
+        "modelo": "A35S113",
+        "perfil": "L100X100X10",
+        "length_mm": 3239,
+        "mode": "weak_guess",
+        "confidence": 0.019868834646280413,
+        "candidates_evaluated": 16583,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.019868834646280413,
+          "profile": 0.48063834780567943,
+          "model": 0.0047156452121694965,
+          "reference": 0.00250342264815177
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 6,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:21916",
+        "of": "261754",
+        "modelo": "A7S506",
+        "perfil": "L60X60X63",
+        "length_mm": 2254,
+        "mode": "strong",
+        "confidence": 0.9840203669749278,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9840203669749278
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7629",
+        "of": "257403",
+        "modelo": "A35H29",
+        "perfil": "L60X60X6",
+        "length_mm": 2505,
+        "mode": "weak_guess",
+        "confidence": 0.01520223876719345,
+        "candidates_evaluated": 15454,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.01520223876719345,
+          "profile": 0.4806947541368384,
+          "model": 0.002087702889704964,
+          "reference": 0.0011481474629472968
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 7,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:31202",
+        "of": "262608",
+        "modelo": "A7S303",
+        "perfil": "L100X100X12",
+        "length_mm": 4320,
+        "mode": "strong",
+        "confidence": 0.9902695375946701,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9902695375946701
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7372",
+        "of": "257403",
+        "modelo": "A25S615",
+        "perfil": "L100X100X8",
+        "length_mm": 3049,
+        "mode": "weak_guess",
+        "confidence": 0.018323260609910488,
+        "candidates_evaluated": 16327,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.018323260609910488,
+          "profile": 0.4804692082111437,
+          "model": 0.006377102217350825,
+          "reference": 0.0031849411998892737
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 8,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47423",
+        "of": "263324",
+        "modelo": "AS1111",
+        "perfil": "L90X90X10",
+        "length_mm": 3239,
+        "mode": "strong",
+        "confidence": 0.980704180833349,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.980704180833349
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7370",
+        "of": "257403",
+        "modelo": "A25S618",
+        "perfil": "L90X90X7",
+        "length_mm": 3484,
+        "mode": "weak_guess",
+        "confidence": 0.01110195585237868,
+        "candidates_evaluated": 19733,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.01110195585237868,
+          "profile": 0.4806947541368384,
+          "model": 0.0043303910778719765,
+          "reference": 0.0016982891478245438
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 9,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:21861",
+        "of": "261755",
+        "modelo": "A30S622",
+        "perfil": "L60X60X8",
+        "length_mm": 2334,
+        "mode": "strong",
+        "confidence": 0.9862589381990284,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9862589381990284
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7348",
+        "of": "257403",
+        "modelo": "A25S517",
+        "perfil": "L60X60X8",
+        "length_mm": 2274,
+        "mode": "weak_guess",
+        "confidence": 0.05871980503189735,
+        "candidates_evaluated": 13268,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.05871980503189735,
+          "profile": 0.4807511737089202,
+          "model": 0.022536823166269596,
+          "reference": 0.011499028646505935
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 10,
+      "observed_label": {
+        "of": "264154"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:21860",
+        "of": "261755",
+        "modelo": "A30S621",
+        "perfil": "L60X60X7",
+        "length_mm": 3397,
+        "mode": "strong",
+        "confidence": 0.9897388342133918,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9897388342133918
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7357",
+        "of": "257403",
+        "modelo": "A25S607",
+        "perfil": "L65X65X7",
+        "length_mm": 1841,
+        "mode": "weak_guess",
+        "confidence": 0.02076342069245197,
+        "candidates_evaluated": 15648,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.02076342069245197,
+          "profile": 0.474183838851586,
+          "model": 0.005690943951982661,
+          "reference": 0.0033823956874454984
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 11,
+      "observed_label": {
+        "of": "264154",
+        "modelo": "A31S524"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47689",
+        "of": "263324",
+        "modelo": "AT1T182",
+        "perfil": "L80X80X10",
+        "length_mm": 5094,
+        "mode": "strong",
+        "confidence": 0.9977893616428332,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9977893616428332
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:7368",
+        "of": "257403",
+        "modelo": "A25S519",
+        "perfil": "L80X80X8",
+        "length_mm": 4004,
+        "mode": "weak_guess",
+        "confidence": 0.0020903014300397136,
+        "candidates_evaluated": 16131,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.013298355886860081,
+          "profile": 0.47232472324723246,
+          "model": 0.0037998051857692844,
+          "reference": 0.0020903014300397136
+        }
+      }
+    },
+    {
+      "uid": "0b5cb0b66c71",
+      "row_index": 12,
+      "observed_label": {
+        "of": "264529",
+        "modelo": "EA8FP24"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:25256",
+        "of": "262298",
+        "modelo": "A12C109",
+        "perfil": "L90X90X6",
+        "length_mm": 3370,
+        "mode": "strong",
+        "confidence": 0.9947092613627145,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9947092613627145
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:25258",
+        "of": "262298",
+        "modelo": "A12C4",
+        "perfil": "L90X90X7",
+        "length_mm": 409,
+        "mode": "weak_guess",
+        "confidence": 0.003580537119823401,
+        "candidates_evaluated": 15675,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.017806268793482204,
+          "profile": 0.8176802079589546,
+          "model": 0.0118026570749272,
+          "reference": 0.003580537119823401
+        }
+      }
+    },
+    {
+      "uid": "1799668b06d7",
+      "row_index": 0,
+      "observed_label": {
+        "of": "265301"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64322",
+        "of": "265288",
+        "modelo": "DLT702D",
+        "perfil": "L100X100X7",
+        "length_mm": 7858,
+        "mode": "strong",
+        "confidence": 0.9978727554546295,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9978727554546295
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:60204",
+        "of": "264932",
+        "modelo": "A4RA24",
+        "perfil": "L100X100X7",
+        "length_mm": 2865,
+        "mode": "weak_guess",
+        "confidence": 0.014760358412203146,
+        "candidates_evaluated": 4921,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.06729645842369761,
+          "profile": 0.809681554923742,
+          "model": 0.03330058656889321,
+          "reference": 0.014760358412203146
+        }
+      }
+    },
+    {
+      "uid": "1799668b06d7",
+      "row_index": 1,
+      "observed_label": {
+        "of": "265301"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64341",
+        "of": "265289",
+        "modelo": "DLA464",
+        "perfil": "L65X65X5",
+        "length_mm": 2151,
+        "mode": "strong",
+        "confidence": 0.9972452760528435,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9972452760528435
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69110",
+        "of": "265299",
+        "modelo": "A4RF1",
+        "perfil": "L65X65X5",
+        "length_mm": 4135,
+        "mode": "weak_guess",
+        "confidence": 0.0011969496486298199,
+        "candidates_evaluated": 14867,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.007564872102687229,
+          "profile": 0.4905389221556886,
+          "model": 0.0034531248419284893,
+          "reference": 0.0011969496486298199
+        }
+      }
+    },
+    {
+      "uid": "1799668b06d7",
+      "row_index": 2,
+      "observed_label": {
+        "of": "265350"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64483",
+        "of": "265286",
+        "modelo": "DLT151D",
+        "perfil": "L70X70X6",
+        "length_mm": 4870,
+        "mode": "strong",
+        "confidence": 0.9927071943142207,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9927071943142207
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69115",
+        "of": "265299",
+        "modelo": "A4RF40",
+        "perfil": "L70X70X6",
+        "length_mm": 4229,
+        "mode": "weak_guess",
+        "confidence": 0.009397341129693025,
+        "candidates_evaluated": 11339,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.054702396553056705,
+          "profile": 0.8130917191997378,
+          "model": 0.020996293889299328,
+          "reference": 0.009397341129693025
+        }
+      }
+    },
+    {
+      "uid": "1799668b06d7",
+      "row_index": 3,
+      "observed_label": {
+        "of": "265350"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64315",
+        "of": "265288",
+        "modelo": "DLT476AD",
+        "perfil": "L80X80X6",
+        "length_mm": 5291,
+        "mode": "strong",
+        "confidence": 0.996533411250932,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.996533411250932
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69126",
+        "of": "265299",
+        "modelo": "A4RB12",
+        "perfil": "L80X80X6",
+        "length_mm": 98,
+        "mode": "weak_guess",
+        "confidence": 0.0009820874537368716,
+        "candidates_evaluated": 7894,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.006130488403558557,
+          "profile": 0.4904214559386973,
+          "model": 0.002527343561999514,
+          "reference": 0.0009820874537368716
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 0,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F33"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64331",
+        "of": "265289",
+        "modelo": "DLA488D",
+        "perfil": "L55X55X4",
+        "length_mm": 1974,
+        "mode": "strong",
+        "confidence": 0.9978148267021267,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9978148267021267
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69779",
+        "of": "265574",
+        "modelo": "D8F10",
+        "perfil": "L55X55X4",
+        "length_mm": 2745,
+        "mode": "weak_guess",
+        "confidence": 0.01043502486066426,
+        "candidates_evaluated": 16755,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.09152086746534259,
+          "profile": 0.8310925192439914,
+          "model": 0.021640560419739753,
+          "reference": 0.01043502486066426
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 1,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F33"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69788",
+        "of": "265574",
+        "modelo": "D8F33",
+        "perfil": "L55X55X4",
+        "length_mm": 2905,
+        "mode": "strong",
+        "confidence": 0.9950076509721733,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9950076509721733
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69788",
+        "of": "265574",
+        "modelo": "D8F33",
+        "perfil": "L55X55X4",
+        "length_mm": 2905,
+        "mode": "weak_guess",
+        "confidence": 0.035331577708393194,
+        "candidates_evaluated": 16756,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.22891922322129676,
+          "profile": 0.3862077151807622,
+          "model": 0.08286853811751338,
+          "reference": 0.035331577708393194
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 2,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F32"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69787",
+        "of": "265574",
+        "modelo": "D8F32",
+        "perfil": "L55X55X4",
+        "length_mm": 2905,
+        "mode": "strong",
+        "confidence": 0.9940483175560187,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9940483175560187
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69787",
+        "of": "265574",
+        "modelo": "D8F32",
+        "perfil": "L55X55X4",
+        "length_mm": 2905,
+        "mode": "weak_guess",
+        "confidence": 0.035712498137813485,
+        "candidates_evaluated": 16770,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.20952999244541107,
+          "profile": 0.39806837037336723,
+          "model": 0.0865254461089077,
+          "reference": 0.035712498137813485
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 3,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F9"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69798",
+        "of": "265574",
+        "modelo": "D8F9",
+        "perfil": "L55X55X4",
+        "length_mm": 2745,
+        "mode": "strong",
+        "confidence": 0.9952054817857799,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9952054817857799
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69798",
+        "of": "265574",
+        "modelo": "D8F9",
+        "perfil": "L55X55X4",
+        "length_mm": 2745,
+        "mode": "weak_guess",
+        "confidence": 0.034924925184629814,
+        "candidates_evaluated": 16755,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.21980083505637493,
+          "profile": 0.35026736388662144,
+          "model": 0.07901632178330609,
+          "reference": 0.034924925184629814
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 4,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F10"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69779",
+        "of": "265574",
+        "modelo": "D8F10",
+        "perfil": "L55X55X4",
+        "length_mm": 2745,
+        "mode": "strong",
+        "confidence": 0.9946433449185941,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9946433449185941
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69779",
+        "of": "265574",
+        "modelo": "D8F10",
+        "perfil": "L55X55X4",
+        "length_mm": 2745,
+        "mode": "weak_guess",
+        "confidence": 0.03443888664029812,
+        "candidates_evaluated": 16758,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.20676179113239593,
+          "profile": 0.33744976735976845,
+          "model": 0.08161282662127367,
+          "reference": 0.03443888664029812
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 5,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F7"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69794",
+        "of": "265574",
+        "modelo": "D8F7",
+        "perfil": "L55X55X4",
+        "length_mm": 2553,
+        "mode": "strong",
+        "confidence": 0.9961681003809877,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9961681003809877
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69794",
+        "of": "265574",
+        "modelo": "D8F7",
+        "perfil": "L55X55X4",
+        "length_mm": 2553,
+        "mode": "weak_guess",
+        "confidence": 0.029789363748435903,
+        "candidates_evaluated": 16755,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.20811011893417228,
+          "profile": 0.3256349199224632,
+          "model": 0.07024144532853259,
+          "reference": 0.029789363748435903
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 6,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F8"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69795",
+        "of": "265574",
+        "modelo": "D8F8",
+        "perfil": "L55X55X4",
+        "length_mm": 2553,
+        "mode": "strong",
+        "confidence": 0.996631644506231,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.996631644506231
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69795",
+        "of": "265574",
+        "modelo": "D8F8",
+        "perfil": "L55X55X4",
+        "length_mm": 2553,
+        "mode": "weak_guess",
+        "confidence": 0.030506113442789473,
+        "candidates_evaluated": 16756,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.21033816381335949,
+          "profile": 0.3582320333488892,
+          "model": 0.07182924488500729,
+          "reference": 0.030506113442789473
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 7,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F17"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69784",
+        "of": "265574",
+        "modelo": "D8F17",
+        "perfil": "L55X55X4",
+        "length_mm": 2598,
+        "mode": "strong",
+        "confidence": 0.9948943901023524,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9948943901023524
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69784",
+        "of": "265574",
+        "modelo": "D8F17",
+        "perfil": "L55X55X4",
+        "length_mm": 2598,
+        "mode": "weak_guess",
+        "confidence": 0.03355124454924432,
+        "candidates_evaluated": 16775,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.1981371640102442,
+          "profile": 0.32913555974090414,
+          "model": 0.08058241187977425,
+          "reference": 0.03355124454924432
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 8,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F18"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69785",
+        "of": "265574",
+        "modelo": "D8F18",
+        "perfil": "L55X55X4",
+        "length_mm": 2598,
+        "mode": "strong",
+        "confidence": 0.9960990133381897,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9960990133381897
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69785",
+        "of": "265574",
+        "modelo": "D8F18",
+        "perfil": "L55X55X4",
+        "length_mm": 2598,
+        "mode": "weak_guess",
+        "confidence": 0.021366710682474137,
+        "candidates_evaluated": 16775,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.1649749333637847,
+          "profile": 0.29624232178666426,
+          "model": 0.05233479633179999,
+          "reference": 0.021366710682474137
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 9,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8C130"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69763",
+        "of": "265574",
+        "modelo": "D8C127",
+        "perfil": "L50X50X4",
+        "length_mm": 1262,
+        "mode": "strong",
+        "confidence": 0.9918781234098925,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9918781234098925
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69763",
+        "of": "265574",
+        "modelo": "D8C127",
+        "perfil": "L50X50X4",
+        "length_mm": 1262,
+        "mode": "weak_guess",
+        "confidence": 0.060512227522080964,
+        "candidates_evaluated": 14552,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.6793278581378109,
+          "profile": 0.9729108668679723,
+          "model": 0.06639392611531154,
+          "reference": 0.060512227522080964
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 10,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8C130"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69764",
+        "of": "265574",
+        "modelo": "D8C130",
+        "perfil": "L50X50X4",
+        "length_mm": 1836,
+        "mode": "strong",
+        "confidence": 0.9930199352663658,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9930199352663658
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69764",
+        "of": "265574",
+        "modelo": "D8C130",
+        "perfil": "L50X50X4",
+        "length_mm": 1836,
+        "mode": "weak_guess",
+        "confidence": 0.047223595084581,
+        "candidates_evaluated": 14552,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.32044401484431556,
+          "profile": 0.40961332880160073,
+          "model": 0.09435696538690748,
+          "reference": 0.047223595084581
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 11,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8T43"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69775",
+        "of": "265574",
+        "modelo": "D8T43",
+        "perfil": "L50X50X4",
+        "length_mm": 425,
+        "mode": "strong",
+        "confidence": 0.9917818414701682,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9917818414701682
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69775",
+        "of": "265574",
+        "modelo": "D8T43",
+        "perfil": "L50X50X4",
+        "length_mm": 425,
+        "mode": "weak_guess",
+        "confidence": 0.04931090449885858,
+        "candidates_evaluated": 14586,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.28268977668077877,
+          "profile": 0.437402899037696,
+          "model": 0.10063883905172089,
+          "reference": 0.04931090449885858
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 12,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8C131"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69765",
+        "of": "265574",
+        "modelo": "D8C131",
+        "perfil": "L50X50X4",
+        "length_mm": 1836,
+        "mode": "strong",
+        "confidence": 0.99329377773208,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.99329377773208
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69765",
+        "of": "265574",
+        "modelo": "D8C131",
+        "perfil": "L50X50X4",
+        "length_mm": 1836,
+        "mode": "weak_guess",
+        "confidence": 0.046442643700067995,
+        "candidates_evaluated": 14552,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.3176144637288576,
+          "profile": 0.3845949187094625,
+          "model": 0.09178071522933492,
+          "reference": 0.046442643700067995
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 13,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8T42"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69774",
+        "of": "265574",
+        "modelo": "D8T42",
+        "perfil": "L50X50X4",
+        "length_mm": 425,
+        "mode": "strong",
+        "confidence": 0.991606589468155,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.991606589468155
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69774",
+        "of": "265574",
+        "modelo": "D8T42",
+        "perfil": "L50X50X4",
+        "length_mm": 425,
+        "mode": "weak_guess",
+        "confidence": 0.050558845288738705,
+        "candidates_evaluated": 14597,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.3039350531260128,
+          "profile": 0.450103318028756,
+          "model": 0.10322396918789874,
+          "reference": 0.050558845288738705
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 14,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8C132"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69766",
+        "of": "265574",
+        "modelo": "D8C132",
+        "perfil": "L50X50X4",
+        "length_mm": 1244,
+        "mode": "strong",
+        "confidence": 0.9929291396890363,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9929291396890363
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69766",
+        "of": "265574",
+        "modelo": "D8C132",
+        "perfil": "L50X50X4",
+        "length_mm": 1244,
+        "mode": "weak_guess",
+        "confidence": 0.047493503830900195,
+        "candidates_evaluated": 14552,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.32044401484431556,
+          "profile": 0.4258679573582501,
+          "model": 0.09402151393903968,
+          "reference": 0.047493503830900195
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 15,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8C134"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69767",
+        "of": "265574",
+        "modelo": "D8C134",
+        "perfil": "L50X50X4",
+        "length_mm": 1250,
+        "mode": "strong",
+        "confidence": 0.9930107164772217,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9930107164772217
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69767",
+        "of": "265574",
+        "modelo": "D8C134",
+        "perfil": "L50X50X4",
+        "length_mm": 1250,
+        "mode": "weak_guess",
+        "confidence": 0.046027819958131384,
+        "candidates_evaluated": 14552,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.3100164206547895,
+          "profile": 0.40660753857227405,
+          "model": 0.09154215482152207,
+          "reference": 0.046027819958131384
+        }
+      }
+    },
+    {
+      "uid": "8bfd9466f652",
+      "row_index": 16,
+      "observed_label": {
+        "of": "265574",
+        "modelo": "D8F12"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69773",
+        "of": "265574",
+        "modelo": "D8F12",
+        "perfil": "L50X50X4",
+        "length_mm": 1693,
+        "mode": "strong",
+        "confidence": 0.991578974452053,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.991578974452053
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69773",
+        "of": "265574",
+        "modelo": "D8F12",
+        "perfil": "L50X50X4",
+        "length_mm": 1693,
+        "mode": "weak_guess",
+        "confidence": 0.021884727088396533,
+        "candidates_evaluated": 14558,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.15308408343248944,
+          "profile": 0.3261216711187214,
+          "model": 0.052068405363179665,
+          "reference": 0.021884727088396533
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 0,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64304",
+        "of": "265288",
+        "modelo": "DLT714",
+        "perfil": "L60X60X4",
+        "length_mm": 3810,
+        "mode": "strong",
+        "confidence": 0.9640575383110286,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9640575383110286
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69104",
+        "of": "265299",
+        "modelo": "A4RC1",
+        "perfil": "L60X60X4",
+        "length_mm": 5060,
+        "mode": "weak_guess",
+        "confidence": 0.04891418040980616,
+        "candidates_evaluated": 4739,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.04891418040980616,
+          "profile": 0.8250699862104404,
+          "model": 0.012426384294292618,
+          "reference": 0.0063168074469500575
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 1,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64306",
+        "of": "265288",
+        "modelo": "DLT715D",
+        "perfil": "L60X60X5",
+        "length_mm": 2545,
+        "mode": "strong",
+        "confidence": 0.9640698960120262,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9640698960120262
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69106",
+        "of": "265299",
+        "modelo": "A4RB34",
+        "perfil": "L60X60X5",
+        "length_mm": 2611,
+        "mode": "weak_guess",
+        "confidence": 0.008695098393020146,
+        "candidates_evaluated": 4744,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.008695098393020146,
+          "profile": 0.4919529185683401,
+          "model": 0.002854267883075362,
+          "reference": 0.001189412141179969
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 2,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64483",
+        "of": "265286",
+        "modelo": "DLT151D",
+        "perfil": "L70X70X6",
+        "length_mm": 4870,
+        "mode": "strong",
+        "confidence": 0.9858891355595889,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9858891355595889
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:69115",
+        "of": "265299",
+        "modelo": "A4RF40",
+        "perfil": "L70X70X6",
+        "length_mm": 4229,
+        "mode": "weak_guess",
+        "confidence": 0.01335681210461097,
+        "candidates_evaluated": 11339,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.01335681210461097,
+          "profile": 0.4918347742555235,
+          "model": 0.006006234988078445,
+          "reference": 0.0022473340341621108
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 3,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.0005222752431334066,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.013869888526188897,
+          "profile": 0.490656444657403,
+          "model": 0.00142125695187574,
+          "reference": 0.0005222752431334066
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 4,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 5,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 6,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 7,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 8,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 9,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 10,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 11,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 12,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 13,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "8ec5f79856a1",
+      "row_index": 14,
+      "observed_label": {
+        "of": "265575"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:64295",
+        "of": "265288",
+        "modelo": "DLT479A",
+        "perfil": "L45X45X4",
+        "length_mm": 1092,
+        "mode": "strong",
+        "confidence": 0.993823800779453,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.993823800779453
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:68979",
+        "of": "265299",
+        "modelo": "A4RB38",
+        "perfil": "L40X40X3",
+        "length_mm": 1213,
+        "mode": "weak_guess",
+        "confidence": 0.00017902229185479056,
+        "candidates_evaluated": 10631,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.004901960784313725,
+          "profile": 0.01546128682854538,
+          "model": 0.00044194977021296797,
+          "reference": 0.00017902229185479056
+        }
+      }
+    },
+    {
+      "uid": "c0b51c37d989",
+      "row_index": 0,
+      "observed_label": {
+        "of": "263323"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47780",
+        "of": "263323",
+        "modelo": "AT1T221",
+        "perfil": "L100X50X6",
+        "length_mm": 2150,
+        "mode": "strong",
+        "confidence": 0.9817344485306649,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9817344485306649
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47780",
+        "of": "263323",
+        "modelo": "AT1T221",
+        "perfil": "L100X50X6",
+        "length_mm": 2150,
+        "mode": "weak_guess",
+        "confidence": 0.9240683600408746,
+        "candidates_evaluated": 9137,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.9240683600408746,
+          "profile": 0.9660141696745809,
+          "model": 0.05446884417961411,
+          "reference": 0.050681795831706164
+        }
+      }
+    },
+    {
+      "uid": "c0b51c37d989",
+      "row_index": 1,
+      "observed_label": {
+        "of": "263323"
+      },
+      "of_evaluable": true,
+      "model_evaluable": false,
+      "geometry_evaluable": false,
+      "changed_reference": true,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47778",
+        "of": "263323",
+        "modelo": "AT1T199",
+        "perfil": "L60X40X5",
+        "length_mm": 775,
+        "mode": "strong",
+        "confidence": 0.9825268525814748,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9825268525814748
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47930",
+        "of": "263323",
+        "modelo": "AEH18",
+        "perfil": "L60X60X5",
+        "length_mm": 1419,
+        "mode": "weak_guess",
+        "confidence": 0.009614526949312478,
+        "candidates_evaluated": 9814,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": 0.009614526949312478,
+          "profile": 0.48479109953840693,
+          "model": 0.0031146038879320504,
+          "reference": 0.0012453125959599092
+        }
+      }
+    },
+    {
+      "uid": "c0b51c37d989",
+      "row_index": 2,
+      "observed_label": {
+        "of": "263323",
+        "modelo": "AT1T115"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47953",
+        "of": "263323",
+        "modelo": "AT1T115",
+        "perfil": "L60X60X6",
+        "length_mm": 2919,
+        "mode": "strong",
+        "confidence": 0.9883778976980431,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9883778976980431
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47953",
+        "of": "263323",
+        "modelo": "AT1T115",
+        "perfil": "L60X60X6",
+        "length_mm": 2919,
+        "mode": "weak_guess",
+        "confidence": 0.10710343217091972,
+        "candidates_evaluated": 9366,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.2637532079452367,
+          "profile": 0.9686263256227723,
+          "model": 0.2738536984748567,
+          "reference": 0.10710343217091972
+        }
+      }
+    },
+    {
+      "uid": "c0b51c37d989",
+      "row_index": 3,
+      "observed_label": {
+        "of": "263323",
+        "modelo": "AT1T116"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47954",
+        "of": "263323",
+        "modelo": "AT1T116",
+        "perfil": "L60X60X6",
+        "length_mm": 2919,
+        "mode": "strong",
+        "confidence": 0.9887653531346933,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9887653531346933
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47954",
+        "of": "263323",
+        "modelo": "AT1T116",
+        "perfil": "L60X60X6",
+        "length_mm": 2919,
+        "mode": "weak_guess",
+        "confidence": 0.03951518739920981,
+        "candidates_evaluated": 9366,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.20855148215465286,
+          "profile": 0.3582542246294103,
+          "model": 0.09781972643223567,
+          "reference": 0.03951518739920981
+        }
+      }
+    },
+    {
+      "uid": "c0b51c37d989",
+      "row_index": 4,
+      "observed_label": {
+        "of": "263323",
+        "modelo": "AT1T162"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47957",
+        "of": "263323",
+        "modelo": "AT1T162",
+        "perfil": "L60X60X6",
+        "length_mm": 7732,
+        "mode": "strong",
+        "confidence": 0.9877974700910004,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9877974700910004
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47957",
+        "of": "263323",
+        "modelo": "AT1T162",
+        "perfil": "L60X60X6",
+        "length_mm": 7732,
+        "mode": "weak_guess",
+        "confidence": 0.043108536638393695,
+        "candidates_evaluated": 9366,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.20855148215465286,
+          "profile": 0.38404875258793025,
+          "model": 0.10297409152982662,
+          "reference": 0.043108536638393695
+        }
+      }
+    },
+    {
+      "uid": "c0b51c37d989",
+      "row_index": 5,
+      "observed_label": {
+        "of": "263323",
+        "modelo": "AT1T163"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47958",
+        "of": "263323",
+        "modelo": "AT1T163",
+        "perfil": "L60X60X6",
+        "length_mm": 7732,
+        "mode": "strong",
+        "confidence": 0.9886373596955497,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9886373596955497
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47958",
+        "of": "263323",
+        "modelo": "AT1T163",
+        "perfil": "L60X60X6",
+        "length_mm": 7732,
+        "mode": "weak_guess",
+        "confidence": 0.03955748087626892,
+        "candidates_evaluated": 9366,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.20855148215465286,
+          "profile": 0.3469657454439661,
+          "model": 0.09810060787451746,
+          "reference": 0.03955748087626892
+        }
+      }
+    },
+    {
+      "uid": "c0b51c37d989",
+      "row_index": 6,
+      "observed_label": {
+        "of": "263323",
+        "modelo": "AT2T566"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47975",
+        "of": "263323",
+        "modelo": "AT2T566",
+        "perfil": "L60X60X6",
+        "length_mm": 1170,
+        "mode": "strong",
+        "confidence": 0.9861171038249309,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9861171038249309
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47975",
+        "of": "263323",
+        "modelo": "AT2T566",
+        "perfil": "L60X60X6",
+        "length_mm": 1170,
+        "mode": "weak_guess",
+        "confidence": 0.04909052717286387,
+        "candidates_evaluated": 9366,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.20855148215465286,
+          "profile": 0.40679625819832843,
+          "model": 0.11123566881951935,
+          "reference": 0.04909052717286387
+        }
+      }
+    },
+    {
+      "uid": "c0b51c37d989",
+      "row_index": 7,
+      "observed_label": {
+        "of": "263323",
+        "modelo": "AT2T567"
+      },
+      "of_evaluable": true,
+      "model_evaluable": true,
+      "geometry_evaluable": true,
+      "changed_reference": false,
+      "legacy": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47976",
+        "of": "263323",
+        "modelo": "AT2T567",
+        "perfil": "L60X60X6",
+        "length_mm": 1170,
+        "mode": "strong",
+        "confidence": 0.9875773075161406,
+        "candidates_evaluated": null,
+        "candidate_of_recovered": null,
+        "candidate_model_recovered": null,
+        "confidence_by_field": {
+          "of": null,
+          "profile": null,
+          "model": null,
+          "reference": 0.9875773075161406
+        }
+      },
+      "v3": {
+        "plan_key": "mtg_6e0be54dfd0de6fc:plan:47976",
+        "of": "263323",
+        "modelo": "AT2T567",
+        "perfil": "L60X60X6",
+        "length_mm": 1170,
+        "mode": "weak_guess",
+        "confidence": 0.027098564494185084,
+        "candidates_evaluated": 9366,
+        "candidate_of_recovered": true,
+        "candidate_model_recovered": true,
+        "confidence_by_field": {
+          "of": 0.19646526696803734,
+          "profile": 0.30522242668955984,
+          "model": 0.06224939183232155,
+          "reference": 0.027098564494185084
+        }
+      }
+    }
+  ],
+  "fixture_hashes": {
+    "labels.json": "f1fbbd6eb4f6aa90291bd105a87b1cdda36583bb997b5f2f89dad026c675006f",
+    "legacy-ca557f0-source.json.gz": "ec48b15ee94ab28ec817bf751e27abe37c361c278fbfd32e8f0a02f789659213",
+    "mtg_6399058a64e06229.json.gz": "e04e1e862c2e42e32ce45e45cd8022ccbac4865ec2ca8ac39a883ead937e7327",
+    "mtg_6e0be54dfd0de6fc.json.gz": "ed8e4a2f3ccb12171532bfc98c920e64c944851394f36d4bc8c91f26fefffddb",
+    "mtg_f158e6915e7fca90.json.gz": "ce1e617debc38d2bcef8caf83953bf21fa792e0051c0ed5dd15da272bc869a8a",
+    "sheets.json": "e1c14c7bf099d209d59536a91c49cd6e719847cc2712b28fa017dfead5651e65"
+  },
+  "parameters": {
+    "channel": {
+      "sub_default_bits": 8.0,
+      "glyph_pair_bits": 2.0,
+      "indel_bits": 5.0,
+      "case_free": true,
+      "g_l0_bits": 12.0,
+      "g_cap": 0.85,
+      "learned_subs": {}
+    },
+    "score": {
+      "m_default": 0.6,
+      "m_by_field": {
+        "maquina": 0.97,
+        "nesting": 1.0
+      },
+      "u_min_corpus": 1000,
+      "w_min_bits": 1.0,
+      "w_cap_bits": 14.0,
+      "sim_full": 1.0,
+      "sim_near": 0.9,
+      "near_fraction": 0.5,
+      "channel_floor_sim": 0.8,
+      "channel_g_floor": 0.3,
+      "disagree_code_bits": -1.5,
+      "disagree_text_bits": -1.0,
+      "veto_valid_code_bits": -3.0,
+      "dim_disagree_bits": -2.5,
+      "dim_disagree_cap_bits": -5.0,
+      "dim_joint_cap_bits": 12.0,
+      "dim_u_floor": 0.1,
+      "context_cap_bits": 2.0,
+      "active_of_bonus_bits": 2.0,
+      "active_of_days": 14,
+      "margin_decisive_bits": 4.0
+    },
+    "posterior": {
+      "temperature_bits": 2.0,
+      "b_h0_raw_bits": 10.0,
+      "pi_h0_base": 0.05,
+      "pi_h0_per_day": 0.01,
+      "pi_h0_max": 0.5
+    },
+    "policy": {
+      "write_threshold_identity": 0.95,
+      "write_threshold_critical_dim": 0.98,
+      "write_threshold_default": 0.9,
+      "propose_threshold": 0.5,
+      "replace_with_plan": true,
+      "criticality": {
+        "cliente": 3,
+        "comp_mm": 5,
+        "esp": 5,
+        "length_mm": 5,
+        "lote": 3,
+        "maquina": 3,
+        "modelo": 3,
+        "nesting": 3,
+        "of": 3,
+        "ov": 3,
+        "perfil": 3,
+        "thickness_mm": 5
+      },
+      "criticality_default": 1
+    },
+    "fitted_from": "backtest 2026-08-06"
+  }
+}

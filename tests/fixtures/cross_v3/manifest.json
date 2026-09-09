@@ -1,0 +1,124 @@
+{
+  "baseline_commit": "ca557f0",
+  "baseline_source_file": "legacy-ca557f0-source.json.gz",
+  "corpus_version": "cantoneiras-cross-v3-real-2026-09-08-v2",
+  "current_snapshot_id": "mtg_6e0be54dfd0de6fc",
+  "development_documents": [
+    "c0b51c37d989",
+    "8bfd9466f652",
+    "8ec5f79856a1"
+  ],
+  "diagnostic_documents": [
+    "095aec277844",
+    "1799668b06d7"
+  ],
+  "held_out_documents": [
+    "02e4058ad2f9",
+    "0b5cb0b66c71"
+  ],
+  "matcher_sha256_at_holdout_freeze": "263ac652f870b101802ab593e8491aacb63c985bcab467a84bb7299a0d6fd666",
+  "matcher_version_at_holdout_freeze": "cross-v3-cantoneiras-2",
+  "params": {
+    "channel": {
+      "case_free": true,
+      "g_cap": 0.85,
+      "g_l0_bits": 12.0,
+      "glyph_pair_bits": 2.0,
+      "indel_bits": 5.0,
+      "learned_subs": {},
+      "sub_default_bits": 8.0
+    },
+    "fitted_from": "backtest 2026-08-06",
+    "policy": {
+      "criticality": {
+        "cliente": 3,
+        "comp_mm": 5,
+        "esp": 5,
+        "length_mm": 5,
+        "lote": 3,
+        "maquina": 3,
+        "modelo": 3,
+        "nesting": 3,
+        "of": 3,
+        "ov": 3,
+        "perfil": 3,
+        "thickness_mm": 5
+      },
+      "criticality_default": 1,
+      "propose_threshold": 0.5,
+      "replace_with_plan": true,
+      "write_threshold_critical_dim": 0.98,
+      "write_threshold_default": 0.9,
+      "write_threshold_identity": 0.95
+    },
+    "posterior": {
+      "b_h0_raw_bits": 10.0,
+      "pi_h0_base": 0.05,
+      "pi_h0_max": 0.5,
+      "pi_h0_per_day": 0.01,
+      "temperature_bits": 2.0
+    },
+    "score": {
+      "active_of_bonus_bits": 2.0,
+      "active_of_days": 14,
+      "channel_floor_sim": 0.8,
+      "channel_g_floor": 0.3,
+      "context_cap_bits": 2.0,
+      "dim_disagree_bits": -2.5,
+      "dim_disagree_cap_bits": -5.0,
+      "dim_joint_cap_bits": 12.0,
+      "dim_u_floor": 0.1,
+      "disagree_code_bits": -1.5,
+      "disagree_text_bits": -1.0,
+      "m_by_field": {
+        "maquina": 0.97,
+        "nesting": 1.0
+      },
+      "m_default": 0.6,
+      "margin_decisive_bits": 4.0,
+      "near_fraction": 0.5,
+      "sim_full": 1.0,
+      "sim_near": 0.9,
+      "u_min_corpus": 1000,
+      "veto_valid_code_bits": -3.0,
+      "w_cap_bits": 14.0,
+      "w_min_bits": 1.0
+    }
+  },
+  "plan_age_days": 0,
+  "sha256": {
+    "labels.json": "f1fbbd6eb4f6aa90291bd105a87b1cdda36583bb997b5f2f89dad026c675006f",
+    "legacy-ca557f0-source.json.gz": "ec48b15ee94ab28ec817bf751e27abe37c361c278fbfd32e8f0a02f789659213",
+    "mtg_6399058a64e06229.json.gz": "e04e1e862c2e42e32ce45e45cd8022ccbac4865ec2ca8ac39a883ead937e7327",
+    "mtg_6e0be54dfd0de6fc.json.gz": "ed8e4a2f3ccb12171532bfc98c920e64c944851394f36d4bc8c91f26fefffddb",
+    "mtg_f158e6915e7fca90.json.gz": "ce1e617debc38d2bcef8caf83953bf21fa792e0051c0ed5dd15da272bc869a8a",
+    "sheets.json": "e1c14c7bf099d209d59536a91c49cd6e719847cc2712b28fa017dfead5651e65"
+  },
+  "snapshots": [
+    {
+      "entries": 64219,
+      "file": "mtg_f158e6915e7fca90.json.gz",
+      "loaded_at": "2026-08-06T21:32:36.042871+00:00",
+      "remaining_contract": "canonical MTG3 calculated:qtd_minus_maq; no MES deductions",
+      "snapshot_id": "mtg_f158e6915e7fca90",
+      "source_app": "kanban-mes"
+    },
+    {
+      "entries": 73738,
+      "file": "mtg_6399058a64e06229.json.gz",
+      "loaded_at": "2026-09-01T06:17:46.870959+00:00",
+      "remaining_contract": "canonical MTG3 calculated:qtd_minus_maq; no MES deductions",
+      "snapshot_id": "mtg_6399058a64e06229",
+      "source_app": "kanban-mes"
+    },
+    {
+      "entries": 73772,
+      "file": "mtg_6e0be54dfd0de6fc.json.gz",
+      "loaded_at": "2026-09-07T12:17:56.749019+00:00",
+      "remaining_contract": "canonical MTG3 calculated:qtd_minus_maq; no MES deductions",
+      "snapshot_id": "mtg_6e0be54dfd0de6fc",
+      "source_app": "kanban-mes"
+    }
+  ],
+  "split_policy": "The 20-Aug documents were inspected in the initial diagnostic replay. The fixed-model-weight rule was justified by a general exact-versus-glyph regression on reused codes, before opening 27-Aug images. Entire documents/dates and duplicate image hashes stay in one group. No parameter fitting uses 27-Aug labels."
+}

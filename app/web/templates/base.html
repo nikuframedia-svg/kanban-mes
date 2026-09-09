@@ -15,7 +15,7 @@
   <script src="/static/vendor/htmx.min.js" defer></script>
   <script src="/static/vendor/alpine.min.js" defer></script>
 </head>
-<body>
+<body data-history-key="kanban-mes:history">
 {% set path = request.url.path %}
 {% set is_captura = path.startswith('/captura') %}
 {% set is_historico = path == '/' or path.startswith('/sheet') %}
@@ -165,6 +165,7 @@ function liveBanner(initialWatermark) {
     if (window.Alpine && e.target) Alpine.initTree(e.target);
   });
 </script>
+<script src="/static/history.js?v={{ css_version }}" defer></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

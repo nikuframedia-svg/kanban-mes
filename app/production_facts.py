@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from .matching.full_profile import plan_identity
 from .matching import carryover
 from .matching import similarity as sim
 from .templates_spec import KanbanTemplate, field_value, is_marked
@@ -26,6 +27,7 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
     data = sheet.get("sheet_data") or {}
     rows = data.get("rows") or []
     cross = sheet.get("cross_check") or {}
+    is_v3 = cross.get("engine") == "cross-v3"
     cross_rows = {row.get("row_index"): row for row in cross.get("rows", [])}
     content_fields = tuple(
         field for field in template.row_fields
@@ -41,7 +43,9 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
                 or source_row.get("_deleted") is True
                 or not row_has_content(source_row)):
             continue
-        effective = carryover.effective_row(source_row, identities[row_index])
+        if is_v3 and cross_rows.get(row_index, {}).get("row_kind") in {"activity", "empty", "deleted"}:
+            continue
+        effective = source_row if is_v3 else carryover.effective_row(source_row, identities[row_index])
         row = {key: value for key, value in effective.items()
                if not str(key).startswith("_")}
         row_cross = deepcopy(cross_rows.get(row_index) or {})
@@ -89,9 +93,13 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
                     "qtd": quantity,
                     "perf_comp": None,
                 }
+                for field, key in (("of", "production_order_no"), ("ov", "sales_order_no"), ("cliente", "customer_name")):
+                    if key in ref:
+                        child_row[field] = ref[key]
                 child_cross = {
                     **row_cross,
                     "matched_plan_key": ref.get("plan_key"),
+                    "plan_identity": plan_identity(ref, ref.get("snapshot_id") or cross.get("snapshot_id")),
                     "plan_length_mm": length,
                     "line_meters": (
                         round(quantity * length / 1000.0, 2)

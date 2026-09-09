@@ -36,6 +36,7 @@ from fastapi.templating import Jinja2Templates
 
 from .. import db, imaging, pg_store, production_facts
 from ..config import settings
+from ..health import STARTUP_HEALTH
 from ..matching import carryover, header_cross, loaders, operador
 from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
@@ -80,6 +81,11 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title="Kanban MES", lifespan=_lifespan)
 app.mount("/static", NoCacheStaticFiles(directory=str(_STATIC_DIR)), name="static")
+@app.get("/health")
+def health():
+    return dict(STARTUP_HEALTH)
+
+
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["css_version"] = hashlib.sha1(
     (_STATIC_DIR / "design.css").read_bytes()
@@ -140,7 +146,7 @@ async def _attach_watermark(request: Request, call_next):
     if path.startswith("/static/") or path.endswith("/photo"):
         return await call_next(request)
     watermark = 0
-    if request.method == "GET":
+    if request.method == "GET" and path in {"/", "/estado"}:
         try:
             conn = _conn()
             try:
@@ -244,6 +250,12 @@ def make_scorer(template_name: str) -> Scorer:
     index = get_index(template.index_loader)
     active = loaders.load_active_ofs() if template.family == "cantoneiras" else set()
     return Scorer(index, CrossParams.load(), active_primary=active)
+
+
+def make_fresh_scorer(template_name: str) -> Scorer:
+    template = get_template(template_name)
+    index = getattr(loaders, template.index_loader)()
+    return Scorer(index, CrossParams.load())
 
 
 _header_machine_cache: tuple[float, list] | None = None
@@ -355,7 +367,177 @@ def resolve_operator(conn, uid: str, sheet: dict) -> dict | None:
     ))
 
 
-def run_cross_check(conn, uid: str, *, force_plan: bool = False) -> bool:
+_HISTORY_AUTO = object()
+
+
+def run_cross_check(conn, uid: str, *, force_plan: bool = False, scorer_override: Scorer | None = None,
+                    engine_override: str | None = None,
+                    historical_context_override=_HISTORY_AUTO) -> bool:
+    engine = engine_override or settings.cross_engine
+    sheet = db.get_sheet(conn, uid)
+    if not sheet or not sheet.get("sheet_data") or sheet["status"] in {"pending", "validated"}:
+        return False
+    if engine == "v3" and sheet["template_name"] == "cantoneiras_kanban":
+        if force_plan and scorer_override is None:
+            scorer_override = make_fresh_scorer(sheet["template_name"])
+
+        return _run_cross_check_v3(
+            conn, uid, scorer_override=scorer_override,
+            historical_context_override=historical_context_override,
+        )
+    if engine not in {"legacy", "v3"}:
+        raise ValueError(f"Motor cross desconhecido: {engine}")
+    return _run_cross_check_legacy(conn, uid, force_plan=force_plan, scorer_override=scorer_override)
+
+
+def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
+                         historical_context_override=_HISTORY_AUTO) -> bool:
+    from ..matching.evidence import IDENTITY_FIELDS, build_evidence
+    from ..matching.history import load_history_context
+    from ..matching.v3 import check_sheet_v3
+
+    base = db.get_sheet(conn, uid)
+    if not base or not base.get("sheet_data") or base["status"] == "validated":
+        return False
+    template = get_template(base["template_name"])
+    evidence = build_evidence(base, db.evidence_edits(conn, base))
+    data = copy.deepcopy(base["sheet_data"])
+    rows = data.get("rows") or []
+    observed_header = evidence.data.get("header") or {}
+    source_document = _source_document(base)
+    assumed_date = _assumed_sheet_date(base)
+    scorer = None
+    plan_reference = {"status": "not_applicable"}
+    if template.index_loader:
+        try:
+            scorer = scorer_override or Scorer(get_index(template.index_loader), CrossParams.load())
+            if not scorer.index.entries:
+                scorer = None
+        except Exception:
+            scorer = None
+        plan_reference = (
+            {"status": "available", "snapshot_id": scorer.index.snapshot_id}
+            if scorer else {"status": "no_reference", "message": "Plano indisponível; dados conservados."}
+        )
+    history = None
+    if scorer is not None:
+        if historical_context_override is _HISTORY_AUTO:
+            sheet_date = observed_header.get("data") or assumed_date
+            history = load_history_context(scorer.index, sheet_date)
+        else:
+            history = historical_context_override
+        cross = check_sheet_v3(
+            evidence.data, scorer.params, index=scorer.index,
+            historical_context=history, explicit_bindings=evidence.explicit_bindings,
+            provenance=evidence.provenance,
+        )
+    else:
+        if template.index_loader:
+            from ..matching.refs import PlanIndex
+            cross = check_sheet_v3(evidence.data, index=PlanIndex([], loaders.CANTONEIRAS_SPEC))
+        else:
+            cross = {"rows": [], "summary": {}, "review_order": []}
+    cross.update({
+        "version": "cross-v3", "engine_version": "cross-v3",
+        "evidence_fingerprint": evidence.provenance["fingerprint"],
+        "provenance": evidence.provenance,
+        "snapshot_id": scorer.index.snapshot_id if scorer else None,
+        "plan_reference": plan_reference,
+        "historical_context": history.to_dict() if history is not None else {"status": "unavailable"},
+    })
+    edits = []
+
+    def apply_value(path, container, key, new, actor):
+        old = container.get(key)
+        # Identity projection uses the exact canonical candidate, including
+        # empty values. Production values are never routed through here.
+        if old != new:
+            container[key] = new
+            edits.append((path, old, new, actor))
+
+    sources = evidence.provenance["field_sources"]
+    for rc in cross.get("rows", []):
+        i = rc["row_index"]
+        if i >= len(rows):
+            continue
+        rc["selected_snapshot_id"] = cross["snapshot_id"]
+        rc["replaced_values"] = {}
+        if scorer is not None and rc.get("mode") in {"activity", "empty"}:
+            # Undo an old engine's identity fill on non-production rows.
+            # These observations have no eligible plan identity to project.
+            for key in IDENTITY_FIELDS:
+                observed = evidence.data["rows"][i].get(key)
+                apply_value(f"rows[{i}].{key}", rows[i], key, observed, "cross:v3:observation")
+        if is_marked(field_value(rows[i], "perf_comp")) or rc.get("binding_status") in {"stale", "reselected"}:
+            if "_plan_binding" in rows[i]:
+                old = rows[i].pop("_plan_binding")
+                edits.append((f"rows[{i}]._plan_binding", old, None, "cross:v3"))
+        for cell in rc.get("cells", []):
+            key = cell["field"]
+            if key not in IDENTITY_FIELDS or not cell.get("auto_write"):
+                continue
+            path = f"rows[{i}].{key}"
+            new = cell.get("proposal")
+            before = (evidence.data.get("rows") or [])[i].get(key)
+            apply_value(path, rows[i], key, new, "cross:v3")
+            if before != new:
+                cell["applied"] = True
+                cell["message"] = "Substituído automaticamente. " + cell.get("message", "")
+                rc["replaced_values"][key] = {
+                    "before": before, "after": new, **sources.get(path, {"source": "raw_extraction"}),
+                }
+            # Result metadata describes the observation and the applied
+            # choice; it is not recomputed from the materialized values.
+            cell["auto_write"] = False
+
+    employees = None
+    if any(str(observed_header.get(key) or "").strip() for key in ("operador", "n_operador")):
+        try:
+            employees = get_employees()
+        except Exception:
+            pass
+    plan_machines = _plan_header_machines(cross, scorer)
+    machines = _load_header_machines() if (
+        observed_header.get("setor_maquina") or plan_machines or header_cross.template_machine(template)
+    ) else []
+    human_header = {
+        path.split(".", 1)[1] for path, source in sources.items()
+        if path.startswith("header.") and source["source"] == "human"
+    }
+    header_result = header_cross.check_header(
+        observed_header, template, human_fields=human_header, employees=employees,
+        machines=machines, plan_machines=plan_machines, source_document=source_document,
+        assumed_date=assumed_date,
+    )
+    header = data.setdefault("header", {})
+    for key, cell in header_result["cells"].items():
+        if cell.get("auto_write") and cell.get("proposal") is not None:
+            new = str(cell["proposal"])
+            apply_value(f"header.{key}", header, key, new, cell.get("actor") or "cross:header")
+            cell["applied"] = observed_header.get(key) != new
+            cell["auto_write"] = False
+    # Header dependency is downstream only; it never reopens row inference.
+    final_header = header_cross.check_header(
+        header, template, human_fields=human_header, employees=employees,
+        machines=machines, plan_machines=plan_machines, source_document=source_document,
+        assumed_date=assumed_date,
+    )
+    for key, cell in final_header["cells"].items():
+        observed_cell = header_result["cells"].get(key) or {}
+        if observed_cell.get("applied"):
+            cell["applied"] = True
+            cell["message"] = "Substituído automaticamente. " + cell.get("message", "")
+        cell["observed_written"] = observed_header.get(key)
+    cross["header"] = {"cells": final_header["cells"], "source_document": final_header["source_document"]}
+    cross["operator"] = final_header["operator"]
+    expected = base["revision"]
+    cross["data_revision"] = cross["materialized_revision"] = expected + bool(edits)
+    if edits:
+        return db.apply_cross_corrections(conn, uid, data, cross, expected, edits)
+    return db.save_cross_check(conn, uid, cross, expected_revision=expected)
+
+
+def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_override: Scorer | None = None) -> bool:
     sheet = db.get_sheet(conn, uid)
     if not sheet or not sheet["sheet_data"]:
         return False
@@ -384,7 +566,7 @@ def run_cross_check(conn, uid: str, *, force_plan: bool = False) -> bool:
             if force_plan:
                 with _index_lock:
                     _index_cache.pop(template.index_loader, None)
-            scorer = make_scorer(base["template_name"])
+            scorer = scorer_override or make_scorer(base["template_name"])
             plan_reference = {"status": "available"}
         except Exception:
             # O plano é uma fonte independente. Uma indisponibilidade não pode
@@ -1073,161 +1255,45 @@ def sheet_csv(uid: str):
     })
 
 
-@app.get("/export/cpis")
-def export_cpis(de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
-    """A tabela plana da Metalogalva 2 («MigracaoNikufraCPIS_….xlsx»).
-
-    Fonte: o staging local (todas as folhas de produção com data) — funciona
-    com o Postgres em baixo e cobre também o que ainda está em revisão;
-    `?validadas=1` restringe ao que já foi validado. Filtros `de`/`ate` em
-    ISO (aaaa-mm-dd) e `operador` por nome.
-    """
-    conn = _conn()
+def _export_response(request: Request, kind: str, de="", ate="", operador="", validadas=0):
+    from . import export_routes, export_source
     try:
-        sheets = db.list_sheets(conn, status="validated" if validadas else None)
-        cpis_rows: list[dict] = []
-        for meta in sheets:
-            if "paragens" in meta["template_name"]:
-                continue
-            sheet = db.get_sheet(conn, meta["uid"])
-            if not sheet or not sheet.get("sheet_data"):
-                continue
-            header = sheet["sheet_data"].get("header") or {}
-            if operador and str(header.get("operador") or "").strip() != operador:
-                continue
-            try:
-                iso = pg_store.normalize_sheet_date(header.get("data"))
-            except pg_store.InvalidSheetDate:
-                iso = None
-            if de and (not iso or iso < de):
-                continue
-            if ate and (not iso or iso > ate):
-                continue
-            cross = sheet.get("cross_check") or {}
-            op = cross.get("operator")
-            template = get_template(sheet["template_name"])
-            for fact in production_facts.materialize_sheet(sheet, template)["exports"]:
-                i, row, row_cross = fact["row_index"], fact["row"], fact["cross"]
-                cpis_rows.append(
-                    (iso or "9999", str(header.get("operador") or ""),
-                     meta.get("sheet_no") or meta["uid"], i,
-                     str(fact.get("plan_key") or ""),
-                     cpis_export.cpis_row_for(sheet, row, row_cross, op)))
-    finally:
-        conn.close()
-    # ordenação do original: data, operador, folha, linha
-    cpis_rows.sort(key=lambda t: t[:5])
-    content = cpis_export.build_cpis_workbook([t[5] for t in cpis_rows])
-    filename = cpis_export.cpis_filename_for(de or None, ate or None, bool(validadas))
-    return Response(
-        content,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+        sheets = export_routes.export_sheets(_conn, de, ate, operador,
+                                             drafts=kind == "cpis" and not validadas)
+        if kind == "technical":
+            content = export_routes.technical_workbook(sheets)
+            filename = "producao_mes.xlsx"
+        else:
+            content = export_routes.workbook(kind, sheets)
+            filename = (cpis_export.basedados_filename_for(de or None, ate or None)
+                        if kind == "basedados" else cpis_export.cpis_filename_for(de or None, ate or None, bool(validadas)))
+    except export_source.IncompleteExport as exc:
+        return templates.TemplateResponse(request, "export_error.html",
+            {"message": str(exc), "problems": exc.problems}, status_code=422)
+    except pg_store.InvalidSheetDate:
+        return templates.TemplateResponse(request, "export_error.html",
+            {"message": "O período indicado não tem datas válidas.", "problems": []}, status_code=422)
+    except Exception:
+        traceback.print_exc()
+        return templates.TemplateResponse(request, "export_error.html",
+            {"message": "Não foi possível ler o histórico validado. Tenta exportar novamente.", "problems": []}, status_code=503)
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.get("/export/cpis")
+def export_cpis(request: Request, de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
+    return _export_response(request, "cpis", de, ate, operador, validadas)
 
 
 @app.get("/export/basedados")
-def export_basedados(de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
-    """A tabela plana no formato Modelo_BaseDados_PerfisCantoneiras.xlsx
-    (11 colunas), comum aos dois setores kanban. Filtros de período/operador
-    como no CPIS, mas SÓ folhas validadas: a BaseDados é o registo oficial e
-    uma folha por rever ainda pode mudar. O query param `validadas` continua a
-    ser aceite (links/bookmarks antigos), mas é ignorado."""
-    del validadas
-    conn = _conn()
-    try:
-        sheets = db.list_sheets(conn, status="validated")
-        bd_rows: list[tuple] = []
-        for meta in sheets:
-            if "paragens" in meta["template_name"]:
-                continue
-            sheet = db.get_sheet(conn, meta["uid"])
-            if not sheet or not sheet.get("sheet_data"):
-                continue
-            header = sheet["sheet_data"].get("header") or {}
-            if operador and str(header.get("operador") or "").strip() != operador:
-                continue
-            try:
-                iso = pg_store.normalize_sheet_date(header.get("data"))
-            except pg_store.InvalidSheetDate:
-                iso = None
-            if de and (not iso or iso < de):
-                continue
-            if ate and (not iso or iso > ate):
-                continue
-            cross = sheet.get("cross_check") or {}
-            op = cross.get("operator")
-            template = get_template(sheet["template_name"])
-            for fact in production_facts.materialize_sheet(sheet, template)["exports"]:
-                i, row, row_cross = fact["row_index"], fact["row"], fact["cross"]
-                bd_rows.append(
-                    (iso or "9999", str(header.get("operador") or ""),
-                     meta.get("sheet_no") or meta["uid"], i,
-                     str(fact.get("plan_key") or ""),
-                     cpis_export.basedados_row_for(sheet, row, row_cross, op)))
-    finally:
-        conn.close()
-    bd_rows.sort(key=lambda t: t[:5])
-    content = cpis_export.build_basedados_workbook([t[5] for t in bd_rows])
-    filename = cpis_export.basedados_filename_for(de or None, ate or None)
-    return Response(
-        content,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+def export_basedados(request: Request, de: str = "", ate: str = "", operador: str = "", validadas: int = 0):
+    return _export_response(request, "basedados", de, ate, operador, 1)
 
 
 @app.get("/export.xlsx")
-def export_xlsx():
-    """Todas as linhas de produção validadas (Postgres) num Excel."""
-    import openpyxl
-    import psycopg
-
-    try:
-        with psycopg.connect(pg_store._dsn(), connect_timeout=5) as pconn:
-            pconn.read_only = True
-            with pconn.cursor() as cur:
-                cur.execute(
-                    "WITH facts AS ("
-                    " SELECT s.source_app, s.sheet_no, p.sheet_uid, p.row_index, "
-                    " p.sheet_date, p.family, p.operator_name, p.machine, "
-                    " p.production_order, p.sales_order, p.customer_name, p.model_ref, "
-                    " p.matched_plan_key, p.match_confidence, p.quantity, p.length_mm, "
-                    " p.width_mm, p.thickness_mm, p.hours_worked, p.plan_snapshot_id, "
-                    " p.validated_at "
-                    " FROM mes_kanban.production_records p "
-                    " JOIN mes_kanban.validated_sheets s ON s.sheet_uid = p.sheet_uid "
-                    " WHERE NOT EXISTS (SELECT 1 FROM mes_kanban.production_record_plan_refs r "
-                    "                   WHERE r.production_record_id = p.id) "
-                    " UNION ALL "
-                    " SELECT s.source_app, s.sheet_no, p.sheet_uid, p.row_index, "
-                    " p.sheet_date, p.family, p.operator_name, p.machine, "
-                    " p.production_order, p.sales_order, p.customer_name, r.component_ref, "
-                    " r.plan_key, p.match_confidence, r.assumed_quantity, r.length_mm, "
-                    " p.width_mm, p.thickness_mm, p.hours_worked, r.plan_snapshot_id, "
-                    " p.validated_at "
-                    " FROM mes_kanban.production_record_plan_refs r "
-                    " JOIN mes_kanban.production_records p ON p.id = r.production_record_id "
-                    " JOIN mes_kanban.validated_sheets s ON s.sheet_uid = p.sheet_uid "
-                    " WHERE r.assumed_quantity > 0"
-                    ") SELECT * FROM facts "
-                    "ORDER BY sheet_date DESC, source_app, sheet_no, row_index, model_ref")
-                cols = [d.name for d in cur.description]
-                rows = cur.fetchall()
-    except Exception as exc:
-        raise HTTPException(503, f"Postgres indisponível: {exc}")
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "producao"
-    ws.append(cols)
-    for r in rows:
-        ws.append([str(v) if v is not None and not isinstance(v, (int, float)) else v
-                   for v in r])
-    buf = io.BytesIO()
-    wb.save(buf)
-    return Response(buf.getvalue(),
-                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": 'attachment; filename="producao_mes.xlsx"'})
+def export_xlsx(request: Request):
+    return _export_response(request, "technical", validadas=1)
 
 
 def _safe_back(back: str | None) -> str | None:
@@ -1238,6 +1304,13 @@ def _safe_back(back: str | None) -> str | None:
             or "\\" in back or any(ord(ch) < 32 for ch in back)):
         return None
     return back
+
+
+def _safe_history_back(back: str | None) -> str | None:
+    safe = _safe_back(back)
+    if not safe or urlsplit(safe).path != "/":
+        return None
+    return safe
 
 
 def _sheet_location(uid: str, back: str | None = None, **query: object) -> str:
@@ -1375,6 +1448,10 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     if field_draft is not None:
         sheet = _with_field_draft(sheet, *field_draft)
     template = get_template(sheet["template_name"])
+    stored_cross = sheet.get("cross_check") or {}
+    if (sheet["status"] != "validated" and stored_cross.get("engine") == "cross-v3"
+            and stored_cross.get("data_revision") != sheet["revision"]):
+        sheet = {**sheet, "cross_check": None}
     raw = sheet.get("raw_extraction") or {}
     raw_rows = [r for r in (raw.get("rows") or []) if isinstance(r, dict)]
     has_ocr = bool(sheet.get("image_path")) and any(
@@ -1387,7 +1464,7 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     cross_rows = {}
     if view_mode == "final" and sheet["cross_check"]:
         cross_rows = {
-            r["row_index"]: {**r, "cells_by_field": {c["field"]: c for c in r["cells"]}}
+            r["row_index"]: {**r, "cells_by_field": {c["field"]: c for c in r.get("cells", [])}}
             for r in sheet["cross_check"]["rows"]
         }
     diverged = _diverged_map(sheet) if view_mode == "final" else {}
@@ -1463,7 +1540,7 @@ def _totais_plano(linhas: list) -> dict:
     """
     totais: dict = {"planeada": None, "feita": None, "falta": None,
                     "excesso": None,
-                    "parcial": len(linhas) >= 500}
+                    "parcial": False}
     colunas = {"planeada": "quantity_planned", "feita": "quantity_made",
                "falta": "remaining_quantity", "excesso": "excesso"}
     for chave, col in colunas.items():
@@ -1475,17 +1552,7 @@ def _totais_plano(linhas: list) -> dict:
 
 @app.get("/sheet/{uid}/plano/{row_index}", response_class=HTMLResponse)
 def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str = ""):
-    """As referências do plano para a chave OF + Perfil de uma linha.
-
-    Recebe a linha e não a chave: é o servidor que resolve a OF (incluindo a
-    herdada da linha de cima) e a forma canónica do perfil. Se fosse o template
-    a montar `?of=&perfil=`, teria de conhecer as convenções do plano e podia
-    perguntar por uma chave diferente daquela com que o motor cruzou.
-
-    `origem=perf_comp` = o clique veio da marca de perfil completo, que afirma
-    «fiz a quantidade toda»: o pop-up junta os totais e avisa se o plano ainda
-    mostra falta.
-    """
+    from . import plan_review
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -1493,85 +1560,15 @@ def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str =
         conn.close()
     if not sheet:
         raise HTTPException(404)
-    template = get_template(sheet["template_name"])
-    rows = (sheet["sheet_data"] or {}).get("rows") or []
-    if row_index < 0 or row_index >= len(rows):
+    rows = (sheet.get("sheet_data") or {}).get("rows") or []
+    if not 0 <= row_index < len(rows) or rows[row_index].get("_deleted") is True:
         raise HTTPException(404)
-    if rows[row_index].get("_deleted") is True:
-        raise HTTPException(404)
-
-    perf_comp_marked = is_marked(field_value(rows[row_index], "perf_comp"))
-    row_number = sum(
-        row.get("_deleted") is not True for row in rows[:row_index + 1]
-    )
-    ctx: dict = {"row_index": row_index, "row_number": row_number,
-                 "of": None, "perfil": None,
-                 "linhas": [], "perfis": [], "erro": None, "plano": {},
-                 "origem_perf_comp": perf_comp_marked or origem == "perf_comp", "totais": None,
-                 "sheet": sheet, "editable": sheet["status"] != "validated",
-                 "current_model": rows[row_index].get("modelo"),
-                 "current_binding": (
-                     {} if perf_comp_marked
-                     else (rows[row_index].get("_plan_binding") or {})
-                 ),
-                 "showing_all_of": False}
     try:
-        if template.index_loader:
-            with _index_lock:
-                _index_cache.pop(template.index_loader, None)
-        index = get_index(template.index_loader) if template.index_loader else None
-        if index is None:
-            ctx["erro"] = "Esta folha não cruza com o plano."
-            return templates.TemplateResponse(request, "_plano_perfil.html", ctx)
-
-        content = tuple(f.name for f in index.spec.identity_fields
-                        if f.name not in carryover.CARRY_FIELDS)
-        identities = carryover.resolve(rows, content, {})
-        eff = carryover.effective_row(rows[row_index], identities[row_index])
-        escrito = str(eff.get("perfil") or "").strip()
-        of_escrita = str(eff.get("of") or "").strip()
-        # A OF no plano leva prefixo; procurar pela forma que lá existe.
-        of = next(
-            (index.entries[i]["of"] for i in index.exact_matches("of", of_escrita)),
-            of_escrita,
-        ) if of_escrita else ""
-        perfil = index.normalize_written("perfil", escrito) if escrito else ""
-        ctx.update({"of": of, "perfil": perfil, "perfil_escrito": escrito,
-                    "herdou_of": identities[row_index].is_inherited("of")})
-        if not of:
-            ctx["erro"] = "Esta linha não tem OF — escreve-a (ou herda-a da linha de cima)."
-        else:
-            ctx["plano"] = loaders.plan_snapshot_info()
-            if (index.snapshot_id and ctx["plano"].get("snapshot_id")
-                    and str(index.snapshot_id) != str(ctx["plano"]["snapshot_id"])):
-                ctx["erro"] = "O planeamento mudou; fecha e reabre Referências."
-                return templates.TemplateResponse(request, "_plano_perfil.html", ctx)
-            if perfil:
-                ctx["linhas"] = loaders.fetch_profile_lines(
-                    of, perfil, snapshot_id=index.snapshot_id
-                )
-            if ctx["linhas"]:
-                ctx["totais"] = _totais_plano(ctx["linhas"])
-            else:
-                # Perfil vazio/incorreto: mostram-se as referências completas
-                # da OF, não apenas chips com nomes de perfil.
-                ctx["linhas"] = loaders.fetch_of_lines(
-                    of, snapshot_id=index.snapshot_id
-                )
-                ctx["showing_all_of"] = True
-                if ctx["linhas"]:
-                    ctx["totais"] = _totais_plano(ctx["linhas"])
-            # A query das linhas foi fixada ao snapshot do índice. Uma última
-            # sonda impede mostrar como atual uma fotografia substituída a
-            # meio do pedido.
-            latest = loaders.plan_snapshot_info() or {}
-            if (index.snapshot_id and latest.get("snapshot_id")
-                    and str(index.snapshot_id) != str(latest["snapshot_id"])):
-                ctx["linhas"] = []
-                ctx["totais"] = None
-                ctx["erro"] = "O planeamento mudou; fecha e reabre Referências."
-    except Exception as exc:  # Postgres em baixo não pode rebentar a revisão
-        ctx["erro"] = f"Não foi possível ler o plano: {exc}"
+        ctx = plan_review.context(sheet, row_index, get_template(sheet["template_name"]),
+                                  _safe_back(request.query_params.get("back")) or "/")
+    except Exception:
+        return templates.TemplateResponse(request, "_plan_error.html",
+            {"message": "Não foi possível consultar estas referências. Confirma o planeamento e tenta novamente."}, status_code=503)
     return templates.TemplateResponse(request, "_plano_perfil.html", ctx)
 
 
@@ -1683,7 +1680,8 @@ def sheet_reference(
             raise HTTPException(409, "A folha foi alterada; reabre Referências.")
         if audit:
             saved = True
-            if not run_cross_check(conn, uid, force_plan=True):
+            if not run_cross_check(conn, uid, force_plan=True,
+                                   scorer_override=Scorer(index, CrossParams.load()) if settings.cross_engine == "v3" else None):
                 raise HTTPException(
                     409,
                     "A referência foi guardada, mas a folha mudou durante o cross.",
@@ -2087,7 +2085,7 @@ def recheck(uid: str, back: str = Form("")):
 
 @app.post("/sheet/{uid}/validate")
 def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
-             revision: int | None = Form(None),
+             history_back: str = Form(""), revision: int | None = Form(None),
              header_operador: str | None = Form(None),
              header_n_operador: str | None = Form(None),
              header_setor_maquina: str | None = Form(None),
@@ -2177,7 +2175,7 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                 raise HTTPException(
                     409, "A folha mudou durante o cross-check; tenta novamente."
                 )
-            if cross.get("fixed_point") is False:
+            if cross.get("engine") != "cross-v3" and cross.get("fixed_point") is False:
                 raise HTTPException(
                     422, "O cross-check não estabilizou; revê a identidade das linhas."
                 )
@@ -2196,6 +2194,8 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                 ):
                     continue
                 row_cross = cross_rows.get(row_index) or {}
+                if cross.get("engine") == "cross-v3" and row_cross.get("row_kind") in {"empty", "activity"}:
+                    continue
                 if row_cross.get("binding_stale"):
                     raise HTTPException(
                         422,
@@ -2284,7 +2284,7 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         )
     finally:
         conn.close()
-    destination = _safe_back(back) or "/"
+    destination = _safe_history_back(back) or _safe_history_back(history_back) or "/"
     return RedirectResponse(
         _with_query(
             destination,
@@ -2293,3 +2293,8 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         ),
         status_code=303,
     )
+
+
+from . import plan_picker  # noqa: E402
+plan_picker.register(app, _conn, lambda loader: get_index(loader),
+                     lambda *args, **kwargs: run_cross_check(*args, **kwargs), _sheet_location)

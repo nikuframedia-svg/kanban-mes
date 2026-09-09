@@ -1,0 +1,24 @@
+<div class="sheet-bg review-dialog" id="plano-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Referências do planeamento" tabindex="-1">
+  <div class="sheet-modal plan-modal">
+    <div id="plano-modal-body" aria-live="polite"></div>
+    <div class="dialog-actions"><button type="button" class="btn" onclick="fecharPlano()">Fechar</button></div>
+  </div>
+</div>
+<div class="sheet-bg review-dialog" id="of-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="of-title" tabindex="-1">
+  <div class="sheet-modal of-wizard-modal">
+    <div class="lbl" id="of-row-label"></div>
+    <h2 id="of-title">Corrigir linha via OF</h2>
+    <p class="muted tiny">Escreve OF, OV ou referência. Escolhe a linha e os campos de identificação preenchem-se do planeamento.</p>
+    <form id="of-search-form" class="of-search">
+      <label class="sr-only" for="of-query">Pesquisar OF, OV ou referência</label>
+      <input id="of-query" type="search" placeholder="OF, OV ou referência" autocomplete="off">
+      <button class="btn primary" type="submit">Procurar</button>
+    </form>
+    <label class="of-include"><input type="checkbox" id="of-include-done"> Incluir peças já fechadas</label>
+    <div id="of-status" class="muted tiny" role="status" aria-live="polite"></div>
+    <div id="of-entries" class="of-entries-list"></div>
+    <nav class="of-pagination" aria-label="Resultados da pesquisa"><button type="button" class="btn ghost" id="of-prev">← Anteriores</button><button type="button" class="btn ghost" id="of-next">Mais resultados →</button></nav>
+    <div id="of-error" class="alert warn" role="alert" hidden></div>
+    <div class="dialog-actions"><button type="button" class="btn" id="of-cancel">Cancelar</button><button type="button" class="btn primary" id="of-apply" disabled>Aplicar à linha</button></div>
+  </div>
+</div>

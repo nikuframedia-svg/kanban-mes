@@ -1,119 +1,42 @@
-{# Conteúdo do pop-up «referências deste perfil na obra».
-
-   Aparece quando uma linha está marcada com PERF. COMP.: nessas linhas o
-   operador escreve o perfil e não lista modelo a modelo, portanto para
-   conferir é preciso ver o que a obra tem daquele perfil. #}
 <div class="lbl">Linha {{ row_number }}</div>
-<div style="font-size:18px; font-weight:600; margin:2px 0 2px;">
-  Referências do perfil nesta obra
-</div>
-<div class="muted tiny" style="margin-bottom:12px;">
-  {% if of %}OF <b class="mono">{{ strip_ref(of) }}</b>{% if herdou_of %} (herdada da linha de cima){% endif %}{% endif %}
-  {% if perfil %} · perfil <b class="mono">{{ perfil }}</b>
-    {% if perfil_escrito and perfil_escrito|upper != perfil %}
-      <span class="muted">(escrito «{{ perfil_escrito }}»)</span>
-    {% endif %}
-  {% endif %}
-  {% if plano.age_hours is defined and plano.age_hours is not none %}
-    · plano de há {{ '%.0f' | format(plano.age_hours) }} h
-  {% endif %}
-</div>
-
-{% if erro %}
-  <div class="alert warn"><span>{{ erro }}</span></div>
-
+<h2>Referências {{ 'da OF' if all_of else 'deste perfil na obra' }}</h2>
+<p class="muted tiny">{% if of %}OF <b class="mono">{{ strip_ref(of) }}</b>{% endif %}
+  {% if perfil %} · {{ 'Tubo' if mtg2 else 'Perfil' }} <b class="mono">{{ perfil }}</b>{% endif %}
+  {% if herdou_of %} · OF herdada da linha de cima{% endif %}
+  {% if plano.get('frozen') %} · dados guardados na validação
+  {% elif plano.get('age_hours') is not none %} · plano de há {{ '%.0f' | format(plano.age_hours) }} h{% endif %}
+</p>
+{% if erro %}<div class="alert warn" role="alert">{{ erro }}</div>
 {% elif linhas %}
-  {# A marca PERF. COMP. afirma «fiz a quantidade toda»; se o plano ainda tem
-     falta, ou a marca é prematura ou o plano está velho — em ambos os casos
-     merece um olhar, não uma certeza. #}
-  {% if origem_perf_comp and totais and totais.falta is not none and totais.falta > 0 %}
-    <div class="alert warn" style="margin-bottom:10px;">
-      <span>Linha marcada como PERF. COMP., mas o plano ainda mostra
-        <b>{{ '%g' | format(totais.falta) }}</b> por fazer neste perfil —
-        o plano pode estar desatualizado (idade acima).</span>
-    </div>
-  {% endif %}
-  {% if showing_all_of %}
-    <div class="alert warn" style="margin-bottom:10px;">
-      <span>O perfil está vazio ou não aparece nesta OF. A mostrar todas as
-        referências da OF para poderes corrigir a linha.</span>
-    </div>
-  {% endif %}
-  <div class="plan-toolbar">
-    <span class="muted tiny">{{ linhas | length }} referência(s).</span>
-    <input type="search" class="kv-select plan-filter"
-           placeholder="Filtrar a lista (opcional)…"
-           aria-label="Filtrar referências visíveis"
-           oninput="filtrarPlano(this.value)">
+  {% if origem_perf_comp %}<div class="alert {{ 'ok' if readonly else 'info' }}"><span>
+    {% if readonly %}Perfil completo: produção guardada nesta folha.
+    {% else %}Perfil completo: assume a produção das quantidades que estavam por fazer.{% endif %}
+  </span></div>{% endif %}
+  <div class="plan-toolbar"><span class="muted tiny">{{ linhas | length }} referência(s).</span>
+    <input type="search" class="kv-select plan-filter" placeholder="Filtrar a lista…" aria-label="Filtrar referências visíveis" oninput="filtrarPlano(this.value)">
   </div>
-  <div class="plan-table-wrap">
-    <table class="tbl" id="tabela-plano">
-      <thead>
-        <tr>
-          <th>Referência</th><th>Perfil</th><th>Comp.</th><th>Planeado</th>
-          <th>Feito</th><th>Por fazer</th><th>Excesso</th>
-          <th>Máquina</th><th>Semana</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for l in linhas %}
-        {% set selected = (current_binding.get('plan_key') and current_binding.get('plan_key') == l.get('plan_key'))
-                          or (not current_binding.get('plan_key') and current_model and current_model == l.get('component_ref')) %}
-        <tr class="{% if selected %}plan-selected{% endif %}{% if l.get('closed_x') %} plan-closed{% endif %}">
-          <td class="mono"><b>{{ l.get('component_ref') or '—' }}</b></td>
-          <td class="mono">{{ l.get('perfil') or '—' }}</td>
-          <td class="mono tnum">{{ '%g' | format(l.get('length_mm')) if l.get('length_mm') is not none else '—' }}</td>
-          <td class="mono tnum">{{ '%g' | format(l.get('quantity_planned')) if l.get('quantity_planned') is not none else '—' }}</td>
-          <td class="mono tnum">{{ '%g' | format(l.get('quantity_made')) if l.get('quantity_made') is not none else '—' }}</td>
-          <td class="mono tnum">{{ '%g' | format(l.get('remaining_quantity')) if l.get('remaining_quantity') is not none else '—' }}</td>
-          <td class="mono tnum">{{ '%g' | format(l.get('excesso')) if l.get('excesso') is not none else '—' }}</td>
-          <td class="tiny">{{ l.get('cutting_machine') or '—' }}</td>
-          <td class="tiny mono">{{ l.get('planning_week') or '—' }}</td>
-          <td>
-            {% if selected %}<span class="pill info">seleção atual</span>{% endif %}
-            {% if origem_perf_comp %}
-              {% if l.get('closed_x') %}<span class="pill neutral">fechada</span>
-              {% elif l.get('remaining_quantity') is not none and l.get('remaining_quantity') <= 0 %}<span class="pill ok">completa</span>{% endif %}
-            {% elif editable and l.get('plan_key') and l.get('snapshot_id') %}
-              <form method="post" action="/sheet/{{ sheet.uid }}/rows/{{ row_index }}/reference" style="display:inline;">
-                <input type="hidden" name="snapshot_id" value="{{ l.get('snapshot_id') }}">
-                <input type="hidden" name="plan_key" value="{{ l.get('plan_key') }}">
-                <input type="hidden" name="revision" value="{{ sheet.revision }}">
-                <input type="hidden" name="back" value="{{ request.query_params.get('back', '') }}">
-                <button class="btn {% if selected %}primary{% endif %}" type="submit">Escolher</button>
-              </form>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-      {# tfoot e não uma linha do tbody: o filtro só varre `tbody tr`, e os
-         totais têm de sobreviver ao filtro. #}
-      {% if origem_perf_comp and totais %}
-      <tfoot>
-        <tr>
-          <td><b>Totais{{ ' (parciais)' if totais.parcial else '' }}</b></td>
-          <td></td><td></td>
-          <td class="mono tnum"><b>{{ '%g' | format(totais.planeada) if totais.planeada is not none else '—' }}</b></td>
-          <td class="mono tnum"><b>{{ '%g' | format(totais.feita) if totais.feita is not none else '—' }}</b></td>
-          <td class="mono tnum"><b>{{ '%g' | format(totais.falta) if totais.falta is not none else '—' }}</b></td>
-          <td class="mono tnum"><b>{{ '%g' | format(totais.excesso) if totais.excesso is not none else '—' }}</b></td>
-          <td></td><td></td><td></td>
-        </tr>
-      </tfoot>
-      {% endif %}
-    </table>
-  </div>
-
-{% else %}
-  <div class="alert warn"><span>Sem linhas no plano para esta obra.</span></div>
-{% endif %}
-
-<script>
-  function filtrarPlano(termo) {
-    const t = (termo || '').trim().toLowerCase();
-    document.querySelectorAll('#tabela-plano tbody tr').forEach(tr => {
-      tr.style.display = !t || tr.textContent.toLowerCase().includes(t) ? '' : 'none';
-    });
-  }
-</script>
+  <div class="plan-table-wrap"><table class="tbl" id="tabela-plano">
+    <thead><tr><th>Referência</th><th>Perfil</th><th>Comp.</th><th>Planeada</th>
+      {% if origem_perf_comp %}<th>Por fazer antes</th><th>Feita nesta folha</th><th>Por fazer depois</th>
+      {% else %}<th>Feita no plano</th><th>Por fazer</th>{% endif %}
+      <th>Máquina</th><th>Semana</th><th></th></tr></thead>
+    <tbody>{% for l in linhas %}
+      <tr class="{{ 'cc-match' if l.get('plan_key') == current_plan_key else '' }}">
+        <td class="mono"><b>{{ l.get('component_ref') or '—' }}</b>{% if l.get('material_description') %}<div class="plan-description">{{ l.material_description }}</div>{% endif %}</td>
+        <td class="mono">{{ (l.get('profile_excel_o') if mtg2 else l.get('profile_type')) or '—' }}{% if mtg2 and l.get('profile_type') %}<div class="muted tiny">Tubo {{ l.profile_type }}</div>{% endif %}</td>
+        {% for key in ['length_mm', 'quantity_planned'] %}<td class="mono tnum">{{ '%g' | format(l[key]) if l.get(key) is not none else '—' }}</td>{% endfor %}
+        {% for key in (['remaining_quantity', 'made_in_sheet', 'remaining_after'] if origem_perf_comp else ['quantity_made', 'remaining_quantity']) %}<td class="mono tnum">{{ '%g' | format(l[key]) if l.get(key) is not none else '—' }}</td>{% endfor %}
+        <td class="tiny">{{ l.get('cutting_machine') or '—' }}</td><td class="tiny">{{ l.get('planning_week') or '—' }}</td>
+        <td>{% if origem_perf_comp %}<span class="pill {{ 'neutral' if l.get('remaining_valid') else 'crit' }}">{{ 'incluída' if l.get('remaining_valid') else 'falta inválida' }}</span>
+        {% elif readonly %}<span class="pill neutral">só leitura</span>
+        {% else %}<form method="post" action="/sheet/{{ uid }}/rows/{{ row_index }}/reference">
+          <input type="hidden" name="snapshot_id" value="{{ plano.snapshot_id }}"><input type="hidden" name="plan_key" value="{{ l.plan_key }}">
+          <input type="hidden" name="revision" value="{{ revision }}"><input type="hidden" name="back" value="{{ back_url }}">
+          <button class="btn ghost" type="submit">Escolher</button>
+        </form>{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    {% if origem_perf_comp and totais %}<tfoot><tr><td><b>Totais{{ ' (parciais)' if totais.parcial else '' }}</b></td><td></td><td></td>
+      {% for key in ['planeada', 'falta', 'nesta_folha', 'depois'] %}<td class="mono tnum"><b>{{ '%g' | format(totais[key]) if totais.get(key) is not none else '—' }}</b></td>{% endfor %}
+      <td></td><td></td><td></td></tr></tfoot>{% endif %}
+  </table></div>
+{% else %}<div class="alert warn">Sem linhas no planeamento para esta obra.</div>{% endif %}

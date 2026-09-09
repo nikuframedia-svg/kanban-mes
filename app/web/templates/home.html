@@ -87,7 +87,7 @@
 
     {% if f.operador or f.data or f.data_captura or f.setor or f.of %}
       <a class="btn ghost" style="font-size:12px;"
-         href="{{ clear_url }}">✕ Limpar filtros</a>
+         data-clear-history href="{{ clear_url }}">✕ Limpar filtros</a>
     {% endif %}
   </form>
 

@@ -1,0 +1,523 @@
+{
+  "source_app": "kanban-mes",
+  "sheets": 61,
+  "recoverable_sheets": 40,
+  "problems": [
+    {
+      "uid": "384ca8eeac0a",
+      "sheet_no": 383,
+      "row": 3,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "384ca8eeac0a",
+      "sheet_no": 383,
+      "row": 4,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "384ca8eeac0a",
+      "sheet_no": 383,
+      "row": 5,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "384ca8eeac0a",
+      "sheet_no": 383,
+      "row": 6,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "384ca8eeac0a",
+      "sheet_no": 383,
+      "row": 7,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "384ca8eeac0a",
+      "sheet_no": 383,
+      "row": 8,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "384ca8eeac0a",
+      "sheet_no": 383,
+      "row": 9,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "384ca8eeac0a",
+      "sheet_no": 383,
+      "row": 10,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "3f7760c510f9",
+      "sheet_no": 384,
+      "row": 7,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "1a51910eb6fc",
+      "sheet_no": 390,
+      "row": 4,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "1a51910eb6fc",
+      "sheet_no": 390,
+      "row": 5,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "46212c8177dc",
+      "sheet_no": 392,
+      "row": 4,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "71f81a549443",
+      "sheet_no": 396,
+      "row": 2,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "71f81a549443",
+      "sheet_no": 396,
+      "row": 3,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "71f81a549443",
+      "sheet_no": 396,
+      "row": 4,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "951161bb1ee4",
+      "sheet_no": 399,
+      "row": 1,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "f7a4909f7cd4",
+      "sheet_no": 403,
+      "row": 1,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "a3e294cd0bae",
+      "sheet_no": 408,
+      "row": 7,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "a3e294cd0bae",
+      "sheet_no": 408,
+      "row": 8,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "a3e294cd0bae",
+      "sheet_no": 408,
+      "row": 9,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 1,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 2,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 3,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 4,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 5,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 6,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 7,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 8,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 9,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 10,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 12,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bf687b7b8420",
+      "sheet_no": 409,
+      "row": 13,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "01b50475d6d9",
+      "sheet_no": 412,
+      "row": 6,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "01b50475d6d9",
+      "sheet_no": 412,
+      "row": 7,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "01b50475d6d9",
+      "sheet_no": 412,
+      "row": 8,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "01b50475d6d9",
+      "sheet_no": 412,
+      "row": 9,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "01b50475d6d9",
+      "sheet_no": 412,
+      "row": 10,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "01b50475d6d9",
+      "sheet_no": 412,
+      "row": 11,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "120f937df371",
+      "sheet_no": 414,
+      "row": 1,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "120f937df371",
+      "sheet_no": 414,
+      "row": 2,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "120f937df371",
+      "sheet_no": 414,
+      "row": 3,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "120f937df371",
+      "sheet_no": 414,
+      "row": 4,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "120f937df371",
+      "sheet_no": 414,
+      "row": 5,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "120f937df371",
+      "sheet_no": 414,
+      "row": 6,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "120f937df371",
+      "sheet_no": 414,
+      "row": 7,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "1d678cee8654",
+      "sheet_no": 416,
+      "row": 3,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "1d678cee8654",
+      "sheet_no": 416,
+      "row": 4,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "929c8c20d698",
+      "sheet_no": 417,
+      "row": 1,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "929c8c20d698",
+      "sheet_no": 417,
+      "row": 2,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "929c8c20d698",
+      "sheet_no": 417,
+      "row": 3,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "929c8c20d698",
+      "sheet_no": 417,
+      "row": 4,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "929c8c20d698",
+      "sheet_no": 417,
+      "row": 5,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "929c8c20d698",
+      "sheet_no": 417,
+      "row": 6,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 1,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 2,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 7,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 8,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 9,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 10,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 11,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 12,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 13,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 14,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "babdc72a0f5b",
+      "sheet_no": 418,
+      "row": 15,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "3313ddc32f2c",
+      "sheet_no": 422,
+      "row": 9,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "3313ddc32f2c",
+      "sheet_no": 422,
+      "row": 10,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "3313ddc32f2c",
+      "sheet_no": 422,
+      "row": 11,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "6d719cd0566e",
+      "sheet_no": 425,
+      "row": 1,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "6d719cd0566e",
+      "sheet_no": 425,
+      "row": 2,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "6d719cd0566e",
+      "sheet_no": 425,
+      "row": 4,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "74b1d6835f5e",
+      "sheet_no": 427,
+      "row": 2,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bdf3283f52fe",
+      "sheet_no": 430,
+      "row": 1,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bdf3283f52fe",
+      "sheet_no": 430,
+      "row": 2,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "bdf3283f52fe",
+      "sheet_no": 430,
+      "row": 4,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "e87411c66f48",
+      "sheet_no": 432,
+      "row": 6,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "ecde4f785d10",
+      "sheet_no": 433,
+      "row": 9,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "ecde4f785d10",
+      "sheet_no": 433,
+      "row": 10,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "ecde4f785d10",
+      "sheet_no": 433,
+      "row": 11,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "ecde4f785d10",
+      "sheet_no": 433,
+      "row": 12,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "ecde4f785d10",
+      "sheet_no": 433,
+      "row": 13,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "ecde4f785d10",
+      "sheet_no": 433,
+      "row": 14,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "ecde4f785d10",
+      "sheet_no": 433,
+      "row": 15,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "de05adb00729",
+      "sheet_no": 437,
+      "row": 10,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "de05adb00729",
+      "sheet_no": 437,
+      "row": 11,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "de05adb00729",
+      "sheet_no": 437,
+      "row": 12,
+      "reason": "Snapshot da validação não identificado."
+    },
+    {
+      "uid": "de05adb00729",
+      "sheet_no": 437,
+      "row": 13,
+      "reason": "Snapshot da validação não identificado."
+    }
+  ]
+}

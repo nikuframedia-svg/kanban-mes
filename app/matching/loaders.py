@@ -117,7 +117,7 @@ def load_cantoneiras_index(snapshot_id: str | None = None) -> PlanIndex:
         SELECT snapshot_id, snapshot_loaded_at, plan_key,
                production_order_no AS of, sales_order_no AS ov,
                customer_name AS cliente, customer_name AS cliente_nome,
-               component_ref AS modelo, profile_type AS perfil,
+               component_ref AS modelo, profile_type AS perfil, material_description,
                length_mm AS comp_mm, quantity_planned AS qtd_planeada,
                quantity_made AS qtd_feita,
                remaining_quantity AS qtd_restante,
@@ -257,11 +257,9 @@ _CANTONEIRAS_SNAPSHOT = (
 def plan_snapshot_info() -> dict:
     """Identidade e idade do plano de cantoneiras em uso."""
     rows = _fetch(
-        "SELECT snapshot_id, max(snapshot_loaded_at) AS loaded_at, "
-        "max(source_filename) AS source_filename "
-        "FROM analytics_mtg.kanban_plan_lines "
-        "WHERE source_app = 'kanban-mes' GROUP BY snapshot_id "
-        "ORDER BY loaded_at DESC, snapshot_id DESC LIMIT 1"
+        "SELECT snapshot_id, loaded_at, source_filename FROM audit_mtg.snapshots "
+        "WHERE snapshot_id LIKE %s ORDER BY loaded_at DESC, snapshot_id DESC LIMIT 1",
+        (_CANTONEIRAS_LIKE,),
     )
     if not rows:
         return {}
