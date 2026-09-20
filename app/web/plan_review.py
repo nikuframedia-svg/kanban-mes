@@ -87,14 +87,30 @@ def display_ref(ref: dict) -> dict:
     line = dict(ref)
     before = sim.parse_number(ref.get("remaining_before"))
     made = sim.parse_number(ref.get("assumed_quantity"))
+    length = sim.parse_number(ref.get("length_mm"))
+    meters = (
+        round(made * length / 1000.0, 3)
+        if made is not None and made >= 0 and length is not None
+        else None
+    )
+    meters_error = None
+    if made is None:
+        meters_error = "Quantidade em falta desconhecida"
+    elif made > 0 and length is None:
+        meters_error = (
+            "Comprimento em falta em "
+            + str(ref.get("component_ref") or ref.get("plan_key") or "referência")
+        )
     line.update(quantity_made=ref.get("quantity_made_before"), remaining_quantity=before,
                 made_in_sheet=made, remaining_after=max(before - made, 0) if before is not None and made is not None else None,
-                remaining_valid=made is not None, overproduction_quantity=ref.get("overproduction_before"))
+                remaining_valid=made is not None,
+                overproduction_quantity=ref.get("overproduction_before"),
+                made_meters=meters, meters_error=meters_error)
     return line
 
 
 def totals(lines: list[dict]) -> dict:
-    result = {"parcial": False}
+    result = {"parcial": False, "meters_errors": []}
     for name, key in (("planeada", "quantity_planned"), ("feita", "quantity_made"),
                       ("falta", "remaining_quantity"), ("excesso", "overproduction_quantity"),
                       ("nesta_folha", "made_in_sheet"), ("depois", "remaining_after")):
@@ -103,6 +119,20 @@ def totals(lines: list[dict]) -> dict:
         result[name] = sum(known) if known else None
         if known and len(known) != len(lines):
             result["parcial"] = True
+    meter_values = [sim.parse_number(line.get("made_meters")) for line in lines]
+    positive = [line for line in lines if (sim.parse_number(line.get("made_in_sheet")) or 0) > 0]
+    missing_positive = [line for line in positive if line.get("made_meters") is None]
+    known_meters = [value for value in meter_values if value is not None]
+    result["metros"] = (
+        round(sum(known_meters), 3)
+        if known_meters and not missing_positive
+        else (0.0 if not positive else None)
+    )
+    result["meters_errors"] = list(dict.fromkeys(
+        line.get("meters_error") for line in lines if line.get("meters_error")
+    ))
+    if missing_positive:
+        result["parcial"] = True
     return result
 
 

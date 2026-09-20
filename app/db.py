@@ -300,7 +300,7 @@ def list_sheets(conn: sqlite3.Connection, status: str | None = None,
         # pesquisa simples no JSON das linhas — chega para encontrar uma OF
         sql += " AND sheet_data LIKE ?"
         args.append(f"%{of.strip()}%")
-    sql += " ORDER BY created_at DESC"
+    sql += " ORDER BY sheet_no ASC, uid ASC"
     return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
 
@@ -350,6 +350,7 @@ def save_sheet_data_with_edits(
     *,
     cross_check: dict | None = None,
     write_cross: bool = False,
+    keep_status: bool = False,
     guard: Callable[[sqlite3.Connection], bool] | None = None,
 ) -> bool:
     """Grava dados, auditoria e opcionalmente o cross no mesmo commit CAS.
@@ -364,10 +365,11 @@ def save_sheet_data_with_edits(
             conn.rollback()
             return False
         data_json = json.dumps(sheet_data, ensure_ascii=False, default=str)
+        status_sql = "status = status" if keep_status else "status = 'in_review'"
         if write_cross:
             cur = conn.execute(
                 "UPDATE sheets SET sheet_data = ?, cross_check = ?, "
-                "status = 'in_review', revision = revision + 1 "
+                f"{status_sql}, revision = revision + 1 "
                 "WHERE uid = ? AND revision = ? AND status != 'validated'",
                 (data_json,
                  json.dumps(cross_check, ensure_ascii=False, default=str),
@@ -375,7 +377,8 @@ def save_sheet_data_with_edits(
             )
         else:
             cur = conn.execute(
-                "UPDATE sheets SET sheet_data = ?, cross_check = NULL, status = 'in_review', "
+                "UPDATE sheets SET sheet_data = ?, cross_check = NULL, "
+                f"{status_sql}, "
                 "revision = revision + 1 "
                 "WHERE uid = ? AND revision = ? AND status != 'validated'",
                 (data_json, uid, expected_revision),

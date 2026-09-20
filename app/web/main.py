@@ -175,13 +175,26 @@ def tunnel_url() -> str | None:
 _FRESHNESS_PROBE_SECONDS = 30
 _index_cache: dict[str, tuple[float, object, str | None]] = {}
 _index_lock = threading.Lock()
+_index_build_locks: dict[str, threading.Lock] = {}
+_validation_timing = threading.local()
 
 
 def _conn():
     return db.connect()
 
 
-def get_index(loader_name: str):
+def _index_build_lock(loader_name: str) -> threading.Lock:
+    with _index_lock:
+        return _index_build_locks.setdefault(loader_name, threading.Lock())
+
+
+def _record_index_time(started: float) -> None:
+    current = getattr(_validation_timing, "current", None)
+    if current is not None:
+        current["index_ms"] += (time.monotonic() - started) * 1000.0
+
+
+def get_index(loader_name: str, *, require_current: bool = False):
     """Índice do plano em cache, revalidado contra o snapshot mais recente.
 
     O TTL sozinho era a forma errada de o fazer: reconstruía 64 mil linhas de
@@ -189,55 +202,98 @@ def get_index(loader_name: str):
     dez minutos a ver um plano novo. A sonda é uma linha de SQL — reconstrói
     quando (e só quando) o snapshot muda.
     """
-    now = time.monotonic()
-    with _index_lock:
-        hit = _index_cache.get(loader_name)
-    if hit:
-        checked_at, index, snapshot = hit
-        if now - checked_at < _FRESHNESS_PROBE_SECONDS:
-            return index
-        current = _current_index_snapshot(loader_name)
-        if current is None or current == snapshot:
-            # sonda falhou (Postgres em baixo) ou nada mudou: continuar com o
-            # que temos, e voltar a sondar daqui a pouco
-            with _index_lock:
-                _index_cache[loader_name] = (time.monotonic(), index, snapshot)
-            return index
-    index = getattr(loaders, loader_name)()
-    # A fotografia que etiqueta o cache é a que foi efetivamente carregada.
-    # Sondar o latest aqui abria uma corrida: carregar A, publicar B, etiquetar
-    # o índice A como B e mantê-lo em cache sem nova invalidação.
-    loaded_snapshot = getattr(index, "snapshot_id", None)
-    with _index_lock:
-        _index_cache[loader_name] = (
-            time.monotonic(), index,
-            (str(loaded_snapshot) if loaded_snapshot is not None
-             else _current_index_snapshot(loader_name)),
-        )
-    return index
-
-
-def _current_snapshot_id() -> str | None:
+    started = time.monotonic()
     try:
-        return (loaders.plan_snapshot_info() or {}).get("snapshot_id")
+        now = time.monotonic()
+        with _index_lock:
+            hit = _index_cache.get(loader_name)
+        if hit and not require_current:
+            checked_at, index, _snapshot = hit
+            if now - checked_at < _FRESHNESS_PROBE_SECONDS:
+                return index
+
+        current = _current_index_snapshot(loader_name, strict=require_current)
+        if hit:
+            _checked_at, index, snapshot = hit
+            if current is None or current == snapshot:
+                # Na revisão normal, uma sonda indisponível mantém a cache e
+                # volta a tentar depois. Na validação, strict=True já lançou.
+                with _index_lock:
+                    _index_cache[loader_name] = (
+                        time.monotonic(), index, snapshot,
+                    )
+                return index
+
+        # Só uma thread constrói cada índice. O lock global protege apenas os
+        # dicionários; SQL e construção do PlanIndex decorrem fora dele.
+        with _index_build_lock(loader_name):
+            with _index_lock:
+                latest = _index_cache.get(loader_name)
+            if latest and current is not None and latest[2] == current:
+                with _index_lock:
+                    _index_cache[loader_name] = (
+                        time.monotonic(), latest[1], latest[2],
+                    )
+                return latest[1]
+
+            loader = getattr(loaders, loader_name)
+            if loader_name == "load_cantoneiras_index" and current:
+                index = loader(snapshot_id=current)
+            else:
+                index = loader()
+            loaded_snapshot = getattr(index, "snapshot_id", None)
+            snapshot = (
+                str(loaded_snapshot) if loaded_snapshot is not None else current
+            )
+            if require_current and snapshot != current:
+                raise RuntimeError(
+                    "O índice carregado não corresponde ao snapshot atual."
+                )
+            with _index_lock:
+                _index_cache[loader_name] = (
+                    time.monotonic(), index, snapshot,
+                )
+            return index
+    finally:
+        _record_index_time(started)
+
+
+def _current_snapshot_id(*, strict: bool = False) -> str | None:
+    try:
+        snapshot = (loaders.plan_snapshot_info() or {}).get("snapshot_id")
     except Exception:
+        if strict:
+            raise
         return None
+    if strict and not snapshot:
+        raise RuntimeError("Planeamento indisponível: snapshot não identificado.")
+    return str(snapshot) if snapshot is not None else None
 
 
-def _current_index_snapshot(loader_name: str) -> str | None:
+def _current_index_snapshot(loader_name: str, *, strict: bool = False) -> str | None:
     """Cada índice invalida-se pela SUA carga: os colaboradores chegam num
     snapshot próprio e ficavam presos ao snapshot do plano."""
     if loader_name == "load_employees":
         try:
-            return loaders.employees_snapshot_id()
+            snapshot = loaders.employees_snapshot_id()
         except Exception:
+            if strict:
+                raise
             return None
+        if strict and not snapshot:
+            raise RuntimeError("Carga de colaboradores indisponível.")
+        return str(snapshot) if snapshot is not None else None
     if loader_name == "load_nesting_index":
         try:
-            return loaders.nesting_snapshot_id()
+            snapshot = loaders.nesting_snapshot_id()
         except Exception:
+            if strict:
+                raise
             return None
-    return _current_snapshot_id()
+        if strict and not snapshot:
+            raise RuntimeError("Snapshot de nesting indisponível.")
+        return str(snapshot) if snapshot is not None else None
+    return _current_snapshot_id(strict=strict)
 
 
 def get_employees():
@@ -245,9 +301,15 @@ def get_employees():
     return get_index("load_employees")
 
 
-def make_scorer(template_name: str) -> Scorer:
+def make_scorer(template_name: str, *, require_current: bool = False) -> Scorer:
     template = get_template(template_name)
-    index = get_index(template.index_loader)
+    if require_current:
+        current = _current_index_snapshot(template.index_loader, strict=True)
+        index = get_index(template.index_loader)
+        if str(getattr(index, "snapshot_id", None)) != str(current):
+            index = get_index(template.index_loader, require_current=True)
+    else:
+        index = get_index(template.index_loader)
     active = loaders.load_active_ofs() if template.family == "cantoneiras" else set()
     return Scorer(index, CrossParams.load(), active_primary=active)
 
@@ -379,7 +441,9 @@ def run_cross_check(conn, uid: str, *, force_plan: bool = False, scorer_override
         return False
     if engine == "v3" and sheet["template_name"] == "cantoneiras_kanban":
         if force_plan and scorer_override is None:
-            scorer_override = make_fresh_scorer(sheet["template_name"])
+            scorer_override = make_scorer(
+                sheet["template_name"], require_current=True,
+            )
 
         return _run_cross_check_v3(
             conn, uid, scorer_override=scorer_override,
@@ -563,10 +627,9 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
         plan_reference = {"status": "not_applicable"}
     else:
         try:
-            if force_plan:
-                with _index_lock:
-                    _index_cache.pop(template.index_loader, None)
-            scorer = scorer_override or make_scorer(base["template_name"])
+            scorer = scorer_override or make_scorer(
+                base["template_name"], require_current=force_plan,
+            )
             plan_reference = {"status": "available"}
         except Exception:
             # O plano é uma fonte independente. Uma indisponibilidade não pode
@@ -2095,6 +2158,15 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
     # «Quem valida» deixou de existir no form: valida-se sem entidade e o
     # registo interno fica «operador».
     actor = actor.strip() or "operador"
+    validation_started = time.monotonic()
+    timings = {
+        "index_ms": 0.0, "cross_ms": 0.0,
+        "sqlite_lock_wait_ms": 0.0, "pg_store_ms": 0.0,
+    }
+    _validation_timing.current = timings
+    outcome = "failed"
+    row_count = 0
+    validation_snapshot = None
     conn = _conn()
     focus: str | None = None
     try:
@@ -2149,10 +2221,22 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                 before = db.get_sheet(conn, uid)
                 if not before:
                     raise HTTPException(404)
-        # O índice é recarregado: a validação congela uma única fotografia
-        # atual, não a que por acaso ficou no cache durante a revisão.
-        run_cross_check(conn, uid, force_plan=True)
+        # A validação confirma o snapshot atual. Se for o mesmo, reutiliza o
+        # índice já construído; se mudou, constrói exatamente o novo snapshot.
+        cross_started = time.monotonic()
+        if not run_cross_check(conn, uid, force_plan=True):
+            raise HTTPException(
+                409, "A folha mudou durante o cross-check; tenta novamente."
+            )
+        timings["cross_ms"] = max(
+            0.0,
+            (time.monotonic() - cross_started) * 1000.0 - timings["index_ms"],
+        )
+        lock_started = time.monotonic()
         conn.execute("BEGIN IMMEDIATE")
+        timings["sqlite_lock_wait_ms"] = (
+            time.monotonic() - lock_started
+        ) * 1000.0
         sheet = db.get_sheet(conn, uid)
         if not sheet:
             raise HTTPException(404)
@@ -2165,6 +2249,8 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
             raise HTTPException(422, "Validação exige data preenchida no cabeçalho.")
         template = get_template(sheet["template_name"])
         cross = sheet.get("cross_check") or {}
+        validation_snapshot = cross.get("snapshot_id")
+        row_count = len((sheet.get("sheet_data") or {}).get("rows") or [])
         if template.index_loader:
             plan_ref = cross.get("plan_reference") or {}
             if plan_ref.get("status") != "available" or not cross.get("snapshot_id"):
@@ -2228,8 +2314,12 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                     409, "O planeamento mudou; reabre Referências e confirma novamente."
                 )
         try:
+            store_started = time.monotonic()
             n = pg_store.store_validated_sheet(
                 sheet, template, db.edit_count(conn, uid), actor)
+            timings["pg_store_ms"] = (
+                time.monotonic() - store_started
+            ) * 1000.0
         except pg_store.InvalidSheetDate as exc:
             raise HTTPException(
                 422, f"Data «{exc}» não é interpretável — escreve dd/mm/aaaa.")
@@ -2253,6 +2343,7 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
             raise HTTPException(
                 409, "A folha mudou durante a validação — tenta novamente."
             )
+        outcome = "validated"
     except HTTPException as exc:
         # Os portões da validação (422/409) voltam à folha como banner: o
         # form navega para o POST, e a resposta JSON crua lê-se como crash.
@@ -2284,6 +2375,15 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         )
     finally:
         conn.close()
+        timings["total_ms"] = (time.monotonic() - validation_started) * 1000.0
+        print("[validate-timing] " + json.dumps({
+            "uid": uid,
+            "snapshot_id": validation_snapshot,
+            "rows": row_count,
+            "outcome": outcome,
+            **{key: round(value, 2) for key, value in timings.items()},
+        }, ensure_ascii=False), flush=True)
+        _validation_timing.current = None
     destination = _safe_history_back(back) or _safe_history_back(history_back) or "/"
     return RedirectResponse(
         _with_query(

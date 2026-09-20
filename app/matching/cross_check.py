@@ -76,6 +76,10 @@ class RowCheck:
     plan_refs: list[dict] = field(default_factory=list)
     plan_refs_valid: bool | None = None
     plan_refs_error: str | None = None
+    full_profile_quantity: float | None = None
+    plan_line_meters: float | None = None
+    plan_meters_error: str | None = None
+    plan_refs_expanded: bool = False
 
 
 def plan_quantity_for(index: PlanIndex, of: str, modelo: str) -> float | None:
@@ -497,65 +501,26 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     plan_refs: list[dict] = []
     plan_refs_valid: bool | None = None
     plan_refs_error: str | None = None
+    full_profile_quantity = None
+    plan_meters_error = None
+    plan_refs_expanded = False
     if linha_marcada:
-        of_truth = entry.get("of")
-        perfil_truth = entry.get("perfil")
-        of_norm = index.normalize_written("of", str(of_truth or ""))
-        perfil_norm = index.normalize_written("perfil", str(perfil_truth or ""))
-        seen_keys: set[str] = set()
-        invalid: list[str] = []
-        for ref in index.entries:
-            if index.normalize_written("of", str(ref.get("of") or "")) != of_norm:
-                continue
-            if index.normalize_written("perfil", str(ref.get("perfil") or "")) != perfil_norm:
-                continue
-            plan_key = str(ref.get(index.spec.key_field) or "")
-            if not plan_key or plan_key in seen_keys:
-                continue
-            seen_keys.add(plan_key)
-            remaining = sim.parse_number(ref.get("qtd_restante"))
-            remaining_rule = str(ref.get("regra_calculo") or "").strip()
-            validity_flag = ref.get("falta_valida")
-            valid = (
-                bool(validity_flag) if validity_flag is not None
-                else remaining is not None
-            )
-            # A regra faz parte da proveniencia canonica guardada nos filhos e
-            # e obrigatoria no contrato Postgres. Uma linha sem regra e tao
-            # incompleta como uma falta desconhecida: nao se valida Perfil
-            # Completo com dados que depois nao podem ser auditados.
-            if not valid or remaining is None or remaining < 0 or not remaining_rule:
-                valid = False
-                invalid.append(plan_key)
-            plan_refs.append({
-                "plan_key": plan_key,
-                "component_ref": ref.get("modelo"),
-                "profile_type": ref.get("perfil"),
-                "length_mm": sim.parse_number(ref.get("comp_mm")),
-                "quantity_planned": sim.parse_number(ref.get("qtd_planeada")),
-                "quantity_made_before": sim.parse_number(ref.get("qtd_feita")),
-                "remaining_before": remaining,
-                "overproduction_before": sim.parse_number(ref.get("excesso")),
-                "assumed_quantity": remaining if valid else None,
-                "remaining_rule": remaining_rule or None,
-            })
-        plan_refs_valid = bool(plan_refs) and not invalid
-        if not plan_refs:
-            plan_refs_error = "Sem referências para a combinação OF + Perfil."
-        elif invalid:
-            plan_refs_error = (
-                "Falta inválida ou desconhecida nas referências: "
-                + ", ".join(invalid[:8])
-            )
-        if plan_refs_valid:
-            positive = [
-                ref for ref in plan_refs if (ref["assumed_quantity"] or 0.0) > 0
-            ]
-            if all(ref["length_mm"] is not None for ref in positive):
-                line_meters = round(sum(
-                    ref["assumed_quantity"] * ref["length_mm"]
-                    for ref in positive
-                ) / 1000.0, 2)
+        from .full_profile import expand_entries
+
+        hits = set(index.exact_matches("of", str(entry.get("of") or "")))
+        hits &= set(index.exact_matches("perfil", str(entry.get("perfil") or "")))
+        expanded = expand_entries(
+            [index.entries[i] for i in sorted(hits)],
+            index.snapshot_id,
+            precision=2,
+        )
+        plan_refs = expanded["plan_refs"]
+        plan_refs_valid = expanded["plan_refs_valid"]
+        plan_refs_error = expanded["plan_refs_error"]
+        full_profile_quantity = expanded["full_profile_quantity"]
+        line_meters = expanded["line_meters"]
+        plan_meters_error = expanded["plan_meters_error"]
+        plan_refs_expanded = True
     if plan_length is not None and not linha_marcada:
         qtd_m = sim.parse_number(qtd_written) if _looks_numeric(qtd_written) else None
         if qtd_m is not None:
@@ -583,6 +548,10 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
         plan_refs=plan_refs,
         plan_refs_valid=plan_refs_valid,
         plan_refs_error=plan_refs_error,
+        full_profile_quantity=full_profile_quantity,
+        plan_line_meters=line_meters,
+        plan_meters_error=plan_meters_error,
+        plan_refs_expanded=plan_refs_expanded,
     )
 
 
@@ -661,5 +630,7 @@ def check_sheet(rows: list[dict], scorer: Scorer,
     }
 
     from .full_profile import attach_plan_facts
-    attach_plan_facts(result, scorer.index, rows, precision=2)
+    attach_plan_facts(
+        result, scorer.index, rows, precision=2, reuse_expanded=True,
+    )
     return result

@@ -201,4 +201,7 @@ class PlanIndex:
         return out
 
     def normalized(self, field_name: str, idx: int) -> str:
-        return self._norm.get(field_name, [""] * self.n)[idx] if idx < self.n else ""
+        values = self._norm.get(field_name)
+        if values is None or idx < 0 or idx >= len(values):
+            return ""
+        return values[idx]

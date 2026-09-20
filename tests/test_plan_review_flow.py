@@ -126,6 +126,52 @@ def test_unknown_length_keeps_quantity_without_fictitious_meters():
     result = expand_entries([{**entries()[0], "length_mm": None}], "old")
     assert result["full_profile_quantity"] == 5
     assert result["plan_line_meters"] is None
+    assert result["plan_meters_error"] == "Comprimento em falta em REF-0"
+
+
+def test_zero_quantity_without_length_is_a_known_zero():
+    result = expand_entries([{
+        **entries()[2], "length_mm": None,
+    }], "old")
+    assert result["plan_refs_valid"]
+    assert result["full_profile_quantity"] == 0
+    assert result["plan_line_meters"] == 0
+    assert result["plan_meters_error"] is None
+
+
+def test_folha_671_full_profiles_reproduce_frozen_quantities_and_meters():
+    """Fixture do snapshot observado; não consulta o plano corrente."""
+    groups = {
+        "L110X110X10": [("DLT125", 544, 2)],
+        "L100X100X10": [
+            ("DLT193", 2140, 4), ("DLT200", 180, 6),
+            ("DLT223", 2120, 2), ("DLT302", 2557, 4),
+            ("DLT303", 3112, 4), ("DLT304", 3635, 4),
+            ("DLT305", 4086, 4), ("DLT332", 2041, 4),
+        ],
+        "L130X130X10": [("DLT211D", 7400, 2), ("DLT211E", 7400, 2)],
+    }
+    expected = {
+        "L110X110X10": (2, 1.088),
+        "L100X100X10": (32, 75.604),
+        "L130X130X10": (4, 29.600),
+    }
+    for profile, refs in groups.items():
+        entries_671 = [{
+            "snapshot_id": "mtg_da883132feefabc2",
+            "plan_key": f"fixture:{model}",
+            "production_order_no": "OF264296",
+            "component_ref": model, "profile_type": profile,
+            "length_mm": length, "quantity_planned": quantity,
+            "quantity_made": 0, "remaining_quantity": quantity,
+            "remaining_valid": True,
+            "remaining_rule": "calculated:qtd_minus_maq_blank_zero",
+        } for model, length, quantity in refs]
+        expanded = expand_entries(entries_671, "mtg_da883132feefabc2")
+        assert expanded["plan_refs_valid"]
+        assert (expanded["full_profile_quantity"], expanded["line_meters"]) == expected[profile]
+        shown = [plan_review.display_ref(ref) for ref in expanded["plan_refs"]]
+        assert plan_review.totals(shown)["metros"] == expected[profile][1]
 
 
 def test_legacy_recovery_uses_only_explicit_snapshot_and_never_replaces_zero(monkeypatch):
