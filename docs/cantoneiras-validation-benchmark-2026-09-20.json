@@ -1,0 +1,41 @@
+{
+  "measured_at": "2026-09-20",
+  "scope": "local CPU and elapsed time for legacy cross-check only",
+  "sheet": {
+    "uid": "024f54607858",
+    "sheet_no": 671,
+    "rows": 15,
+    "full_profile_rows": 3
+  },
+  "plan": {
+    "snapshot_id": "mtg_da883132feefabc2",
+    "entries": 75192,
+    "initial_index_load_ms": 903.42
+  },
+  "method": {
+    "warmup_runs": 2,
+    "measured_runs": 20,
+    "baseline": "same code and data with the former PlanIndex.normalized allocation restored",
+    "optimized": "current PlanIndex.normalized implementation",
+    "decision_comparison": "matched key, mode, line meters and full-profile validity for every row"
+  },
+  "baseline": {
+    "wall_median_ms": 1721.78,
+    "wall_p95_ms": 1771.70,
+    "cpu_median_ms": 1721.69,
+    "cpu_p95_ms": 1771.60
+  },
+  "optimized": {
+    "wall_median_ms": 63.86,
+    "wall_p95_ms": 96.78,
+    "cpu_median_ms": 63.85,
+    "cpu_p95_ms": 96.77
+  },
+  "cpu_median_reduction_percent": 96.29,
+  "same_decisions": true,
+  "notes": [
+    "The initial index load is reported separately and is not included in cross-check timings.",
+    "This benchmark does not claim the same reduction for complete validation.",
+    "Complete-validation timing is emitted by the application as index_ms, cross_ms, sqlite_lock_wait_ms, pg_store_ms and total_ms and must be sampled after the Windows release."
+  ]
+}

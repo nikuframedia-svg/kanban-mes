@@ -179,3 +179,11 @@ def test_context_bonus_capped():
     row = {"of": "OF259999", "ov": "OV2409999", "cliente": "SILVA & VINHA", "comp_mm": 1234}
     m = s.match_row(row)
     assert m.winner.context_bits <= s.params.score.context_cap_bits
+
+
+def test_normalized_handles_unknown_field_and_bounds_without_large_default():
+    index = make_index()
+    assert index.normalized("of", 0) == "OF250001"
+    assert index.normalized("missing", 0) == ""
+    assert index.normalized("of", -1) == ""
+    assert index.normalized("of", index.n) == ""

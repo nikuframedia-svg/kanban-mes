@@ -2,6 +2,9 @@
 com staging SQLite temporário, índice do plano sintético e Postgres simulado.
 O caminho real para o Postgres é coberto pelo teste E2E manual (não aqui)."""
 
+from concurrent.futures import ThreadPoolExecutor
+import time
+
 import pytest
 from app import db, pg_store
 from app.matching.loaders import CANTONEIRAS_SPEC
@@ -69,6 +72,49 @@ def create_sheet(client) -> str:
     r = client.post("/upload", data={"template_name": "cantoneiras_kanban"})
     assert r.status_code == 303
     return r.headers["location"].rsplit("/", 1)[1]
+
+
+def test_current_index_reuses_snapshot_and_rebuilds_once(monkeypatch):
+    snapshots = ["s1"]
+    builds = []
+
+    def load(snapshot_id=None):
+        builds.append(snapshot_id)
+        time.sleep(0.01)
+        return PlanIndex([], CANTONEIRAS_SPEC, snapshot_id=snapshot_id)
+
+    monkeypatch.setattr(main.loaders, "load_cantoneiras_index", load)
+    monkeypatch.setattr(
+        main, "_current_index_snapshot",
+        lambda _loader, strict=False: snapshots[0],
+    )
+    with main._index_lock:
+        main._index_cache.clear()
+        main._index_build_locks.clear()
+    try:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            first = list(pool.map(
+                lambda _: main.get_index(
+                    "load_cantoneiras_index", require_current=True,
+                ),
+                range(6),
+            ))
+        assert len({id(index) for index in first}) == 1
+        assert builds == ["s1"]
+        assert main.get_index(
+            "load_cantoneiras_index", require_current=True,
+        ) is first[0]
+        assert builds == ["s1"]
+        snapshots[0] = "s2"
+        updated = main.get_index(
+            "load_cantoneiras_index", require_current=True,
+        )
+        assert updated.snapshot_id == "s2"
+        assert builds == ["s1", "s2"]
+    finally:
+        with main._index_lock:
+            main._index_cache.clear()
+            main._index_build_locks.clear()
 
 
 def get_revision(client, uid) -> int:

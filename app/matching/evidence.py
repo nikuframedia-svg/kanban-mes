@@ -64,6 +64,10 @@ def build_evidence(sheet: dict, human_events: list[dict]) -> Evidence:
     for i, row in enumerate(rows):
         for key in row:
             sources[f"rows[{i}].{key}"] = {"source": "raw_extraction"}
+    from ..header_recovery import evidence_observations
+    for key, value in evidence_observations(sheet).items():
+        data.setdefault("header", {})[key] = value
+        sources[f"header.{key}"] = {"source": "header_recovery"}
     used_ids = []
     for event in sorted(human_events, key=lambda event: int(event["id"])):
         if event.get("source", "human") != "human":
