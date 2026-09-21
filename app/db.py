@@ -332,12 +332,15 @@ def delete_sheet(conn: sqlite3.Connection, uid: str) -> str | None:
 def save_sheet_data(conn: sqlite3.Connection, uid: str, sheet_data: dict,
                     expected_revision: int) -> bool:
     """Escrita com controlo otimista de concorrência: falha se a revisão mudou."""
+    from . import review_guard
+    review_guard.check(uid, expected_revision)
     cur = conn.execute(
         "UPDATE sheets SET sheet_data = ?, cross_check = NULL, status = 'in_review', revision = revision + 1 "
         "WHERE uid = ? AND revision = ? AND status != 'validated'",
         (json.dumps(sheet_data, ensure_ascii=False, default=str), uid, expected_revision),
     )
     conn.commit()
+    review_guard.committed(uid, expected_revision + 1, cur.rowcount == 1)
     return cur.rowcount == 1
 
 
@@ -359,6 +362,8 @@ def save_sheet_data_with_edits(
     como correções do cross (o resultado final não pode ficar separado dos
     valores que descreve).
     """
+    from . import review_guard
+    review_guard.check(uid, expected_revision)
     try:
         conn.execute("BEGIN IMMEDIATE")
         if guard is not None and not guard(conn):
@@ -404,6 +409,7 @@ def save_sheet_data_with_edits(
             ],
         )
         conn.commit()
+        review_guard.committed(uid, expected_revision + 1, True)
         return True
     except Exception:
         conn.rollback()
@@ -444,6 +450,8 @@ def save_cross_check(conn: sqlite3.Connection, uid: str, cross: dict,
     """Grava o cruzamento. Com `expected_revision`, só se a folha ainda for a
     mesma sobre a qual ele foi calculado — um cross velho a sobrepor-se ao
     novo pintava cores calculadas sobre valores que já não existem."""
+    from . import review_guard
+    review_guard.check(uid, expected_revision)
     sql = "UPDATE sheets SET cross_check = ? WHERE uid = ? AND status != 'validated'"
     args: list = [json.dumps(cross, ensure_ascii=False, default=str), uid]
     if expected_revision is not None:
@@ -451,6 +459,7 @@ def save_cross_check(conn: sqlite3.Connection, uid: str, cross: dict,
         args.append(expected_revision)
     cur = conn.execute(sql, args)
     conn.commit()
+    review_guard.committed(uid, expected_revision, cur.rowcount == 1)
     return cur.rowcount == 1
 
 

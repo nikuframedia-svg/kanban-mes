@@ -88,7 +88,7 @@ def health():
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["css_version"] = hashlib.sha1(
-    (_STATIC_DIR / "design.css").read_bytes()
+    b"".join((_STATIC_DIR / name).read_bytes() for name in ("design.css", "review.js", "automatic-review.js"))
 ).hexdigest()[:10]
 # a folha decide o que é uma marca; o template não repete a regra
 templates.env.globals["is_marked"] = is_marked
@@ -621,6 +621,12 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
     header = data.get("header") or {}
     human_header = db.human_header_fields(conn, uid)
     expected = base["revision"]
+    from ..full_profile_identity import corrections as profile_corrections
+    recovered_profiles = profile_corrections(base, db.evidence_edits(conn, base))
+    recovery_edits = []
+    for i, value in recovered_profiles.items():
+        recovery_edits.append((f"rows[{i}].perfil", rows[i].get("perfil"), value, "automatic:physical-profile"))
+        rows[i]["perfil"] = value
 
     scorer: Scorer | None = None
     if template.index_loader is None:
@@ -679,7 +685,7 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
             assumed_date=assumed_date,
         )
 
-    edits: list[tuple[str, object, object, str]] = []
+    edits: list[tuple[str, object, object, str]] = recovery_edits
 
     # Materializar propostas únicas do cabeçalho até estabilizar. A última
     # passagem descreve o valor final, por isso a UI mostra a célula verde; o
@@ -1641,11 +1647,18 @@ def _totais_plano(linhas: list) -> dict:
 
 
 @app.get("/sheet/{uid}/plano/{row_index}", response_class=HTMLResponse)
-def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str = ""):
+def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str = "", scope: str = "profile"):
+    if scope not in {"profile", "of"}:
+        raise HTTPException(422, "Âmbito de referências inválido.")
     from . import plan_review
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
+        if sheet:
+            from ..full_profile_identity import observations
+            profiles = observations(sheet, db.evidence_edits(conn, sheet))
+            for i, value in profiles.items():
+                sheet["sheet_data"]["rows"][i]["perfil"] = value
     finally:
         conn.close()
     if not sheet:
@@ -1653,9 +1666,11 @@ def sheet_plano_perfil(request: Request, uid: str, row_index: int, origem: str =
     rows = (sheet.get("sheet_data") or {}).get("rows") or []
     if not 0 <= row_index < len(rows) or rows[row_index].get("_deleted") is True:
         raise HTTPException(404)
+    automatic_job = header_recovery_routes.job_status(uid)
     try:
         ctx = plan_review.context(sheet, row_index, get_template(sheet["template_name"]),
-                                  _safe_back(request.query_params.get("back")) or "/")
+                                  _safe_back(request.query_params.get("back")) or "/", scope,
+                                  running=automatic_job.get("status") in {"queued", "running"})
     except Exception:
         return templates.TemplateResponse(request, "_plan_error.html",
             {"message": "Não foi possível consultar estas referências. Confirma o planeamento e tenta novamente."}, status_code=503)
@@ -2380,3 +2395,7 @@ coverage_routes.register(app, _conn, sheet_view, _sheet_location, lambda *args: 
 
 from . import recovery_inventory
 recovery_inventory.register(app, _conn, header_recovery_routes.automatic)
+
+
+from .request_diagnostics import install as install_request_diagnostics
+install_request_diagnostics(app, templates, _safe_back)

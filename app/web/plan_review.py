@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from .. import pg_store
 from ..matching import carryover, loaders, similarity as sim
-from ..matching.full_profile import expand_entries
 from ..matching.angle_geometry import profile_key
 from ..templates_spec import field_value, is_marked
 
@@ -136,68 +135,77 @@ def totals(lines: list[dict]) -> dict:
     return result
 
 
-def context(sheet: dict, row_index: int, template, back: str) -> dict:
+def context(sheet: dict, row_index: int, template, back: str, scope: str = "profile", *, running=False) -> dict:
+    if scope not in {"profile", "of"}:
+        raise ValueError("Âmbito de referências inválido.")
     rows = (sheet.get("sheet_data") or {}).get("rows") or []
     row = rows[row_index]
     full = is_marked(field_value(row, "perf_comp"))
     cross = sheet.get("cross_check") or {}
     check = next((r for r in cross.get("rows", []) if r.get("row_index") == row_index), {})
-    ctx = {"uid": sheet["uid"], "row_index": row_index,
-           "row_number": sum(r.get("_deleted") is not True for r in rows[:row_index + 1]),
+    inherited = carryover.resolve(rows, tuple(f for f in template.row_fields if f not in carryover.CARRY_FIELDS), {})
+    effective = carryover.effective_row(row, inherited[row_index])
+    of, profile = str(effective.get("of") or "").strip(), str(effective.get("perfil") or "").strip()
+    ordered = sorted((i for i, r in enumerate(rows) if r.get("_deleted") is not True),
+                     key=lambda i: rows[i].get("_paper_position", i + 1))
+    ctx = {"uid": sheet["uid"], "row_index": row_index, "row_number": ordered.index(row_index) + 1,
            "readonly": sheet["status"] == "validated", "revision": sheet["revision"],
-           "back_url": back, "origem_perf_comp": full, "all_of": False,
+           "back_url": back, "origem_perf_comp": full, "all_of": scope == "of", "scope": scope,
            "linhas": [], "erro": None, "plano": {}, "totais": None,
-           "of": row.get("of"), "perfil": row.get("perfil"), "mtg2": IS_MTG2,
+           "of": of, "perfil": profile, "mtg2": IS_MTG2,
+           "herdou_of": inherited[row_index].is_inherited("of"),
+           "production_values": False, "consultation_only": False,
            "current_plan_key": (row.get("_plan_binding") or {}).get("plan_key") if not full else None}
     if not template.index_loader:
         ctx["erro"] = "Esta folha não cruza com o plano."
         return ctx
-    if full and not ctx["readonly"]:
-        basis = check.get("quantity_basis") or {}
-        ctx["plano"] = {**basis, "frozen": True}
-        if basis.get("status") != "ready":
-            ctx["erro"] = check.get("plan_refs_error") or "O saldo histórico está a ser verificado automaticamente."
-        else:
-            ctx["linhas"] = [display_ref(ref) for ref in check.get("plan_refs", [])]
-            ctx["totais"] = totals(ctx["linhas"])
-        return ctx
-    if ctx["readonly"] and full:
-        if not check.get("plan_refs"):
-            from .export_source import prepare_sheets
-            sheet = prepare_sheets([sheet])[0]
-            check = next((r for r in sheet["cross_check"]["rows"] if r["row_index"] == row_index), {})
-        ctx["linhas"] = [display_ref(ref) for ref in check.get("plan_refs", [])]
-        ctx["plano"] = {"snapshot_id": cross.get("snapshot_id"), **(check.get("quantity_basis") or {}), "frozen": True}
-        ctx["totais"] = totals(ctx["linhas"])
-        return ctx
-    identity = check.get("plan_identity") or {}
-    if ctx["readonly"] and identity:
-        ctx["linhas"] = [dict(identity)]
-        ctx["plano"] = {"snapshot_id": identity.get("snapshot_id"), "frozen": True}
-        return ctx
-    info = ({"snapshot_id": cross.get("validation_snapshot_id") or cross.get("snapshot_id")}
-            if ctx["readonly"] else loaders.plan_snapshot_info())
-    snapshot_id = str(info.get("snapshot_id") or "")
-    ctx["plano"] = info
-    if not snapshot_id:
-        ctx["erro"] = "Não foi possível identificar o planeamento desta folha."
-        return ctx
-    inherited = carryover.resolve(rows, tuple(f for f in template.row_fields if f not in carryover.CARRY_FIELDS), {})
-    effective = carryover.effective_row(row, inherited[row_index])
-    of, profile = str(effective.get("of") or "").strip(), str(effective.get("perfil") or "").strip()
-    ctx.update(of=of, perfil=profile, herdou_of=inherited[row_index].is_inherited("of"))
     if not of:
         ctx["erro"] = "Esta linha não tem OF. Usa Corrigir via OF para escolher uma referência."
         return ctx
-    lines = fetch_order(snapshot_id, of)
-    group = [line for line in lines if same_profile(line.get("profile_type"), profile)]
-    ctx["all_of"] = not bool(group)
-    if full and group:
-        expanded = expand_entries(group, snapshot_id)
-        ctx["linhas"] = [display_ref(ref) for ref in expanded["plan_refs"]]
+    saved = []
+    if full and ctx["readonly"]:
+        if not check.get("plan_refs"):
+            from .export_source import prepare_sheets
+            archived = prepare_sheets([sheet])[0]
+            check = next((r for r in archived["cross_check"]["rows"] if r["row_index"] == row_index), {})
+        saved = [display_ref(ref) for ref in check.get("plan_refs", [])]
+        ctx["plano"] = {"snapshot_id": cross.get("validation_snapshot_id") or cross.get("snapshot_id"),
+                        **(check.get("quantity_basis") or {}), "frozen": True}
+        ctx["production_values"] = True
+    elif full:
+        basis = check.get("quantity_basis") or {}
+        # A corrected physical profile must not display facts for the old profile.
+        basis_profile = (basis.get("context") or {}).get("profile")
+        ready = basis.get("status") == "ready" and (not basis_profile or basis_profile == profile_key(profile))
+        if ready:
+            saved = [display_ref(ref) for ref in check.get("plan_refs", [])]
+            ctx["plano"] = {**basis, "frozen": True}
+            ctx["production_values"] = True
+        else:
+            ctx["consultation_only"] = True
+            ctx["erro"] = ("O saldo histórico está a ser verificado automaticamente." if running else
+                           check.get("plan_refs_error") or "Saldo histórico indisponível; a produção deste perfil ainda não pode ser validada.")
+            ctx["plano"] = {**loaders.plan_snapshot_info(), "consultation": True}
+    elif ctx["readonly"]:
+        identity = check.get("plan_identity") or {}
+        ctx["plano"] = {"snapshot_id": identity.get("snapshot_id") or cross.get("validation_snapshot_id") or cross.get("snapshot_id"), "frozen": True}
     else:
-        ctx["linhas"] = group or lines
-        if full and not group:
-            ctx["erro"] = "O perfil não pertence a esta OF. Usa Corrigir via OF para escolher o perfil completo."
-    ctx["totais"] = totals(ctx["linhas"])
+        ctx["plano"] = loaders.plan_snapshot_info()
+
+    # Frozen profile groups are complete and remain usable when PG is offline.
+    if ctx["production_values"] and scope == "profile":
+        ctx["linhas"] = saved
+    else:
+        snapshot = str(ctx["plano"].get("snapshot_id") or "")
+        if not snapshot:
+            ctx["erro"] = "Não foi possível identificar o planeamento desta folha."
+            return ctx
+        lines = fetch_order(snapshot, of)
+        ctx["linhas"] = lines if scope == "of" else [line for line in lines if same_profile(line.get("profile_type"), profile)]
+        if saved:
+            by_key = {line["plan_key"]: line for line in saved}
+            ctx["linhas"] = [by_key.get(line.get("plan_key"), line) for line in ctx["linhas"]]
+        if scope == "profile" and not ctx["linhas"]:
+            ctx["erro"] = (ctx["erro"] + " " if ctx["erro"] else "") + "Não há referências deste perfil nesta OF. Podes consultar toda a OF."
+    ctx["totais"] = totals(saved if ctx["production_values"] else ctx["linhas"])
     return ctx

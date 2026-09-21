@@ -4,45 +4,50 @@
   {% if perfil %} · {{ 'Tubo' if mtg2 else 'Perfil' }} <b class="mono">{{ perfil }}</b>{% endif %}
   {% if herdou_of %} · OF herdada da linha de cima{% endif %}
   {% if plano.get('date') %} · saldo de {{ plano.date }} · plano guardado em {{ plano.loaded_at[:10] if plano.loaded_at else '—' }}
-  {% elif plano.get('frozen') %} · dados guardados na validação
+  {% elif readonly and plano.get('frozen') %} · dados guardados na validação
+  {% elif plano.get('consultation') %} · plano atual — apenas consulta
   {% elif plano.get('age_hours') is not none %} · plano de há {{ '%.0f' | format(plano.age_hours) }} h{% endif %}
 </p>
-{% if erro %}<div class="alert warn" role="alert">{{ erro }}</div>
-{% elif linhas %}
-  {% if origem_perf_comp %}<div class="alert {{ 'ok' if readonly else 'info' }}"><span>
+{% if erro %}<div class="alert warn" role="alert">{{ erro }}</div>{% endif %}
+{% if consultation_only %}<p class="muted tiny">As quantidades do plano atual não são produção desta folha. A validação continua a exigir saldo histórico válido.</p>{% endif %}
+<div class="plan-toolbar">
+  <button type="button" class="btn ghost" onclick="abrirPlano('/sheet/{{ uid }}/plano/{{ row_index }}?scope={{ 'profile' if all_of else 'of' }}&amp;back={{ back_url|urlencode }}')">{{ 'Ver só este perfil' if all_of else 'Ver toda a OF' }}</button>
+</div>
+{% if linhas %}
+  {% if production_values %}<div class="alert {{ 'ok' if readonly else 'info' }}"><span>
     {% if readonly %}Perfil completo: produção guardada nesta folha.
     {% else %}Perfil completo: assume a produção das quantidades que estavam por fazer.{% endif %}
   </span></div>{% endif %}
-  <div class="plan-toolbar"><span class="muted tiny">{{ linhas | length }} referência(s).</span>
+  <div class="plan-toolbar"><span class="muted tiny" data-plan-count="{{ linhas|length }}">{{ linhas | length }} referência(s).</span>
     <input type="search" class="kv-select plan-filter" placeholder="Filtrar a lista…" aria-label="Filtrar referências visíveis" oninput="filtrarPlano(this.value)">
   </div>
   <div class="plan-table-wrap"><table class="tbl" id="tabela-plano">
     <thead><tr><th>Referência</th><th>Perfil</th><th>Comp.</th><th>Planeada</th>
-      {% if origem_perf_comp %}<th>Por fazer antes</th><th>Feita nesta folha</th><th>Por fazer depois</th>
+      {% if production_values %}<th>Por fazer antes</th><th>Feita nesta folha</th><th>Por fazer depois</th>
       {% else %}<th>Feita no plano</th><th>Por fazer</th>{% endif %}
-      {% if origem_perf_comp %}<th>Metros nesta folha</th>{% endif %}
+      {% if production_values %}<th>Metros nesta folha</th>{% endif %}
       <th>Máquina</th><th>Semana</th><th></th></tr></thead>
     <tbody>{% for l in linhas %}
       <tr class="{{ 'cc-match' if l.get('plan_key') == current_plan_key else '' }}">
         <td class="mono"><b>{{ l.get('component_ref') or '—' }}</b>{% if l.get('material_description') %}<div class="plan-description">{{ l.material_description }}</div>{% endif %}</td>
         <td class="mono">{{ (l.get('profile_excel_o') if mtg2 else l.get('profile_type')) or '—' }}{% if mtg2 and l.get('profile_type') %}<div class="muted tiny">Tubo {{ l.profile_type }}</div>{% endif %}</td>
         {% for key in ['length_mm', 'quantity_planned'] %}<td class="mono tnum">{{ '%g' | format(l[key]) if l.get(key) is not none else '—' }}</td>{% endfor %}
-        {% for key in (['remaining_quantity', 'made_in_sheet', 'remaining_after'] if origem_perf_comp else ['quantity_made', 'remaining_quantity']) %}<td class="mono tnum">{{ '%g' | format(l[key]) if l.get(key) is not none else '—' }}</td>{% endfor %}
-        {% if origem_perf_comp %}<td class="mono tnum">
+        {% for key in (['remaining_quantity', 'made_in_sheet', 'remaining_after'] if production_values else ['quantity_made', 'remaining_quantity']) %}<td class="mono tnum">{{ '%g' | format(l[key]) if l.get(key) is not none else '—' }}</td>{% endfor %}
+        {% if production_values %}<td class="mono tnum">
           {% if l.get('made_meters') is not none %}{{ '%.2f' | format(l.made_meters) }} m
           {% elif l.get('meters_error') %}<span class="pill crit" title="{{ l.meters_error }}">—</span>
           {% else %}—{% endif %}
         </td>{% endif %}
         <td class="tiny">{{ l.get('cutting_machine') or '—' }}</td><td class="tiny">{{ l.get('planning_week') or '—' }}</td>
-        <td>{% if origem_perf_comp %}<span class="pill {{ 'neutral' if l.get('remaining_valid') else 'crit' }}">{{ 'incluída' if l.get('remaining_valid') else 'falta inválida' }}</span>
-        {% elif readonly %}<span class="pill neutral">só leitura</span>
+        <td>{% if production_values and l.get("made_in_sheet") is not none %}<span class="pill {{ 'neutral' if l.get('remaining_valid') else 'crit' }}">{{ 'incluída' if l.get('remaining_valid') else 'falta inválida' }}</span>
+        {% elif readonly or origem_perf_comp %}<span class="pill neutral">só leitura</span>
         {% else %}<form method="post" action="/sheet/{{ uid }}/rows/{{ row_index }}/reference">
           <input type="hidden" name="snapshot_id" value="{{ plano.snapshot_id }}"><input type="hidden" name="plan_key" value="{{ l.plan_key }}">
           <input type="hidden" name="revision" value="{{ revision }}"><input type="hidden" name="back" value="{{ back_url }}">
           <button class="btn ghost" type="submit">Escolher</button>
         </form>{% endif %}</td>
       </tr>{% endfor %}</tbody>
-    {% if origem_perf_comp and totais %}<tfoot><tr><td><b>Totais{{ ' (parciais)' if totais.parcial else '' }}</b></td><td></td><td></td>
+    {% if production_values and totais %}<tfoot><tr><td><b>Totais{{ ' deste perfil' if all_of else '' }}{{ ' (parciais)' if totais.parcial else '' }}</b></td><td></td><td></td>
       {% for key in ['planeada', 'falta', 'nesta_folha', 'depois'] %}<td class="mono tnum"><b>{{ '%g' | format(totais[key]) if totais.get(key) is not none else '—' }}</b></td>{% endfor %}
       <td class="mono tnum"><b>{{ ('%.2f m' | format(totais.metros)) if totais.get('metros') is not none else '—' }}</b></td>
       <td></td><td></td><td></td></tr>
@@ -50,4 +55,4 @@
         {{ totais.meters_errors | join(' · ') }}</td></tr>{% endif %}
     </tfoot>{% endif %}
   </table></div>
-{% else %}<div class="alert warn">Sem linhas no planeamento para esta obra.</div>{% endif %}
+{% else %}<div class="alert warn">Sem referências neste conjunto.</div>{% endif %}

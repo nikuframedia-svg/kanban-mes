@@ -69,9 +69,10 @@
   window.fecharPlano = close;
   window.filtrarPlano = query => {
     const normalized = query.toLocaleLowerCase('pt');
-    document.querySelectorAll('#tabela-plano tbody tr').forEach(row => {
-      row.hidden = !row.textContent.toLocaleLowerCase('pt').includes(normalized);
-    });
+    const rows = [...document.querySelectorAll('#tabela-plano tbody tr')];
+    rows.forEach(row => { row.hidden = !row.textContent.toLocaleLowerCase('pt').includes(normalized); });
+    const count = document.querySelector('[data-plan-count]');
+    if (count) count.textContent = `${rows.filter(row => !row.hidden).length} de ${rows.length} referência(s).`;
   };
   function showError(message) {
     $('of-error').textContent = message;
@@ -187,8 +188,9 @@
   });
   // Header edits survive the page reload after an individual cell/OF edit.
   const sheetId = location.pathname.split('/')[2], draftKey = `${document.body.dataset.historyKey}:header:${sheetId}`;
-  const headers = [...document.querySelectorAll('#header-form input[name^="header_"]')];
+  const headerInputs = () => [...document.querySelectorAll('#header-form input[name^="header_"]')];
   window.guardarCabecalho = () => {
+    const headers = headerInputs();
     if (busy || submitting || !headers.length) return;
     const validation = $('validate-form');
     const form = document.createElement('form');
@@ -206,18 +208,42 @@
     document.body.append(form);
     form.requestSubmit();
   };
-  try {
-    if (headers.length) {
+  function restoreDraft() {
+    try {
       const draft = JSON.parse(sessionStorage.getItem(draftKey) || '{}');
-      headers.forEach(input => {
+      headerInputs().forEach(input => {
         if (Object.hasOwn(draft, input.name)) input.value = draft[input.name];
-        input.addEventListener('input', () => {
-          draft[input.name] = input.value;
-          try { sessionStorage.setItem(draftKey, JSON.stringify(draft)); } catch (_) { /* browser policy */ }
-        });
       });
-    } else { sessionStorage.removeItem(draftKey); }
-  } catch (_) { /* Explicit form values remain available without storage. */ }
+    } catch (_) { /* Explicit form values remain available without storage. */ }
+  }
+  restoreDraft();
+  document.addEventListener('input', event => {
+    if (!event.target.matches('#header-form input[name^="header_"]')) return;
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(draftKey) || '{}');
+      draft[event.target.name] = event.target.value;
+      sessionStorage.setItem(draftKey, JSON.stringify(draft));
+    } catch (_) { /* Browser policy. */ }
+  });
+  document.addEventListener('review:before-update', event => { if (busy || submitting) event.preventDefault(); });
+  document.addEventListener('review:updated', async () => {
+    restoreDraft();
+    if (!active || active.id !== 'plano-modal' || !lastPlan || busy) return;
+    try {
+      const result = await read(lastPlan);
+      if (!result || !result.response.ok || !active || active.id !== 'plano-modal') return;
+      const filter = active.querySelector('.plan-filter');
+      const query = filter ? filter.value : '';
+      const focused = document.activeElement === filter;
+      const wrap = active.querySelector('.plan-table-wrap');
+      const position = wrap ? {top: wrap.scrollTop, left: wrap.scrollLeft} : {top: 0, left: 0};
+      $('plano-modal-body').innerHTML = result.body;
+      const nextFilter = active.querySelector('.plan-filter');
+      if (nextFilter) { nextFilter.value = query; window.filtrarPlano(query); if (focused) nextFilter.focus({preventScroll: true}); }
+      const nextWrap = active.querySelector('.plan-table-wrap');
+      if (nextWrap) { nextWrap.scrollTop = position.top; nextWrap.scrollLeft = position.left; }
+    } catch (_) { /* Keep the currently visible references if the refresh fails. */ }
+  });
   let submitting = false;
   document.addEventListener('submit', event => {
     if (event.target.method !== 'post' || event.defaultPrevented) return;
