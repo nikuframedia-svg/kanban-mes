@@ -300,7 +300,7 @@ def list_sheets(conn: sqlite3.Connection, status: str | None = None,
         # pesquisa simples no JSON das linhas — chega para encontrar uma OF
         sql += " AND sheet_data LIKE ?"
         args.append(f"%{of.strip()}%")
-    sql += " ORDER BY sheet_no ASC, uid ASC"
+    sql += " ORDER BY created_at DESC, sheet_no DESC, uid DESC"
     return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
 

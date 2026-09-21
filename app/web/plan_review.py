@@ -152,13 +152,22 @@ def context(sheet: dict, row_index: int, template, back: str) -> dict:
     if not template.index_loader:
         ctx["erro"] = "Esta folha não cruza com o plano."
         return ctx
+    if full and not ctx["readonly"]:
+        basis = check.get("quantity_basis") or {}
+        ctx["plano"] = {**basis, "frozen": True}
+        if basis.get("status") != "ready":
+            ctx["erro"] = check.get("plan_refs_error") or "O saldo histórico está a ser verificado automaticamente."
+        else:
+            ctx["linhas"] = [display_ref(ref) for ref in check.get("plan_refs", [])]
+            ctx["totais"] = totals(ctx["linhas"])
+        return ctx
     if ctx["readonly"] and full:
         if not check.get("plan_refs"):
             from .export_source import prepare_sheets
             sheet = prepare_sheets([sheet])[0]
             check = next((r for r in sheet["cross_check"]["rows"] if r["row_index"] == row_index), {})
         ctx["linhas"] = [display_ref(ref) for ref in check.get("plan_refs", [])]
-        ctx["plano"] = {"snapshot_id": cross.get("snapshot_id"), "frozen": True}
+        ctx["plano"] = {"snapshot_id": cross.get("snapshot_id"), **(check.get("quantity_basis") or {}), "frozen": True}
         ctx["totais"] = totals(ctx["linhas"])
         return ctx
     identity = check.get("plan_identity") or {}

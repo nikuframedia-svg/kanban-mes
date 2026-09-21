@@ -82,7 +82,7 @@ def test_historico_ordena_numero_globalmente_antes_da_paginacao(tmp_path):
             )
             conn.commit()
         assert [sheet["sheet_no"] for sheet in db.list_sheets(conn)] == [
-            643, 645, 667, 671, 681,
+            681, 671, 667, 645, 643,
         ]
     finally:
         conn.close()
@@ -103,8 +103,8 @@ def test_historico_filtra_e_so_depois_separa_paginas(tmp_path):
         conn.commit()
         filtered = db.list_sheets(conn, operador="ANA")
         numbers = [sheet["sheet_no"] for sheet in filtered]
-        assert numbers == list(range(112, 421, 2))
-        assert numbers[:100] == sorted(numbers)[:100]
-        assert numbers[100:] == sorted(numbers)[100:]
+        assert numbers == list(range(420, 111, -2))
+        assert numbers[:100] == sorted(numbers, reverse=True)[:100]
+        assert numbers[100:] == sorted(numbers, reverse=True)[100:]
     finally:
         conn.close()
