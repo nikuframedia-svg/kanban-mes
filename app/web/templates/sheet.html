@@ -17,7 +17,7 @@
 {% set rows = data.get('rows') or [] %}
 {% set active_rows = [] %}
 {% set paper_rows = [] %}
-{% for candidate in rows %}{% set _ = paper_rows.append({"index": loop.index0, "row": candidate, "position": candidate.get("_paper_position", loop.index)}) %}{% endfor %}
+{% for candidate in rows %}{% set _ = paper_rows.append({"index": loop.index0, "row": candidate, "position": candidate.get("_display_order", candidate.get("_paper_position", loop.index))}) %}{% endfor %}
 {% set visible_row_numbers = {} %}
 {% for entry in (paper_rows if is_raw else paper_rows|sort(attribute="position")) %}
 {% set candidate = entry.row %}
@@ -208,6 +208,7 @@
       <div class="card-h">
         <span class="card-h-title">{{ 'Paragens da máquina' if not t.index_loader else 'Linhas de produção' }}</span>
         <span class="card-h-sub">{{ active_rows | length }} linhas</span>
+        {% if not readonly %}<button type="button" class="btn" data-new-row>+ Linha</button>{% endif %}
       </div>
       <div class="card-b">
         {% if t.index_loader and not is_raw %}
@@ -238,7 +239,7 @@
               {% set row = indexed_row[1] %}
               {% set visible_i = loop.index %}
               {% set cr = cross_rows.get(i) %}
-              <tr id="row-{{ i }}">
+              <tr id="row-{{ i }}" data-production-row="{{ i }}">
                 <td class="muted mono">
                   <div class="row-number-actions">
                     <span>{{ visible_i }}</span>
@@ -252,9 +253,7 @@
                             onclick="abrirEditorOF(this)">✎</button>
                     {% endif %}
                     {% if not readonly %}
-                    <details><summary class="btn danger" aria-label="Excluir linha {{ visible_i }}">−</summary>
                     {% set row_index = i %}{% include '_exclude_row_form.html' %}
-                    </details>
                     {% endif %}
                   </div>
                 </td>
@@ -398,10 +397,6 @@
       </div>
       <div class="card-b">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <form method="post" action="/sheet/{{ sheet.uid }}/add-row">
-            <input type="hidden" name="back" value="{{ back_url }}">
-            <button type="submit" class="btn">+ Linha</button>
-          </form>
           {% if t.index_loader %}
           <form method="post" action="/sheet/{{ sheet.uid }}/recheck">
             <input type="hidden" name="back" value="{{ back_url }}">
@@ -428,10 +423,12 @@
 {# Pop-up das referências do perfil. Fica fora da tabela de propósito: dentro
    de uma célula ficaria preso ao overflow do scroll horizontal. #}
 {% include "_review_dialogs.html" %}
+{% include "_new_row.html" %}
 
 {% endblock %}
 {% block scripts %}
 <script src="/static/review.js?v={{ css_version }}" defer></script>
+<script src="/static/row-actions.js?v={{ css_version }}" defer></script>
 <script src="/static/automatic-review.js?v={{ css_version }}" defer></script>
 <script>
 function acceptProposal(link) {

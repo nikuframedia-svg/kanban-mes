@@ -26,14 +26,14 @@ class PlanSelection(BaseModel):
 
 def register(app, conn_fn, get_index, run_cross_check, sheet_location):
     @app.get("/sheet/{uid}/of-lookup")
-    def of_lookup(uid: str, row_index: int, q: str = "", include_done: bool = False, offset: int = 0):
+    def of_lookup(uid: str, row_index: int | None = None, q: str = "", include_done: bool = False, offset: int = 0):
         conn = conn_fn()
         try:
             sheet = db.get_sheet(conn, uid)
         finally:
             conn.close()
         rows = ((sheet or {}).get("sheet_data") or {}).get("rows") or []
-        if not sheet or not 0 <= row_index < len(rows) or rows[row_index].get("_deleted"):
+        if not sheet or (row_index is not None and (not 0 <= row_index < len(rows) or rows[row_index].get("_deleted"))):
             raise HTTPException(404)
         if not get_template(sheet["template_name"]).index_loader:
             raise HTTPException(422, "Esta folha não usa referências do planeamento.")
@@ -46,7 +46,7 @@ def register(app, conn_fn, get_index, run_cross_check, sheet_location):
                 return JSONResponse({"detail": "Planeamento indisponível."}, status_code=503)
             result = plan_review.lookup(sid, q, include_done=include_done, offset=offset)
             result.update(revision=sheet["revision"], mtg2=plan_review.IS_MTG2,
-                          selection_kind="profile" if is_marked(field_value(rows[row_index], "perf_comp")) else "reference")
+                          selection_kind="profile" if row_index is not None and is_marked(field_value(rows[row_index], "perf_comp")) else "reference")
             return JSONResponse(jsonable_encoder(result))
         except Exception:
             return JSONResponse({"detail": "Não foi possível pesquisar o planeamento. Tenta novamente."}, status_code=503)

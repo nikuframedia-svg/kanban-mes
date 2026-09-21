@@ -4,15 +4,9 @@
 {% set coverage = coverage_data %}
 <div class="alert warn" style="margin-bottom:14px; flex-wrap:wrap;">
   <div>
-    {% if coverage.pending_exclusions %}
-    <strong>Há {{ coverage.pending_exclusions|length }} linhas excluídas por esclarecer.</strong>
-    {% if coverage.expected_rows is not none %}<div>{{ coverage.expected_rows }} linhas detetadas no papel · {{ coverage.included_rows }} incluídas na produção.</div>{% endif %}
-    <div>Confirma abaixo o motivo ou restaura essas linhas. Não é necessário voltar a contar a folha.</div>
-    {% else %}
     <strong>A leitura automática não conseguiu resolver esta diferença.</strong>
     <div>{{ coverage.included_rows }} linhas incluídas{% if coverage.physical_exclusions %} e {{ coverage.physical_exclusions }} fora do âmbito{% endif %}{% if coverage.expected_rows is not none %}; {{ coverage.expected_rows }} detetadas no papel{% endif %}.</div>
     <div>Confere o original: completa as linhas em falta ou corrige a contagem se a imagem tiver sido mal interpretada.</div>
-    {% endif %}
   </div>
   {% if data.get('_coverage_recovery', {}).get('status') in ('failed','review') %}
   <form method="post" action="/sheet/{{ sheet.uid }}/coverage/retry">
@@ -20,7 +14,6 @@
     <button type="submit" class="btn">Repetir leitura da zona em falta</button>
   </form>
   {% endif %}
-  {% if not coverage.pending_exclusions %}
   <details {% if error_context == 'coverage' %}open{% endif %}>
     <summary>Corrigir contagem manualmente</summary>
     <form method="post" action="/sheet/{{ sheet.uid }}/coverage" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -29,13 +22,13 @@
       <button type="submit" class="btn">Confirmar contagem</button>
     </form>
   </details>
-  {% elif error_context == 'coverage' and coverage_count %}<div>Contagem introduzida: {{ coverage_count }}.</div>{% endif %}
 </div>
 {% endif %}
 {% if not is_raw and t.name == "cantoneiras_kanban" and sheet.image_path %}
 <div class="muted" style="margin-bottom:14px;" aria-label="Completude da leitura">
 <strong>Leitura do papel:</strong>
-{% if coverage_data.resolved and not coverage_data.stale %}{{ coverage_data.expected_rows }} linhas físicas · {{ coverage_data.included_rows }} na produção{% if coverage_data.justified_exclusions %} · {{ coverage_data.justified_exclusions }} exclusões justificadas{% endif %} · {{ 'confirmada pelo revisor' if coverage_data.confirmation else 'conferida automaticamente' }}.
+{% if coverage_data.physical_verified and not coverage_data.stale %}{{ coverage_data.confirmation.count if coverage_data.confirmed_by_human else coverage_data.expected_rows }} linhas físicas · {{ coverage_data.included_rows }} na produção{% if coverage_data.removed_rows %} · {{ coverage_data.removed_rows }} retiradas{% endif %} · {{ 'confirmada pelo revisor' if coverage_data.confirmed_by_human else 'conferida automaticamente' }}.
+{% elif coverage_data.resolved and coverage_data.unclassified_exclusions %}{{ coverage_data.expected_rows }} linhas detetadas no papel · {{ coverage_data.included_rows }} na produção · {{ coverage_data.removed_rows }} retiradas. A remoção foi respeitada; a correspondência física das linhas retiradas não foi verificada.
 {% elif automatic_review_needed %}Verificação em curso.
 {% else %}Por conferir{% if coverage_data.expected_rows is not none %}: {{ coverage_data.expected_rows }} linhas físicas · {{ coverage_data.included_rows }} na produção{% endif %}.
 {% endif %}
@@ -46,17 +39,14 @@ A correspondência com o plano é apresentada nas células.
 {% set excluded = [] %}
 {% for row in rows %}{% if row.get('_deleted') is sameas true %}{% set _ = excluded.append((loop.index0, row)) %}{% endif %}{% endfor %}
 {% if excluded %}
-<details class="card" style="margin-bottom:14px;" {% if coverage_data.pending_exclusions %}open{% endif %}>
+<details class="card" style="margin-bottom:14px;" data-detail-key="excluded">
   <summary class="card-h">Linhas excluídas ({{ excluded|length }})</summary>
   <div class="card-b">
   {% for row_index, row in excluded %}
     <div style="padding:12px 0; border-bottom:1px solid var(--line);">
       <strong>Linha original {{ row_index + 1 }}</strong> · <a href="/sheet/{{ sheet.uid }}/rows/{{ row_index }}/audit" target="_blank">Histórico da linha</a> · OF {{ row.of or '—' }} · {{ row.perfil or '—' }} · quantidade {{ row.qtd or '—' }}
-      <div>Motivo: {{ {'out_of_scope':'Fora do âmbito', 'duplicate':'Duplicação', 'ocr_artifact':'Artefacto do OCR'}.get((row.get('_exclusion') or {}).get('reason'), 'Por justificar') }}</div>
-      {% if (row.get('_exclusion') or {}).get('reason') == 'duplicate' %}<div>Linha mantida: {{ row._exclusion.duplicate_of + 1 }}.</div>{% endif %}
       {% if not readonly %}
-        {% include '_exclude_row_form.html' %}
-        <form method="post" action="/sheet/{{ sheet.uid }}/rows/{{ row_index }}/restore" style="margin-top:8px;">
+        <form method="post" action="/sheet/{{ sheet.uid }}/rows/{{ row_index }}/restore" style="margin-top:8px;" data-row-action>
           <input type="hidden" name="revision" value="{{ sheet.revision }}"><input type="hidden" name="back" value="{{ back_url }}">
           <button type="submit" class="btn">Restaurar linha {{ row_index + 1 }}</button>
         </form>

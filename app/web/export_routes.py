@@ -65,7 +65,7 @@ def workbook(kind, sheets):
             date = "9999"
         for i, row, cross in facts_for(sheet):
             rows.append(((date, str(header.get("operador") or ""), int(sheet.get("sheet_no") or 0),
-                          sheet["uid"], i, str(cross.get("matched_plan_key") or "")),
+                          sheet["uid"], (sheet["sheet_data"]["rows"][i].get("_display_order", sheet["sheet_data"]["rows"][i].get("_paper_position", i + 1))), str(cross.get("matched_plan_key") or "")),
                          converter(sheet, row, cross, None)))
     values = [row for _, row in sorted(rows, key=lambda item: item[0])]
     return excel.build_basedados_workbook(values) if kind == "basedados" else excel.build_cpis_workbook(values)

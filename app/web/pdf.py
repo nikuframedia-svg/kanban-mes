@@ -167,7 +167,7 @@ def sheet_pdf(sheet: dict, template: KanbanTemplate, edit_count: int) -> bytes:
     """Folha kanban em A4 retrato — espelho fiel do que está no ecrã."""
     data = sheet.get("sheet_data") or {}
     header = data.get("header") or {}
-    rows = data.get("rows") or []
+    rows = [row for _, row in sorted(enumerate(data.get("rows") or []), key=lambda item: item[1].get("_display_order", item[1].get("_paper_position", item[0]+1)))]
     footer = data.get("footer") or {}
     labels = template.field_labels or {}
     validated = sheet.get("status") == "validated"

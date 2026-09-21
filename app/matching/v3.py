@@ -814,7 +814,7 @@ def check_sheet_v3(sheet_data: dict, params: CrossParams | None = None, *, index
     segments: list[list[int]] = []
     current: list[int] = []
     previous_internal = False
-    for i, source in sorted(enumerate(source_rows), key=lambda item: item[1].get("_paper_position", item[0]+1)):
+    for i, source in sorted(enumerate(source_rows), key=lambda item: item[1].get("_display_order", item[1].get("_paper_position", item[0]+1))):
         kind = classify_row(source)
         if kind == "deleted":
             continue

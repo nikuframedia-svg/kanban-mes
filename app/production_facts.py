@@ -38,7 +38,7 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
     exports: list[dict] = []
     plan_refs: list[dict] = []
 
-    for row_index, source_row in sorted(enumerate(rows), key=lambda item: item[1].get("_paper_position", item[0]+1)):
+    for row_index, source_row in sorted(enumerate(rows), key=lambda item: item[1].get("_display_order", item[1].get("_paper_position", item[0]+1))):
         if (not isinstance(source_row, dict)
                 or source_row.get("_deleted") is True
                 or not row_has_content(source_row)):

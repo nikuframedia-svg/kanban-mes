@@ -91,13 +91,15 @@ def resolve(rows: list[dict], content_fields: tuple[str, ...],
     block: dict[str, str] = {}      # último valor visto de cada campo
     block_source: dict[str, int] = {}  # linha de onde veio
 
-    for i, row in sorted(enumerate(rows), key=lambda item: item[1].get("_paper_position", item[0]+1)):
+    for i, row in sorted(enumerate(rows), key=lambda item: item[1].get("_display_order", item[1].get("_paper_position", item[0]+1))):
         if is_deleted(row):
             # Uma eliminação aproxima visualmente as linhas vizinhas: não
             # fornece identidade e também não corta o bloco entre elas.
             out[i] = RowIdentity(values={}, inherited_from={})
             continue
         human = human_fields_by_row.get(i, set())
+        if row.get("_manual_entry"):
+            human = human | set(CARRY_FIELDS)
         written = {f: _written(row, f) for f in CARRY_FIELDS}
 
         if not _has_content(row, content_fields) and not any(written.values()):

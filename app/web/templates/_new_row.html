@@ -1,0 +1,31 @@
+{% if not readonly %}
+<div id="row-feedback" role="status" aria-live="polite" hidden></div>
+<dialog id="new-row-dialog" class="row-dialog" aria-labelledby="new-row-title" data-uid="{{ sheet.uid }}" data-back="{{ back_url }}">
+  <h2 id="new-row-title">Adicionar linha</h2>
+  <form id="new-row-form" data-row-action>
+    <label>Posição na folha <select id="new-row-position"></select></label>
+    <div class="new-row-fields">
+      {% for f in (display_fields if display_fields is defined else t.row_fields) %}
+      <label>{{ (display_labels if display_labels is defined else t.field_labels or {}).get(f, f) }}
+        {% if f == 'perf_comp' %}<input type="checkbox" name="perf_comp" value="X">
+        {% else %}<input type="text" name="{{ f }}" maxlength="500" autocomplete="off" {% if f in ('qtd', 'qtd_total_mm', 'esp', 'comp_mm', 'larg_mm', 'repeticoes') %}inputmode="decimal"{% endif %}>{% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    <div id="new-row-error" class="alert warn" role="alert" hidden></div>
+    <div class="dialog-actions"><button type="button" class="btn" data-new-row-close>Cancelar</button><button type="submit" class="btn primary">Guardar linha</button></div>
+  </form>
+  {% if t.index_loader %}
+  <details id="new-row-lookup">
+    <summary>Pesquisar OF ou referência</summary>
+    <form id="new-row-search" class="of-search" data-row-action>
+      <input type="search" name="q" placeholder="OF, OV ou referência" aria-label="Pesquisar OF, OV ou referência" autocomplete="off">
+      <button type="submit" class="btn">Procurar</button>
+    </form>
+    <label><input type="checkbox" id="new-row-include-done"> Incluir peças já fechadas</label>
+    <div id="new-row-results" class="of-entries-list" aria-live="polite"></div>
+    <div class="of-pagination"><button type="button" class="btn ghost" id="new-row-prev" disabled>← Anteriores</button><button type="button" class="btn ghost" id="new-row-next" disabled>Mais resultados →</button></div>
+  </details>
+  {% endif %}
+</dialog>
+{% endif %}

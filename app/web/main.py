@@ -88,7 +88,7 @@ def health():
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["css_version"] = hashlib.sha1(
-    b"".join((_STATIC_DIR / name).read_bytes() for name in ("design.css", "review.js", "automatic-review.js"))
+    b"".join((_STATIC_DIR / name).read_bytes() for name in ("design.css", "review.js", "automatic-review.js", "row-actions.js"))
 ).hexdigest()[:10]
 # a folha decide o que é uma marca; o template não repete a regra
 templates.env.globals["is_marked"] = is_marked
@@ -102,7 +102,8 @@ templates.env.globals["field_value"] = field_value
 @app.exception_handler(HTTPException)
 async def _html_post_errors(request: Request, exc: HTTPException):
     """Formulários do browser nunca aterram num documento JSON cru."""
-    if request.method.upper() == "POST":
+    if (request.method.upper() == "POST" and "application/json" not in request.headers.get("accept", "")
+            and "application/json" not in request.headers.get("content-type", "")):
         detail = html.escape(str(exc.detail))
         return HTMLResponse(
             "<!doctype html><html lang='pt'><meta charset='utf-8'>"
@@ -119,7 +120,8 @@ async def _html_post_errors(request: Request, exc: HTTPException):
 async def _html_post_validation_errors(request: Request,
                                        exc: RequestValidationError):
     """Os erros de parsing/fields obrigatórios dos forms também são HTML."""
-    if request.method.upper() == "POST":
+    if (request.method.upper() == "POST" and "application/json" not in request.headers.get("accept", "")
+            and "application/json" not in request.headers.get("content-type", "")):
         return HTMLResponse(
             "<!doctype html><html lang='pt'><meta charset='utf-8'>"
             "<title>Kanban MES — erro</title><body>"
@@ -1315,7 +1317,7 @@ def sheet_csv(uid: str):
     w.writerow(["folha", "estado", "operador", "data", "setor_maquina", "linha"]
                + list(template.row_fields))
     visible_no = 0
-    for row in data.get("rows") or []:
+    for _, row in sorted(enumerate(data.get("rows") or []), key=lambda item: item[1].get("_display_order", item[1].get("_paper_position", item[0]+1))):
         if row.get("_deleted") is True:
             continue
         if not any(not str(k).startswith("_")
@@ -2056,26 +2058,8 @@ def sheet_edit(request: Request, uid: str, field_path: str = Form(...),
     return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
-@app.post("/sheet/{uid}/add-row")
-def add_row(uid: str, back: str = Form("")):
-    conn = _conn()
-    try:
-        sheet = db.get_sheet(conn, uid)
-        if not sheet:
-            raise HTTPException(404)
-        if sheet["status"] == "validated":
-            raise HTTPException(409, "Folha validada é imutável.")
-        data = sheet["sheet_data"]
-        if data is None:
-            raise HTTPException(409, "A folha ainda está a ser lida pelo OCR.")
-        template = get_template(sheet["template_name"])
-        data["rows"].append({f: None for f in template.row_fields})
-        if not db.save_sheet_data(conn, uid, data, sheet["revision"]):
-            raise HTTPException(409, "A folha mudou entretanto — recarrega a página.")
-    finally:
-        conn.close()
-    return RedirectResponse(_sheet_location(uid, back), status_code=303)
-
+from .row_actions import register as register_row_actions
+register_row_actions(app, _conn, lambda conn, uid: run_cross_check(conn, uid), _sheet_location)
 
 
 @app.post("/sheet/{uid}/recheck")

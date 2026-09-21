@@ -28,12 +28,12 @@ def nonempty_rows(extraction: dict) -> list[dict]:
 def row_accounting(data: dict) -> dict:
     rows = data.get("rows") or []
     active = len(nonempty_rows(data))
-    physical_exclusions = 0
-    justified = 0
-    pending = []
+    physical, classified, removed = 0, 0, 0
+    unknown = []
     for i, row in enumerate(rows):
         if not isinstance(row, dict) or row.get("_deleted") is not True:
             continue
+        removed += 1
         decision = row.get("_exclusion") or {}
         reason = decision.get("reason")
         valid = reason in EXCLUSION_REASONS
@@ -42,14 +42,22 @@ def row_accounting(data: dict) -> dict:
             valid = (type(target) is int and 0 <= target < len(rows) and target != i
                      and isinstance(rows[target], dict) and _filled(rows[target])
                      and rows[target].get("_deleted") is not True)
-        if not valid:
-            pending.append(i)
-        else:
-            justified += 1
-            physical_exclusions += int(reason == "out_of_scope" and _filled(row))
-    return {"included_rows": active, "physical_exclusions": physical_exclusions,
-            "justified_exclusions": justified, "pending_exclusions": pending,
-            "accounted_rows": active + physical_exclusions}
+        if valid:
+            classified += 1
+            physical += int(reason == "out_of_scope" and _filled(row))
+        elif _filled(row):
+            unknown.append(i)
+    # Removal is a production decision, not evidence that a physical row is
+    # an OCR artifact or a duplicate. Keep its contribution explicitly unknown.
+    return {"included_rows": active, "physical_exclusions": physical,
+            "justified_exclusions": classified, "removed_rows": removed,
+            "pending_exclusions": [], "unclassified_exclusions": unknown,
+            "accounted_rows": active + physical,
+            "accounted_max": active + physical + len(unknown)}
+
+
+def count_compatible(count, accounting):
+    return type(count) is int and accounting["accounted_rows"] <= count <= accounting["accounted_max"]
 
 
 def sheet_identity(sheet: dict) -> dict:
@@ -68,8 +76,6 @@ def structure_fingerprint(data: dict) -> str:
 
 def coverage_resolved(data: dict, sheet: dict | None = None) -> bool:
     accounting = row_accounting(data)
-    if accounting["pending_exclusions"]:
-        return False
     coverage = data.get("_ocr_coverage")
     if not coverage:
         return not (sheet and sheet.get("image_path"))  # Manual sheets have no paper to reconcile.
@@ -79,21 +85,19 @@ def coverage_resolved(data: dict, sheet: dict | None = None) -> bool:
     if confirmation and (confirmation.get("structure") == structure_fingerprint(data)
             and confirmation.get("context") == coverage.get("context")
             and type(confirmation.get("count")) is int
-            and confirmation["count"] == accounting["accounted_rows"]):
+            and count_compatible(confirmation["count"], accounting)):
         return True
     # A stale human confirmation is never reused. Independent, current image
     # evidence can nevertheless resolve the sheet without another manual step.
     return (coverage.get("algorithm_version") == ALGORITHM_VERSION
             and type(coverage.get("expected_rows")) is int
-            and coverage["expected_rows"] == accounting["accounted_rows"])
+            and count_compatible(coverage["expected_rows"], accounting))
 
 
 def confirm_count(data: dict, count: int, sheet: dict, actor: str, at: str) -> None:
     accounting = row_accounting(data)
-    if accounting["pending_exclusions"]:
-        raise ValueError("Justifica ou restaura as linhas excluídas antes de confirmar a contagem.")
-    if type(count) is not int or not 0 <= count <= 200 or count != accounting["accounted_rows"]:
-        raise ValueError("A contagem do papel não coincide com as linhas incluídas e as exclusões físicas justificadas.")
+    if type(count) is not int or not 0 <= count <= 200 or not count_compatible(count, accounting):
+        raise ValueError("A contagem do papel não coincide com as linhas registadas, incluindo as retiradas.")
     coverage = data.setdefault("_ocr_coverage", {})
     # A changed image/generation needs recalculation; don't bind an old estimate
     # to new evidence through a count form.
@@ -111,7 +115,13 @@ def coverage_view(data: dict, sheet: dict) -> dict:
     coverage.update(row_accounting(data))
     coverage["extracted_rows"] = coverage["included_rows"]
     coverage["resolved"] = coverage_resolved(data, sheet)
-    coverage["status"] = "complete" if coverage["resolved"] else (
+    confirmation = coverage.get("confirmation") or {}
+    human = (confirmation.get("structure") == structure_fingerprint(data)
+             and confirmation.get("context") == coverage.get("context")
+             and count_compatible(confirmation.get("count"), coverage))
+    coverage["physical_verified"] = coverage["resolved"] and (human or not coverage["unclassified_exclusions"])
+    coverage["confirmed_by_human"] = human and coverage["resolved"]
+    coverage["status"] = ("complete" if coverage["physical_verified"] else "reviewed") if coverage["resolved"] else (
         "unverified" if coverage.get("expected_rows") is None else "incomplete")
     coverage["stale"] = (coverage.get("algorithm_version") != ALGORITHM_VERSION
                          or coverage.get("context") != sheet_identity(sheet))
