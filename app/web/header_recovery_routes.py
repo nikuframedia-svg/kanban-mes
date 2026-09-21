@@ -1,55 +1,41 @@
 """Header-only requests use revision guards and never enqueue full-sheet OCR."""
-import threading
 from fastapi import Form, HTTPException
 from fastapi.responses import RedirectResponse
 from .. import db, header_recovery
 
-# Serialize expensive reads in this process; the CLI also uses one worker.
-_lock = threading.Lock()
-_jobs = {}
+automatic = None
 
 
 def job_status(uid):
-    return _jobs.get(uid, {})
+    return automatic.jobs.get(uid, {}) if automatic else {}
 
 
 def register(app, connect, provider, employees, machines, assumed_date, location):
+    from .automatic_review import AutomaticReview
+    from pathlib import Path
+    global automatic
+
+    def eligible(conn, sheet):
+        if not sheet.get('image_path') or not Path(sheet['image_path']).is_file():
+            return False
+        if header_recovery.current_recovery(sheet):
+            return False  # One automatic attempt per image/generation; failures offer retry.
+        protected = db.human_header_fields(conn, sheet['uid'])
+        header = (sheet.get('sheet_data') or {}).get('header') or {}
+        return any(not str(header.get(field) or '').strip() and field not in protected
+                   for field in ('operador', 'n_operador', 'setor_maquina', 'data'))
+
+    def process(conn, uid, revision):
+        sheet = db.get_sheet(conn, uid)
+        return header_recovery.recover(conn, uid, revision, provider(),
+            _safe(employees, {}), _safe(machines, []), assumed_date(sheet))
+
+    automatic = AutomaticReview(app, connect, eligible, process)
+
     @app.post('/sheet/{uid}/header-recovery')
     def recover(uid: str, revision: int = Form(...), back: str = Form('')):
-        if not _lock.acquire(blocking=False):
-            return RedirectResponse(location(uid, back, erro='Já existe uma recuperação em curso. Tenta novamente quando terminar.', erro_context='edit'), status_code=303)
-        conn = connect()
-        try:
-            sheet = db.get_sheet(conn, uid)
-            if not sheet:
-                raise HTTPException(404)
-            if sheet['revision'] != revision or sheet['status'] not in {'extracted', 'in_review'}:
-                raise HTTPException(409, 'A folha mudou ou não admite recuperação.')
-            # HTTP request only starts a bounded background header job. The
-            # snapshot revision is checked again after OCR; a restart leaves no
-            # pending sheet status and the request can safely be repeated.
-            _jobs[uid] = {"status": "running"}
-            def work():
-                worker = None
-                try:
-                    worker = connect()
-                    result = header_recovery.recover(worker, uid, revision, provider(),
-                        _safe(employees, {}), _safe(machines, []), assumed_date(sheet))
-                    _jobs[uid] = result
-                except Exception as exc:
-                    _jobs[uid] = {'status': 'error', 'error': str(exc)}
-                    print(f'[header-recovery] {uid}: {type(exc).__name__}: {exc}', flush=True)
-                finally:
-                    if worker is not None:
-                        worker.close()
-                    _lock.release()
-            threading.Thread(target=work, daemon=True).start()
-        except Exception:
-            _lock.release()
-            raise
-        finally:
-            conn.close()
-        return RedirectResponse(location(uid, back, recovery_started=1), status_code=303)
+        automatic.enqueue(uid, revision, force=True)
+        return RedirectResponse(location(uid, back), status_code=303)
 
     @app.post('/sheet/{uid}/header-recovery/confirm-date')
     def confirm_date(uid: str, revision: int = Form(...), back: str = Form('')):

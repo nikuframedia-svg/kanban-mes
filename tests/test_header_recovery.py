@@ -185,3 +185,52 @@ def test_batch_inventory_and_failure_stop_preserve_unprocessed_sheets(tmp_path,m
     assert cli.main()==0
     with db.connect(database) as conn:
         assert all(recovery.current_recovery(db.get_sheet(conn,uid))['status']=='review' for uid in (first,second))
+
+
+def test_automatic_header_job_starts_once_and_only_date_exception_remains(client,tmp_path,monkeypatch):
+    import time
+    provider=Provider()
+    monkeypatch.setattr(main,'get_provider',lambda:provider)
+    monkeypatch.setattr(main,'get_employees',lambda:EMPLOYEES)
+    monkeypatch.setattr(main,'_load_header_machines',lambda:MACHINES)
+    with db.connect() as conn:
+        uid=create(conn,tmp_path);before=db.get_sheet(conn,uid)
+    page=client.get(f'/sheet/{uid}')
+    assert 'data-automatic-review=' in page.text
+    assert 'Recuperar cabeçalho</button>' not in page.text
+    assert client.post(f'/sheet/{uid}/automatic-review',data={'revision':before['revision']}).status_code==200
+    for _ in range(100):
+        job=client.get(f'/sheet/{uid}/automatic-review').json()
+        if job['status'] not in {'queued','running'}:break
+        time.sleep(.02)
+    assert job['status']=='complete'
+    page=client.get(f'/sheet/{uid}')
+    assert 'data-automatic-review=' not in page.text
+    assert 'Confirmar data pela regra' in page.text
+    with db.connect() as conn:
+        after=db.get_sheet(conn,uid)
+        assert after['sheet_data']['rows']==before['sheet_data']['rows']
+        recovery.confirm_rule(conn,uid,after['revision'])
+    page=client.get(f'/sheet/{uid}')
+    assert 'Confirmar data pela regra' not in page.text
+    assert 'Confirma estes dados' not in page.text
+    assert provider.calls==1
+
+
+def test_failed_automatic_header_attempt_does_not_loop(client,tmp_path,monkeypatch):
+    import time
+    class Offline(Provider):
+        def extract_header(self,*args):
+            raise RuntimeError('offline')
+    monkeypatch.setattr(main,'get_provider',lambda:Offline())
+    monkeypatch.setattr(main,'get_employees',lambda:{})
+    monkeypatch.setattr(main,'_load_header_machines',lambda:[])
+    with db.connect() as conn:
+        uid=create(conn,tmp_path);sheet=db.get_sheet(conn,uid)
+    client.post(f'/sheet/{uid}/automatic-review',data={'revision':sheet['revision']})
+    for _ in range(100):
+        if client.get(f'/sheet/{uid}/automatic-review').json()['status'] not in {'queued','running'}:break
+        time.sleep(.02)
+    page=client.get(f'/sheet/{uid}')
+    assert 'data-automatic-review=' not in page.text
+    assert 'Tentar leitura novamente' in page.text

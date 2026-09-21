@@ -1541,8 +1541,12 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     recovery_conn = _conn()
     try:
         protected_header = db.human_header_fields(recovery_conn, sheet["uid"])
+        automatic_review_needed = (header_recovery_routes.automatic.needed(recovery_conn, sheet)
+            or header_recovery_routes.job_status(sheet["uid"]).get("status") in {"queued", "running"})
     finally:
         recovery_conn.close()
+    if header_draft is not None or field_draft is not None or status_code != 200:
+        automatic_review_needed = False
     recovery_info = header_recovery.current_recovery(sheet)
     recovery_date_pending = header_recovery.date_needs_confirmation(sheet, protected_header)
     return templates.TemplateResponse(request, "sheet.html", {
@@ -1555,6 +1559,8 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
         "header_conflict": header_draft is not None,
         "header_recovery": recovery_info, "recovery_date_pending": recovery_date_pending,
         "recovery_job": header_recovery_routes.job_status(sheet["uid"]),
+        "automatic_review_needed": automatic_review_needed,
+        "automatic_review_job": header_recovery_routes.job_status(sheet["uid"]),
         "error_context": (error_context
                           or request.query_params.get("erro_context")),
         "focus": focus if focus is not None else request.query_params.get("focus"),
