@@ -147,7 +147,7 @@ def context(sheet: dict, row_index: int, template, back: str, scope: str = "prof
     effective = carryover.effective_row(row, inherited[row_index])
     of, profile = str(effective.get("of") or "").strip(), str(effective.get("perfil") or "").strip()
     ordered = sorted((i for i, r in enumerate(rows) if r.get("_deleted") is not True),
-                     key=lambda i: rows[i].get("_paper_position", i + 1))
+                     key=lambda i: rows[i].get("_display_order", rows[i].get("_paper_position", i + 1)))
     ctx = {"uid": sheet["uid"], "row_index": row_index, "row_number": ordered.index(row_index) + 1,
            "readonly": sheet["status"] == "validated", "revision": sheet["revision"],
            "back_url": back, "origem_perf_comp": full, "all_of": scope == "of", "scope": scope,

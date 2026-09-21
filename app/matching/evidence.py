@@ -123,7 +123,7 @@ def build_evidence(sheet: dict, human_events: list[dict]) -> Evidence:
         cur = current_rows[i] if i < len(current_rows) else {}
         if "_deleted" in cur:
             row["_deleted"] = cur["_deleted"]
-        for marker in ("_paper_position", "_identity_unresolved"):
+        for marker in ("_paper_position", "_identity_unresolved", "_display_order", "_manual_entry", "_exclusion"):
             if marker in cur:
                 row[marker] = cur[marker]
         # These markers are operator decisions, never identity predictions.

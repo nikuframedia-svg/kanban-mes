@@ -246,7 +246,7 @@
   });
   let submitting = false;
   document.addEventListener('submit', event => {
-    if (event.target.method !== 'post' || event.defaultPrevented) return;
+    if (event.target.method !== 'post' || event.defaultPrevented || event.target.hasAttribute('data-row-action')) return;
     if (submitting || busy) { event.preventDefault(); return; }
     submitting = true;
     window.setTimeout(() => { document.querySelectorAll('button[type="submit"]').forEach(b => { b.disabled = true; }); }, 0);

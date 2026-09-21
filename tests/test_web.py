@@ -734,7 +734,7 @@ def test_add_row_and_recheck(client):
         n_before = len(db.get_sheet(conn, uid)["sheet_data"]["rows"])
     finally:
         conn.close()
-    assert client.post(f"/sheet/{uid}/add-row").status_code == 303
+    assert client.post(f"/sheet/{uid}/add-row", json={"revision": get_revision(client, uid), "request_id": "test-add-row", "values": {"qtd": "3"}}).status_code == 200
     conn = db.connect()
     try:
         assert len(db.get_sheet(conn, uid)["sheet_data"]["rows"]) == n_before + 1
@@ -774,7 +774,7 @@ def test_apagar_linha_e_logico_auditado_renumera_e_exclui_csv(client):
     page = client.get(f"/sheet/{uid}")
     assert f'/sheet/{uid}/rows/1/delete' not in page.text
     assert f'/sheet/{uid}/rows/2/exclude' in page.text
-    assert 'aria-label="Excluir linha 2"' in page.text
+    assert 'aria-label="Retirar linha 2"' in page.text
     csv_text = client.get(f"/sheet/{uid}/csv").text
     assert ",20" not in csv_text
     assert ",30" in csv_text

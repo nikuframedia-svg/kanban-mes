@@ -38,3 +38,28 @@ def test_historical_parent_children_and_repeat_preserve_facts(clean_history):
     else:
         exported=production_facts.materialize_sheet(sheet,template)['exports']
         assert sum(float(f['row']['qtd']) for f in exported)==106
+
+
+def test_removed_row_never_enters_production_and_manual_order_keeps_stable_ids(clean_history):
+    template=get_template('tpl999_kanban' if pg_store.SOURCE_APP.endswith('mtg2') else 'cantoneiras_kanban')
+    sheet={'uid':uuid.uuid4().hex[:12], 'sheet_no':2, 'template_name':template.name,
+           'image_sha256':'e'*64, 'raw_extraction':{}, 'status':'in_review',
+           'sheet_data':{'header':{'data':'16/09/2026','operador':'TEST'}, 'footer':{}, 'rows':[
+               {'of':'264534','perfil':'L55X55X5','modelo':'EA8B78','qtd':'2','_display_order':2},
+               {'of':'264534','perfil':'L55X55X5','modelo':'REMOVED','qtd':'999','_deleted':True,
+                '_exclusion':{'action':'remove'},'_display_order':3},
+               {'of':'264534','perfil':'L55X55X5','modelo':'EA8B79','qtd':'4','_display_order':1,
+                '_manual_entry':{'request_id':'manual-integration'}}]},
+           'cross_check':{'snapshot_id':'current','rows':[]}}
+    pg_store.store_validated_sheet(sheet,template,0,'test')
+    with psycopg.connect(clean_history) as conn:
+        records=conn.execute('SELECT row_index,quantity FROM mes_kanban.production_records WHERE sheet_uid=%s ORDER BY row_index',(sheet['uid'],)).fetchall()
+    assert [(r[0],float(r[1])) for r in records]==[(0,2),(2,4)]
+    from app.web.export_routes import facts_for
+    exported=list(facts_for(sheet))
+    assert [i for i,_,_ in exported]==[2,0]
+    assert [float(row['qtd']) for _,row,_ in exported]==[4,2]
+    before=copy.deepcopy(sheet)
+    sheet['status']='validated'
+    pg_store.store_validated_sheet(sheet,template,0,'test')
+    assert sheet['sheet_data']==before['sheet_data']

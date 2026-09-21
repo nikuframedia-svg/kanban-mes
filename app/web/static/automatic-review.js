@@ -12,7 +12,7 @@
     dirty = Object.keys(JSON.parse(sessionStorage.getItem(key) || '{}')).length > 0;
   } catch (_) { /* Storage may be disabled. */ }
   function edited(event) {
-    if (event.target.matches('.plan-filter, #of-query')) return;
+    if (event.target.matches('.plan-filter, #of-query') || event.target.closest('#new-row-dialog')) return;
     if (event.target.closest('[data-review-region], .review-dialog')) dirty = true;
   }
   document.addEventListener('input', edited, true);
@@ -20,6 +20,7 @@
   document.addEventListener('submit', event => {
     if (event.target.method === 'post' && !event.defaultPrevented) submitting = true;
   });
+  document.addEventListener('review:updated', event => { if (event.detail?.rowMutation) revision = event.detail.revision; });
   function message(value, retry = false) {
     let panel = document.querySelector('[data-automatic-review], [data-ocr-pending]');
     if (!panel) {

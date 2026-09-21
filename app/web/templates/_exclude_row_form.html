@@ -1,11 +1,4 @@
-<form method="post" action="/sheet/{{ sheet.uid }}/rows/{{ row_index }}/exclude" style="display:flex; gap:6px; flex-wrap:wrap;">
+<form method="post" action="/sheet/{{ sheet.uid }}/rows/{{ row_index }}/exclude" data-row-action data-row="{{ row_index }}">
   <input type="hidden" name="revision" value="{{ sheet.revision }}"><input type="hidden" name="back" value="{{ back_url }}">
-  <label>Motivo <select name="reason" required aria-label="Motivo de exclusão da linha {{ row_index + 1 }}">
-    <option value="">Escolher…</option>
-    <option value="out_of_scope">Fora do âmbito</option>
-    <option value="duplicate">Duplicação de outra linha</option>
-    <option value="ocr_artifact">Artefacto do OCR</option>
-  </select></label>
-  <label>Linha original mantida (se duplicada) <input name="duplicate_of" type="number" min="1" max="200" style="width:65px;"></label>
-  <button type="submit" class="btn">Guardar exclusão</button>
+  <button type="submit" class="btn danger" aria-label="Retirar linha {{ visible_i }}">−</button>
 </form>

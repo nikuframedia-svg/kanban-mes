@@ -72,8 +72,8 @@ def test_legacy_exclusion_restore_keeps_id_and_blocks_unknown_order(client,monke
         data['rows'][0]['_deleted']=True
         db.save_sheet_data_with_edits(conn,uid,data,sheet['revision'],[('rows[0]',raw['rows'][0],'<apagada>','human','legacy')])
         sheet=db.get_sheet(conn,uid)
-    assert not coverage_resolved(data)
-    assert 'Por justificar' in client.get(f'/sheet/{uid}').text
+    assert coverage_resolved(data)
+    assert 'Por justificar' not in client.get(f'/sheet/{uid}').text
     response=client.post(f'/sheet/{uid}/rows/0/restore',data={'revision':sheet['revision']})
     assert response.status_code==303
     with db.connect() as conn:
@@ -94,7 +94,7 @@ def test_exclusion_accounting():
     data={'rows':rows,'_ocr_coverage':{'algorithm_version':ALGORITHM_VERSION,'expected_rows':6}}
     assert coverage_resolved(data)
     rows[0]['_deleted']=rows[1]['_deleted']=True
-    assert not coverage_resolved(data)
+    assert coverage_resolved(data)
     rows[0]['_exclusion']=rows[1]['_exclusion']={'reason':'out_of_scope'}
     assert coverage_resolved(data) and row_accounting(data)['included_rows']==4
 
