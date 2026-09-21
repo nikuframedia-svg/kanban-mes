@@ -58,8 +58,11 @@ const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
   // A second tab cannot remove rows using a stale revision or overwrite drafts.
   const other=await context.newPage();
   await other.goto(config.url);
+  // Reverting an edited value must also discard its saved in-page draft.
+  await quantity.fill('33');
   await page.getByRole('button',{name:'Retirar linha 1',exact:true}).click();
   await page.locator('#row-2').waitFor({state:'detached'});
+  assert.equal(await quantity.inputValue(),'33');
   await other.locator('[name="header_operador"]').fill('OUTRA ABA');
   await other.getByRole('button',{name:'Retirar linha 2',exact:true}).click();
   await other.waitForFunction(()=>document.querySelector('#row-feedback').textContent.includes('noutra aba'));

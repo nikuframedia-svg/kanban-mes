@@ -39,7 +39,9 @@
     const scrolls = [...old.querySelectorAll('.scroll-x')].map(el => el.scrollLeft);
     const expanded = new Set([...old.querySelectorAll('details[open][data-detail-key]')].map(el => el.dataset.detailKey));
     old.querySelectorAll('input:not([type=hidden]), textarea, select').forEach(input => {
-      if (input.name && edited(input)) draftValues.set(key(input), {value: input.value, checked: input.checked});
+      if (!input.name) return;
+      if (edited(input)) draftValues.set(key(input), {value: input.value, checked: input.checked});
+      else draftValues.delete(key(input));
     });
     const focusedKey = old.contains(document.activeElement) ? key(document.activeElement) : null;
     next.querySelectorAll('script').forEach(script => script.remove());
