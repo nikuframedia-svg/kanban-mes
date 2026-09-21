@@ -34,7 +34,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import db, imaging, pg_store, production_facts
+from .. import db, imaging, image_storage, pg_store, production_facts
 from ..config import settings
 from ..health import STARTUP_HEALTH
 from ..matching import carryover, header_cross, loaders, operador
@@ -978,7 +978,7 @@ def _process_sheet(uid: str, force_ocr: bool = False) -> None:
         # O OCR lê a folha na orientação de leitura, não como ela saiu do
         # scanner: com a folha deitada o modelo troca colunas.
         image_path = imaging.render_oriented(
-            Path(sheet["image_path"]), int(sheet.get("image_rotation") or 0)
+            image_storage.for_processing(sheet) or Path(sheet["image_path"]), int(sheet.get("image_rotation") or 0)
         )
         # Verso em branco do scanner: sem tinta não há nada para ler, e mandar
         # uma página vazia ao modelo produzia folhas inventadas inteiras.
@@ -1583,10 +1583,9 @@ def sheet_photo(uid: str, original: int = 0):
         conn.close()
     if not sheet or not sheet.get("image_path"):
         raise HTTPException(404)
-    path = Path(sheet["image_path"]).resolve()
-    # a foto tem de viver dentro da pasta de imagens da app (anti path-traversal)
-    if not path.is_relative_to(settings.images_dir.resolve()) or not path.is_file():
-        raise HTTPException(404)
+    path = image_storage.resolve(sheet)
+    if path is None:
+        raise HTTPException(404, "Imagem original indisponível; os dados da folha estão preservados.")
     if not original:
         path = imaging.render_oriented(path, int(sheet.get("image_rotation") or 0))
     return FileResponse(path)
@@ -2420,3 +2419,7 @@ plan_picker.register(app, _conn, lambda loader: get_index(loader),
 
 from . import header_recovery_routes
 header_recovery_routes.register(app, _conn, lambda: get_provider(), lambda: get_employees(), lambda: _load_header_machines(), _assumed_sheet_date, _sheet_location)
+
+
+from . import image_routes
+image_routes.register(app, _conn)

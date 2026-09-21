@@ -1,7 +1,7 @@
 """Header-only requests use revision guards and never enqueue full-sheet OCR."""
 from fastapi import Form, HTTPException
 from fastapi.responses import RedirectResponse
-from .. import db, header_recovery
+from .. import db, header_recovery, image_storage
 
 automatic = None
 
@@ -12,11 +12,10 @@ def job_status(uid):
 
 def register(app, connect, provider, employees, machines, assumed_date, location):
     from .automatic_review import AutomaticReview
-    from pathlib import Path
     global automatic
 
     def eligible(conn, sheet):
-        if not sheet.get('image_path') or not Path(sheet['image_path']).is_file():
+        if image_storage.for_processing(sheet) is None:
             return False
         if header_recovery.current_recovery(sheet):
             return False  # One automatic attempt per image/generation; failures offer retry.
