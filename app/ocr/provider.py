@@ -149,9 +149,9 @@ def _auto_extraction_prompt(templates: dict[str, KanbanTemplate]) -> str:
 
 # ---- resgate do cabeçalho (segunda chamada focada) ----
 
-# Os 4 campos de identificação que aparecem vazios no sintoma real (a data
-# fica de fora: é assumida pelo sistema como o dia útil anterior).
-HEADER_RESCUE_FIELDS = ("operador", "n_operador", "setor_maquina", "turno")
+# A data manuscrita é evidência; a data final mantém a regra do dia útil anterior.
+# O gatilho automático continua a considerar apenas os quatro campos de identificação.
+HEADER_RESCUE_FIELDS = ("operador", "n_operador", "setor_maquina", "data", "turno")
 
 
 def _header_rescue_prompt(template: KanbanTemplate) -> str:
@@ -163,11 +163,12 @@ def _header_rescue_prompt(template: KanbanTemplate) -> str:
         "- `operador` = o nome manuscrito no campo «Operador»;\n"
         "- `n_operador` = os dígitos do campo «N.º» (ao lado do nome);\n"
         "- `setor_maquina` = o campo «Setor/Máquina» (ex.: «Rapid 20T - 2»);\n"
+        "- `data` = a data manuscrita no campo «Data», sem assumir a data da digitalização;\n"
         "- `turno` = a caixa assinalada com cruz entre «M», «R» e «XM», se alguma.\n"
         "REGRAS ESTRITAS: transcreve EXATAMENTE o que está escrito, sem corrigir "
         "nem completar; campo vazio ou ilegível → null; nunca inventes valores.\n"
         'Devolve apenas o JSON {"operador": …, "n_operador": …, '
-        '"setor_maquina": …, "turno": …}.'
+        '"setor_maquina": …, "data": …, "turno": …}.'
     )
 
 
@@ -229,7 +230,7 @@ def rescue_header(provider: "OcrProvider", image_path: Path | None,
     """
     header = extraction.get("header") or {}
     fields = [f for f in HEADER_RESCUE_FIELDS if f in template.header_fields]
-    empty = [f for f in fields if not str(header.get(f) or "").strip()]
+    empty = [f for f in fields if f != "data" and not str(header.get(f) or "").strip()]
     extract_header = getattr(provider, "extract_header", None)
     if len(empty) < 2 or not image_path or extract_header is None:
         return extraction

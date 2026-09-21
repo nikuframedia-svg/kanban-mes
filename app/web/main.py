@@ -1537,6 +1537,14 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     source_document = (
         header_cross_data.get("source_document") or _source_document(sheet)
     )
+    from .. import header_recovery
+    recovery_conn = _conn()
+    try:
+        protected_header = db.human_header_fields(recovery_conn, sheet["uid"])
+    finally:
+        recovery_conn.close()
+    recovery_info = header_recovery.current_recovery(sheet)
+    recovery_date_pending = header_recovery.date_needs_confirmation(sheet, protected_header)
     return templates.TemplateResponse(request, "sheet.html", {
         "sheet": sheet, "t": template, "cross_rows": cross_rows,
         "summary": cross.get("summary"),
@@ -1545,6 +1553,8 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
         "stored": request.query_params.get("stored"),
         "erro": erro if erro is not None else request.query_params.get("erro"),
         "header_conflict": header_draft is not None,
+        "header_recovery": recovery_info, "recovery_date_pending": recovery_date_pending,
+        "recovery_job": header_recovery_routes.job_status(sheet["uid"]),
         "error_context": (error_context
                           or request.query_params.get("erro_context")),
         "focus": focus if focus is not None else request.query_params.get("focus"),
@@ -2242,6 +2252,9 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
             raise HTTPException(404)
         if sheet["status"] == "validated":
             raise HTTPException(409, "Folha já validada.")
+        from ..header_recovery import date_needs_confirmation
+        if date_needs_confirmation(sheet, db.human_header_fields(conn, uid)):
+            raise HTTPException(422, "Confirma a divergência de data do cabeçalho recuperado antes de validar.")
         header = (sheet["sheet_data"] or {}).get("header") or {}
         if not str(header.get("operador") or "").strip():
             raise HTTPException(422, "Validação exige operador preenchido no cabeçalho.")
@@ -2398,3 +2411,6 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
 from . import plan_picker  # noqa: E402
 plan_picker.register(app, _conn, lambda loader: get_index(loader),
                      lambda *args, **kwargs: run_cross_check(*args, **kwargs), _sheet_location)
+
+from . import header_recovery_routes
+header_recovery_routes.register(app, _conn, lambda: get_provider(), lambda: get_employees(), lambda: _load_header_machines(), _assumed_sheet_date, _sheet_location)
