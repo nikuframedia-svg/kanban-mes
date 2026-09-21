@@ -311,6 +311,8 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 cells = {c["field"]: c for c in cr.get("cells", [])}
                 cols: dict[str, object] = {}
                 extra: dict[str, object] = {"plan_identity": cr["plan_identity"]} if cr.get("plan_identity") else {}
+                if cr.get("quantity_basis"):
+                    extra["quantity_basis"] = cr["quantity_basis"]
                 for f, value in row.items():
                     if value is None or str(value).strip() == "":
                         continue
@@ -339,7 +341,7 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 cols["line_meters"] = cr.get("line_meters")
                 cols["meters_produced"] = sim.parse_number(
                     footer.get("metros_produzidos"))
-                cols["plan_snapshot_id"] = cross.get("snapshot_id")
+                cols["plan_snapshot_id"] = (cr.get("quantity_basis") or {}).get("snapshot_id") or cross.get("snapshot_id")
                 # OF/OV como números puros, a convenção do planeamento —
                 # mesmo quando o valor veio do plano (com prefixo)
                 for ref_col in ("production_order", "sales_order"):

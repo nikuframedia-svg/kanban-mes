@@ -3,7 +3,8 @@
 <p class="muted tiny">{% if of %}OF <b class="mono">{{ strip_ref(of) }}</b>{% endif %}
   {% if perfil %} · {{ 'Tubo' if mtg2 else 'Perfil' }} <b class="mono">{{ perfil }}</b>{% endif %}
   {% if herdou_of %} · OF herdada da linha de cima{% endif %}
-  {% if plano.get('frozen') %} · dados guardados na validação
+  {% if plano.get('date') %} · saldo de {{ plano.date }} · plano guardado em {{ plano.loaded_at[:10] if plano.loaded_at else '—' }}
+  {% elif plano.get('frozen') %} · dados guardados na validação
   {% elif plano.get('age_hours') is not none %} · plano de há {{ '%.0f' | format(plano.age_hours) }} h{% endif %}
 </p>
 {% if erro %}<div class="alert warn" role="alert">{{ erro }}</div>

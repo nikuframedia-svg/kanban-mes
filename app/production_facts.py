@@ -38,7 +38,7 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
     exports: list[dict] = []
     plan_refs: list[dict] = []
 
-    for row_index, source_row in enumerate(rows):
+    for row_index, source_row in sorted(enumerate(rows), key=lambda item: item[1].get("_paper_position", item[0]+1)):
         if (not isinstance(source_row, dict)
                 or source_row.get("_deleted") is True
                 or not row_has_content(source_row)):
@@ -53,12 +53,15 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
             template.name == "cantoneiras_kanban"
             and is_marked(field_value(source_row, "perf_comp"))
         )
+        if sheet.get("status") != "validated" and row_cross.get("quantity_basis") and (row_cross["quantity_basis"].get("status") != "ready"):
+            raise ValueError("Saldo histórico por verificar; exportação de produção indisponível.")
         refs = list(row_cross.get("plan_refs") or []) if full_profile else []
 
         if full_profile and refs:
             assumed = [sim.parse_number(ref.get("assumed_quantity")) for ref in refs]
             aggregate_qtd = sum(value or 0.0 for value in assumed)
-            parent_row = {**row, "modelo": None, "qtd": aggregate_qtd}
+            parent_row = {**row, "modelo": None, "qtd": aggregate_qtd,
+                          "perf_comp": field_value(source_row, "perf_comp")}
             parent_cross = {
                 **row_cross,
                 "matched_plan_key": None,
@@ -78,7 +81,7 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
                 ref_fact = {
                     **ref,
                     "row_index": row_index,
-                    "plan_snapshot_id": cross.get("snapshot_id"),
+                    "plan_snapshot_id": ref.get("snapshot_id") or cross.get("snapshot_id"),
                 }
                 plan_refs.append(ref_fact)
                 # Zero fica na auditoria/filho PG, mas não é uma linha de

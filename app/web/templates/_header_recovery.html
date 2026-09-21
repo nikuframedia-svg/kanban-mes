@@ -7,7 +7,7 @@
 {% endif %}
 {% set pending_proposals = [] %}
 {% if header_recovery %}{% for field in (header_recovery.proposals or {}) %}{% if not header.get(field) %}{% set _ = pending_proposals.append(field) %}{% endif %}{% endfor %}{% endif %}
-{% if header_recovery and not automatic_review_needed and ((header_recovery.error and missing_header) or pending_proposals or recovery_date_pending) %}
+{% if header_recovery and ((header_recovery.error and missing_header) or pending_proposals or recovery_date_pending) %}
 <div class="alert {{ 'crit' if header_recovery.status == 'failed' else 'info' }}" style="flex-direction:column; align-items:flex-start; gap:8px;">
   <strong>Confirma estes dados do cabeçalho</strong>
   {% if header_recovery.error %}<div>Não foi possível ler o cabeçalho. Os dados anteriores foram preservados. Podes tentar novamente ou preencher os campos.</div>{% endif %}

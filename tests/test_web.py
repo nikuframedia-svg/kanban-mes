@@ -510,7 +510,7 @@ def test_header_form_guarda_tudo_uma_vez_e_preserva_draft_no_conflito(
     payload = {
         "operador": "Ana Silva", "n_operador": "42",
         "setor_maquina": "Rapid 20T - 1", "data": "31/08/2026",
-        "turno": "M", "revision": revision, "actor": "teste",
+        "turno": "M", "revision": revision, "actor": "teste", "reason": "out_of_scope",
         "back": "/?status=pending&page=2",
     }
     response = client.post(f"/sheet/{uid}/header", data=payload)
@@ -749,7 +749,7 @@ def test_apagar_linha_e_logico_auditado_renumera_e_exclui_csv(client):
         assert edit(client, uid, f"rows[{i}].qtd", qtd).status_code == 303
     revision = get_revision(client, uid)
     response = client.post(f"/sheet/{uid}/rows/1/delete", data={
-        "revision": revision, "actor": "teste",
+        "revision": revision, "actor": "teste", "reason": "out_of_scope",
         "back": "/?status=in_review&page=2",
     })
     assert response.status_code == 303
@@ -764,18 +764,17 @@ def test_apagar_linha_e_logico_auditado_renumera_e_exclui_csv(client):
         assert 1 not in cross_indexes and 0 in cross_indexes and 2 in cross_indexes
         audit = conn.execute(
             "SELECT old_value, new_value, source, actor FROM edits "
-            "WHERE sheet_uid=? AND field_path='rows[1]'", (uid,),
+            "WHERE sheet_uid=? AND field_path='rows[1]._deleted'", (uid,),
         ).fetchone()
     finally:
         conn.close()
-    assert '"qtd": "20"' in audit["old_value"]
-    assert audit["new_value"] == "<apagada>"
+    assert audit["new_value"] == "true"
     assert (audit["source"], audit["actor"]) == ("human", "teste")
 
     page = client.get(f"/sheet/{uid}")
     assert f'/sheet/{uid}/rows/1/delete' not in page.text
-    assert f'/sheet/{uid}/rows/2/delete' in page.text
-    assert 'aria-label="Apagar linha 2"' in page.text
+    assert f'/sheet/{uid}/rows/2/exclude' in page.text
+    assert 'aria-label="Excluir linha 2"' in page.text
     csv_text = client.get(f"/sheet/{uid}/csv").text
     assert ",20" not in csv_text
     assert ",30" in csv_text
@@ -787,9 +786,8 @@ def test_apagar_linha_respeita_revisao_e_folha_validada(client):
     assert edit(client, uid, "rows[0].qtd", "1").status_code == 303
     stale = get_revision(client, uid)
     assert edit(client, uid, "rows[1].qtd", "2").status_code == 303
-    conflict = client.post(f"/sheet/{uid}/rows/0/delete", data={"revision": stale})
-    assert conflict.status_code == 303
-    assert "erro=" in conflict.headers["location"]
+    conflict = client.post(f"/sheet/{uid}/rows/0/delete", data={"revision": stale, "reason": "out_of_scope"})
+    assert conflict.status_code == 409
     conn = db.connect()
     try:
         assert db.get_sheet(conn, uid)["sheet_data"]["rows"][0].get("_deleted") is not True
@@ -800,9 +798,8 @@ def test_apagar_linha_respeita_revisao_e_folha_validada(client):
         conn.close()
     page = client.get(f"/sheet/{uid}")
     assert "/delete" not in page.text
-    frozen = client.post(f"/sheet/{uid}/rows/0/delete", data={"revision": revision})
-    assert frozen.status_code == 303
-    assert "erro=" in frozen.headers["location"]
+    frozen = client.post(f"/sheet/{uid}/rows/0/delete", data={"revision": revision, "reason": "out_of_scope"})
+    assert frozen.status_code == 409
 
 
 def test_apagar_primeira_intermedia_e_ultima_linha(client):
@@ -811,7 +808,7 @@ def test_apagar_primeira_intermedia_e_ultima_linha(client):
         for i in range(3):
             assert edit(client, uid, f"rows[{i}].qtd", str(i + 1)).status_code == 303
         response = client.post(f"/sheet/{uid}/rows/{row_index}/delete", data={
-            "revision": get_revision(client, uid),
+            "revision": get_revision(client, uid), "reason": "out_of_scope",
         })
         assert response.status_code == 303
         conn = db.connect()

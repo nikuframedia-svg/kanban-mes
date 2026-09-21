@@ -33,7 +33,7 @@ def _index():
 def _sheet(conn, *, validated=False):
     uid = db.create_sheet(conn, "cantoneiras_kanban")
     data = {
-        "header": {},
+        "header": {"data": "16/09/2026"},
         "rows": [{
             "of": "42", "ov": "21", "cliente": "CLIENTE",
             "perfil": "L100X100X10", "modelo": None,
@@ -42,6 +42,7 @@ def _sheet(conn, *, validated=False):
         "footer": {},
     }
     db.set_extraction(conn, uid, data)
+    db.record_edit(conn, uid, 'header.data', None, '16/09/2026', 'human', 'test')
     if validated:
         conn.execute("UPDATE sheets SET status='validated' WHERE uid=?", (uid,))
         conn.commit()
@@ -60,6 +61,8 @@ def test_recovery_dry_run_apply_and_repeat_are_safe(tmp_path, monkeypatch):
         conn.close()
 
     index = _index()
+    from tests.historical_fixtures import install
+    install(monkeypatch, index.entries, "snap")
     from app.matching import loaders
     monkeypatch.setattr(loaders, "plan_snapshot_info", lambda: {"snapshot_id": "snap"})
     monkeypatch.setattr(loaders, "load_cantoneiras_index", lambda snapshot_id=None: index)

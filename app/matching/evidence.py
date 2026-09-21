@@ -68,6 +68,15 @@ def build_evidence(sheet: dict, human_events: list[dict]) -> Evidence:
     for key, value in evidence_observations(sheet).items():
         data.setdefault("header", {})[key] = value
         sources[f"header.{key}"] = {"source": "header_recovery"}
+    recovery = current.get("_coverage_recovery") or {}
+    from ..ocr.coverage import sheet_identity
+    if recovery.get("context") == sheet_identity(sheet):
+        for index, observation in recovery.get("observations", {}).items():
+            i = int(index)
+            if 0 <= i < len(rows):
+                rows[i] = copy.deepcopy(observation)
+                for key in observation:
+                    sources[f"rows[{i}].{key}"] = {"source": "row_recovery"}
     used_ids = []
     for event in sorted(human_events, key=lambda event: int(event["id"])):
         if event.get("source", "human") != "human":
@@ -106,8 +115,11 @@ def build_evidence(sheet: dict, human_events: list[dict]) -> Evidence:
     explicit = {}
     for i, row in enumerate(rows):
         cur = current_rows[i] if i < len(current_rows) else {}
-        if cur.get("_deleted") is True:
-            row["_deleted"] = True
+        if "_deleted" in cur:
+            row["_deleted"] = cur["_deleted"]
+        for marker in ("_paper_position", "_identity_unresolved"):
+            if marker in cur:
+                row[marker] = cur[marker]
         # These markers are operator decisions, never identity predictions.
         for key in ("perf_comp", "perfil_completo"):
             if key in cur and sources.get(f"rows[{i}].{key}", {}).get("source") != "human":

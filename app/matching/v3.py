@@ -814,9 +814,16 @@ def check_sheet_v3(sheet_data: dict, params: CrossParams | None = None, *, index
     segments: list[list[int]] = []
     current: list[int] = []
     previous_internal = False
-    for i, source in enumerate(source_rows):
+    for i, source in sorted(enumerate(source_rows), key=lambda item: item[1].get("_paper_position", item[0]+1)):
         kind = classify_row(source)
         if kind == "deleted":
+            continue
+        if source.get("_identity_unresolved"):
+            if current:
+                segments.append(current)
+                current = []
+            checks[i] = _empty_check(i, source, "production")
+            checks[i]["review_required"] = source["_identity_unresolved"]
             continue
         internal = _internal(source)
         if kind != "production" or internal or previous_internal:

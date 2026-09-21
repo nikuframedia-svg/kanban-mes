@@ -10,11 +10,12 @@ def job_status(uid):
     return automatic.jobs.get(uid, {}) if automatic else {}
 
 
-def register(app, connect, provider, employees, machines, assumed_date, location):
+def register(app, connect, provider, employees, machines, assumed_date, location, recheck):
     from .automatic_review import AutomaticReview
+    from .. import coverage_recovery, historical_quantities
     global automatic
 
-    def eligible(conn, sheet):
+    def header_eligible(conn, sheet):
         if image_storage.for_processing(sheet) is None:
             return False
         if header_recovery.current_recovery(sheet):
@@ -26,8 +27,20 @@ def register(app, connect, provider, employees, machines, assumed_date, location
 
     def process(conn, uid, revision):
         sheet = db.get_sheet(conn, uid)
-        return header_recovery.recover(conn, uid, revision, provider(),
-            _safe(employees, {}), _safe(machines, []), assumed_date(sheet))
+        result = {}
+        if header_eligible(conn, sheet) or header_recovery.current_recovery(sheet).get('status') == 'failed':
+            result['header'] = header_recovery.recover(conn, uid, revision, provider(),
+                _safe(employees, {}), _safe(machines, []), assumed_date(sheet))
+            sheet = db.get_sheet(conn, uid)
+        if coverage_recovery.needs_automatic(conn, sheet):
+            result['coverage'] = coverage_recovery.automatic(conn, uid, sheet['revision'], provider)
+        if not recheck(conn, uid):
+            raise ValueError('A folha mudou durante a verificação.')
+        return result
+
+    def eligible(conn, sheet):
+        return (header_eligible(conn, sheet) or coverage_recovery.needs_automatic(conn, sheet)
+                or historical_quantities.needs_refresh(sheet))
 
     automatic = AutomaticReview(app, connect, eligible, process)
 

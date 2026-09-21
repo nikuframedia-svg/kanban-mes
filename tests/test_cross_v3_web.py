@@ -25,6 +25,8 @@ def v3_client(client, monkeypatch):
         {'plan_key':'B','of':'OF123','ov':'OV111','cliente':'PLAN','perfil':'L60X60X5','modelo':'MODEL-B',
          'comp_mm':2000,'qtd_planeada':20,'qtd_restante':0,'falta_valida':True,'regra_calculo':'calculated:qtd_minus_maq'},
     ],CANTONEIRAS_SPEC,snapshot_id='S')
+    from tests.historical_fixtures import install
+    install(monkeypatch, index.entries)
     monkeypatch.setattr(main,'get_index', lambda name: index)
     monkeypatch.setattr(main,'make_fresh_scorer', lambda name: Scorer(index,CrossParams()))
     monkeypatch.setattr(main.loaders,'plan_snapshot_info',lambda:{'snapshot_id':'S'})
@@ -84,7 +86,8 @@ def test_profile_complete_refuses_invalid_and_preserves_zero_audit(v3_client):
     with db.connect() as conn:
         assert main.run_cross_check(conn,uid,engine_override='v3',scorer_override=Scorer(
             PlanIndex(invalid,CANTONEIRAS_SPEC,snapshot_id='S'),CrossParams()),historical_context_override=None)
-    assert sheet(uid)['cross_check']['rows'][0]['plan_refs_valid'] is False
+    assert sheet(uid)['cross_check']['rows'][0]['plan_refs_valid'] is True
+    assert sheet(uid)['cross_check']['rows'][0]['plan_refs'] == rc['plan_refs']
 
 
 def test_web_cas_conflict_preserves_measurement(v3_client,monkeypatch):

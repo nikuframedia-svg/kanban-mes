@@ -73,7 +73,11 @@ LEGACY_FIELD_ALIASES = {old: new for new, old in _LEGACY_FIELD.items()}
 def field_value(row: dict, field: str):
     value = row.get(field)
     if value in (None, "") and field in _LEGACY_FIELD:
-        return row.get(_LEGACY_FIELD[field])
+        value = row.get(_LEGACY_FIELD[field])
+    # TPL102 operators also write X in QTD (e.g. sheet 681). It is a
+    # completion mark, never a numeric zero. Keep the original cell intact.
+    if field == "perf_comp" and value in (None, "") and is_marked(row.get("qtd")):
+        return row["qtd"]
     return value
 
 CANTONEIRAS_PARAGENS = KanbanTemplate(

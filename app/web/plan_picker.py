@@ -93,6 +93,9 @@ def register(app, conn_fn, get_index, run_cross_check, sheet_location):
                 "modelo": None if full else chosen.get("component_ref"),
             }
             edits = []
+            unresolved = row.pop("_identity_unresolved", None)
+            if unresolved:
+                edits.append((f"rows[{row_index}]._identity_unresolved", unresolved, None, "human", "plan-picker"))
             for field, value in values.items():
                 value = str(value).strip() or None if value is not None else None
                 # Selecting even an unchanged value confirms the identity as

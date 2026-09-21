@@ -87,15 +87,15 @@ def resolve(rows: list[dict], content_fields: tuple[str, ...],
             human_fields_by_row: dict[int, set[str]] | None = None) -> list[RowIdentity]:
     """Identidade efectiva de cada linha, com a proveniência de cada campo."""
     human_fields_by_row = human_fields_by_row or {}
-    out: list[RowIdentity] = []
+    out = {}
     block: dict[str, str] = {}      # último valor visto de cada campo
     block_source: dict[str, int] = {}  # linha de onde veio
 
-    for i, row in enumerate(rows):
+    for i, row in sorted(enumerate(rows), key=lambda item: item[1].get("_paper_position", item[0]+1)):
         if is_deleted(row):
             # Uma eliminação aproxima visualmente as linhas vizinhas: não
             # fornece identidade e também não corta o bloco entre elas.
-            out.append(RowIdentity(values={}, inherited_from={}))
+            out[i] = RowIdentity(values={}, inherited_from={})
             continue
         human = human_fields_by_row.get(i, set())
         written = {f: _written(row, f) for f in CARRY_FIELDS}
@@ -103,7 +103,7 @@ def resolve(rows: list[dict], content_fields: tuple[str, ...],
         if not _has_content(row, content_fields) and not any(written.values()):
             # linha muda: não herda e corta o bloco, para o que vier a seguir
             # não colar à identidade de antes de um espaço em branco
-            out.append(RowIdentity(values={}, inherited_from={}))
+            out[i] = RowIdentity(values={}, inherited_from={})
             block, block_source = {}, {}
             continue
 
@@ -128,8 +128,8 @@ def resolve(rows: list[dict], content_fields: tuple[str, ...],
             elif block.get(f):
                 values[f] = block[f]
                 inherited[f] = block_source.get(f, i)
-        out.append(RowIdentity(values=values, inherited_from=inherited))
-    return out
+        out[i] = RowIdentity(values=values, inherited_from=inherited)
+    return [out[i] for i in range(len(rows))]
 
 
 def effective_row(row: dict, identity: RowIdentity) -> dict:

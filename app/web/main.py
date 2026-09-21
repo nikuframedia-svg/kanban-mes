@@ -595,6 +595,8 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
     cross["header"] = {"cells": final_header["cells"], "source_document": final_header["source_document"]}
     cross["operator"] = final_header["operator"]
     expected = base["revision"]
+    from ..historical_quantities import apply as apply_historical_quantities
+    apply_historical_quantities(base, data, cross, decisions=db.evidence_edits(conn, base))
     cross["data_revision"] = cross["materialized_revision"] = expected + bool(edits)
     if edits:
         return db.apply_cross_corrections(conn, uid, data, cross, expected, edits)
@@ -804,6 +806,9 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
         )
     # A revisão que estes metadados descrevem. Validação recusa um cross velho
     # se uma edição entrar entre o cálculo e a reserva SQLite.
+    from ..historical_quantities import apply as apply_historical_quantities
+    apply_historical_quantities(base, data, cross, decisions=db.evidence_edits(conn, base))
+
     cross["data_revision"] = expected + (1 if edits else 0)
 
     if edits:
@@ -1015,6 +1020,10 @@ def _process_sheet(uid: str, force_ocr: bool = False) -> None:
             extraction["_ocr_error"] = str(exc)
         if not db.set_extraction(conn, uid, extraction, template_name=template_name):
             return  # o revisor começou a editar entretanto: o trabalho dele manda
+        if template.name == "cantoneiras_kanban":
+            from .. import coverage_recovery
+            current = db.get_sheet(conn, uid)
+            coverage_recovery.automatic(conn, uid, current["revision"], lambda: provider)
         run_cross_check(conn, uid)
     except Exception as exc:  # nunca matar o worker do lote por causa de uma folha
         print(f"[worker] folha {uid}: {exc}", flush=True)
@@ -1538,6 +1547,7 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
         header_cross_data.get("source_document") or _source_document(sheet)
     )
     from .. import header_recovery
+    from ..ocr.coverage import coverage_view
     recovery_conn = _conn()
     try:
         protected_header = db.human_header_fields(recovery_conn, sheet["uid"])
@@ -1545,7 +1555,7 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
             or header_recovery_routes.job_status(sheet["uid"]).get("status") in {"queued", "running"})
     finally:
         recovery_conn.close()
-    if header_draft is not None or field_draft is not None or status_code != 200:
+    if header_draft is not None or field_draft is not None or status_code != 200 or getattr(request.state, "form_error", None):
         automatic_review_needed = False
     recovery_info = header_recovery.current_recovery(sheet)
     recovery_date_pending = header_recovery.date_needs_confirmation(sheet, protected_header)
@@ -1555,13 +1565,15 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
         "review_order": cross.get("review_order", []),
         "plan_reference": cross.get("plan_reference") or {},
         "stored": request.query_params.get("stored"),
-        "erro": erro if erro is not None else request.query_params.get("erro"),
+        "erro": erro if erro is not None else getattr(request.state, "form_error", None) or request.query_params.get("erro"),
         "header_conflict": header_draft is not None,
+        "coverage_data": coverage_view(sheet.get("sheet_data") or {}, sheet),
+        "coverage_count": getattr(request.state, "coverage_count", ""),
         "header_recovery": recovery_info, "recovery_date_pending": recovery_date_pending,
         "recovery_job": header_recovery_routes.job_status(sheet["uid"]),
         "automatic_review_needed": automatic_review_needed,
         "automatic_review_job": header_recovery_routes.job_status(sheet["uid"]),
-        "error_context": (error_context
+        "error_context": (error_context or getattr(request.state, "error_context", None)
                           or request.query_params.get("erro_context")),
         "focus": focus if focus is not None else request.query_params.get("focus"),
         "has_ocr": has_ocr, "view_mode": view_mode,
@@ -1944,6 +1956,9 @@ def sheet_edit(request: Request, uid: str, field_path: str = Form(...),
                 data["rows"].append({})
             old = data["rows"][i].get(fname)
             data["rows"][i][fname] = value_clean
+            if fname == "of" and value_clean and data["rows"][i].get("_identity_unresolved"):
+                unresolved = data["rows"][i].pop("_identity_unresolved")
+                audit_edits.append((f"rows[{i}]._identity_unresolved", unresolved, None, "human", actor))
             planning_fields = (
                 {"of", "ov", "cliente", "perfil", "modelo", "perf_comp"}
                 if sheet["template_name"] == "cantoneiras_kanban"
@@ -2046,75 +2061,6 @@ def add_row(uid: str, back: str = Form("")):
         conn.close()
     return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
-
-@app.post("/sheet/{uid}/rows/{row_index}/delete")
-def delete_row(uid: str, row_index: int, revision: int = Form(...),
-               actor: str = Form("operador"), back: str = Form("")):
-    """Retira uma linha sem destruir a transcrição/auditoria que lhe deu origem."""
-    conn = _conn()
-    deleted = False
-    try:
-        try:
-            sheet = db.get_sheet(conn, uid)
-            if not sheet:
-                raise HTTPException(404)
-            if sheet["status"] == "validated":
-                raise HTTPException(409, "Folha validada é imutável.")
-            data = sheet.get("sheet_data")
-            if data is None:
-                raise HTTPException(409, "A folha ainda está a ser lida pelo OCR.")
-            rows = data.get("rows") or []
-            if row_index < 0 or row_index >= len(rows):
-                raise HTTPException(422, "Linha inexistente.")
-            row = rows[row_index]
-            if not isinstance(row, dict) or row.get("_deleted") is True:
-                raise HTTPException(409, "Esta linha já foi apagada.")
-            old_row = json.dumps(row, ensure_ascii=False, sort_keys=True, default=str)
-            row["_deleted"] = True
-            if not db.save_sheet_data_with_edits(
-                conn, uid, data, revision,
-                [(f"rows[{row_index}]", old_row, "<apagada>", "human", actor)],
-            ):
-                raise HTTPException(
-                    409, "A folha foi alterada; confirma novamente os valores"
-                )
-            deleted = True
-            if not run_cross_check(conn, uid):
-                raise HTTPException(
-                    409, "A linha foi apagada, mas a folha mudou durante o cross."
-                )
-        except HTTPException as exc:
-            if exc.status_code == 404:
-                raise
-            return RedirectResponse(
-                _sheet_location(
-                    uid, back, erro=exc.detail, focus=f"row-{row_index}",
-                    erro_context="edit",
-                ),
-                status_code=303,
-            )
-        except Exception as exc:
-            print(
-                f"[delete-row] folha {uid}, linha {row_index}: "
-                f"{type(exc).__name__}: {exc}",
-                flush=True,
-            )
-            traceback.print_exc()
-            message = (
-                "A linha foi apagada, mas não foi possível atualizar o cross."
-                if deleted else
-                "Não foi possível apagar a linha; a folha ficou preservada."
-            )
-            return RedirectResponse(
-                _sheet_location(
-                    uid, back, erro=message, focus=f"row-{row_index}",
-                    erro_context="edit",
-                ),
-                status_code=303,
-            )
-    finally:
-        conn.close()
-    return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
 @app.post("/sheet/{uid}/recheck")
@@ -2260,6 +2206,9 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         from ..header_recovery import date_needs_confirmation
         if date_needs_confirmation(sheet, db.human_header_fields(conn, uid)):
             raise HTTPException(422, "Confirma a divergência de data do cabeçalho recuperado antes de validar.")
+        from ..ocr.coverage import coverage_resolved
+        if not coverage_resolved(sheet.get("sheet_data") or {}, sheet):
+            raise HTTPException(422, "A leitura tem linhas por recuperar ou exclusões por esclarecer.")
         header = (sheet["sheet_data"] or {}).get("header") or {}
         if not str(header.get("operador") or "").strip():
             raise HTTPException(422, "Validação exige operador preenchido no cabeçalho.")
@@ -2300,6 +2249,8 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                 row_cross = cross_rows.get(row_index) or {}
                 if cross.get("engine") == "cross-v3" and row_cross.get("row_kind") in {"empty", "activity"}:
                     continue
+                if row.get("_identity_unresolved"):
+                    raise HTTPException(422, f"Linha {visible_no}: {row['_identity_unresolved']}")
                 if row_cross.get("binding_stale"):
                     raise HTTPException(
                         422,
@@ -2312,7 +2263,7 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                         f"Linha {visible_no}: não existe candidato no planeamento.",
                     )
                 if is_marked(field_value(row, "perf_comp")):
-                    if not row_cross.get("plan_refs_valid"):
+                    if not row_cross.get("plan_refs_valid") or (row_cross.get("quantity_basis") or {}).get("status") != "ready":
                         raise HTTPException(
                             422,
                             f"Linha {visible_no}: "
@@ -2418,8 +2369,14 @@ plan_picker.register(app, _conn, lambda loader: get_index(loader),
                      lambda *args, **kwargs: run_cross_check(*args, **kwargs), _sheet_location)
 
 from . import header_recovery_routes
-header_recovery_routes.register(app, _conn, lambda: get_provider(), lambda: get_employees(), lambda: _load_header_machines(), _assumed_sheet_date, _sheet_location)
+header_recovery_routes.register(app, _conn, lambda: get_provider(), lambda: get_employees(), lambda: _load_header_machines(), _assumed_sheet_date, _sheet_location, lambda *args: run_cross_check(*args))
 
 
 from . import image_routes
 image_routes.register(app, _conn)
+
+from . import coverage_routes
+coverage_routes.register(app, _conn, sheet_view, _sheet_location, lambda *args: run_cross_check(*args), lambda: get_provider(), register_automatic=False)
+
+from . import recovery_inventory
+recovery_inventory.register(app, _conn, header_recovery_routes.automatic)

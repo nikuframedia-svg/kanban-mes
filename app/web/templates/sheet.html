@@ -16,11 +16,14 @@
 {% set header = data.get('header') or {} %}
 {% set rows = data.get('rows') or [] %}
 {% set active_rows = [] %}
+{% set paper_rows = [] %}
+{% for candidate in rows %}{% set _ = paper_rows.append({"index": loop.index0, "row": candidate, "position": candidate.get("_paper_position", loop.index)}) %}{% endfor %}
 {% set visible_row_numbers = {} %}
-{% for candidate in rows %}
+{% for entry in (paper_rows if is_raw else paper_rows|sort(attribute="position")) %}
+{% set candidate = entry.row %}
   {% if is_raw or candidate.get('_deleted') is not sameas true %}
-    {% set _ = active_rows.append((loop.index0, candidate)) %}
-    {% set _ = visible_row_numbers.update({loop.index0: active_rows|length}) %}
+    {% set _ = active_rows.append((entry.index, candidate)) %}
+    {% set _ = visible_row_numbers.update({entry.index: active_rows|length}) %}
   {% endif %}
 {% endfor %}
 {% set footer = data.get('footer') or {} %}
@@ -67,7 +70,7 @@
 
 {% if erro %}
 <div class="alert crit" style="margin-bottom:14px;">
-  <span><strong>{% if header_conflict %}Conflito no cabeçalho.{% elif error_context == 'edit' %}Não foi possível guardar.{% else %}Não foi possível validar.{% endif %}</strong> {{ erro }}</span>
+  <span><strong>{% if header_conflict %}Conflito no cabeçalho.{% elif error_context == 'coverage' %}Não foi possível confirmar a contagem.{% elif error_context == 'edit' %}Não foi possível guardar.{% else %}Não foi possível validar.{% endif %}</strong> {{ erro }}</span>
 </div>
 {% endif %}
 
@@ -154,6 +157,7 @@ setTimeout(function () {
 </div>
 {% endif %}
 
+{% include "_coverage_review.html" %}
 <div class="review-layout">
 
   <!-- ============ coluna esquerda: a fonte ============ -->
@@ -248,6 +252,8 @@ setTimeout(function () {
                 <td class="muted mono">
                   <div class="row-number-actions">
                     <span>{{ visible_i }}</span>
+                    {% if cr and cr.quantity_basis %}<small class="muted">Saldo de {{ cr.quantity_basis.date }}{% if cr.quantity_basis.status != 'ready' %} por verificar{% endif %}</small>{% endif %}
+                    {% if row.get('_identity_unresolved') %}<span class="pill warn">{{ row._identity_unresolved }}</span>{% endif %}
                     {% if not readonly and t.index_loader %}
                     <button type="button" class="btn ghost row-of-wand-btn" title="Corrigir linha via OF"
                             aria-label="Corrigir linha {{ visible_i }} via OF"
@@ -256,14 +262,9 @@ setTimeout(function () {
                             onclick="abrirEditorOF(this)">✎</button>
                     {% endif %}
                     {% if not readonly %}
-                    <form method="post" action="/sheet/{{ sheet.uid }}/rows/{{ i }}/delete"
-                          onsubmit="return confirm('Apagar a linha {{ visible_i }}?');">
-                      <input type="hidden" name="revision" value="{{ sheet.revision }}">
-                      <input type="hidden" name="back" value="{{ back_url }}">
-                      <input type="hidden" name="actor" value="operador">
-                      <button type="submit" class="btn danger row-delete-btn"
-                              title="Apagar linha" aria-label="Apagar linha {{ visible_i }}">−</button>
-                    </form>
+                    <details><summary class="btn danger" aria-label="Excluir linha {{ visible_i }}">−</summary>
+                    {% set row_index = i %}{% include '_exclude_row_form.html' %}
+                    </details>
                     {% endif %}
                   </div>
                 </td>

@@ -238,6 +238,8 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     cima; o cruzamento usa-a, mas as células continuam a mostrar o que está
     escrito, com o herdado à parte.
     """
+    if row.get("_identity_unresolved"):
+        return RowCheck(row_index, None, 0.0, 0.0, "no_match", 1.0)
     human_fields = human_fields or set()
     params = scorer.params
     index: PlanIndex = scorer.index
