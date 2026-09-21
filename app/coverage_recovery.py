@@ -72,14 +72,16 @@ def automatic(conn, uid, revision, provider_factory):
         detected = table_rows(image)
         provider = provider_factory()
         attempt['provider'] = type(provider).__name__
+        anchor_observations = {}
         observations, positions = recover_missing(provider, image,
-            get_template(sheet['template_name']), sheet, detected)
+            get_template(sheet['template_name']), sheet, detected, anchor_observations)
         for i, position in positions.items():
             data['rows'][i]['_paper_position'] = position
         for index, row in observations.items():
             assert int(index) == len(data['rows'])
             data['rows'].append(row)
         attempt['observations'] = observations
+        attempt['anchor_observations'] = anchor_observations
         attempt['regions'] = [{**detected['rows'][row['_paper_position']-1],
                                'paper_position': row['_paper_position']} for row in observations.values()]
         attempt['status'] = 'recovered'

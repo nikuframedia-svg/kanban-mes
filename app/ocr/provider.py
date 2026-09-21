@@ -88,7 +88,9 @@ def _extraction_prompt(template: KanbanTemplate) -> str:
         "NÃO corrijas, NÃO completes, NÃO normalizes códigos nem datas.\n"
         "2. Célula vazia ou ilegível → null. Nunca inventes valores.\n"
         "3. Uma entrada em `rows` por cada linha da tabela COM ALGO escrito; "
-        "ignora linhas totalmente vazias.\n"
+        "ignora linhas totalmente vazias. Uma linha com apenas perfil e X em "
+        "«Perf. Comp.» é uma linha independente: mantém modelo e quantidade "
+        "a null. Nunca juntes esse perfil ou X à referência da linha anterior.\n"
         "4. Números: transcreve os dígitos tal como escritos (sem unidades). "
         "Um visto/cruz numa célula transcreve-se como «x».\n"
         "5. Cabeçalho impresso no topo da folha — transcreve TODOS os campos: "
@@ -128,7 +130,9 @@ def _auto_extraction_prompt(templates: dict[str, KanbanTemplate]) -> str:
         "NÃO corrijas, NÃO completes, NÃO normalizes códigos nem datas.\n"
         "2. Célula vazia ou ilegível → null. Nunca inventes valores.\n"
         "3. Uma entrada em `rows` por cada linha da tabela COM ALGO escrito; "
-        "ignora linhas totalmente vazias. Página sem nada manuscrito → `rows` vazio.\n"
+        "ignora linhas totalmente vazias. Página sem nada manuscrito → `rows` vazio. "
+        "Uma linha com apenas perfil e X em «Perf. Comp.» é independente: "
+        "não juntes esse perfil ou X à referência da linha anterior.\n"
         "4. Números: transcreve os dígitos tal como escritos (sem unidades). "
         "Um visto/cruz numa célula transcreve-se como «x».\n"
         "5. Cabeçalho impresso no topo (igual nas duas faces) — transcreve TODOS "
@@ -585,7 +589,7 @@ class GeminiOcrProvider:
         with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
-    def _call(self, body: dict) -> dict:
+    def _call(self, body: dict, validate=None) -> dict:
         """Tenta cada modelo da cadeia; por modelo, uma repetição em erro transitório.
 
         429 (quota) e 404 (modelo desconhecido) saltam logo para o modelo
@@ -598,7 +602,14 @@ class GeminiOcrProvider:
         for model in self.models:
             for attempt in (1, 2):
                 try:
-                    return self._call_model(model, body)
+                    response = self._call_model(model, body)
+                    if validate is not None:
+                        try:
+                            validate(response)
+                        except (OcrError, ValueError) as exc:
+                            last_error = OcrError(f"Gemini [{model}]: {exc}")
+                            break  # A successful HTTP response can still omit physical rows.
+                    return response
                 except urllib.error.HTTPError as exc:
                     detail = exc.read().decode("utf-8", "ignore")[:300]
                     last_error = OcrError(f"Gemini [{model}] HTTP {exc.code}: {detail}")
@@ -859,6 +870,28 @@ class ClaudeOcrProvider:
         }
         return _clean_header_fields(
             self._call(image_path, _header_rescue_prompt(template), schema))
+
+
+def extract_checked(provider, image_path, template, validate):
+    """Bounded fallback when a strip contradicts independently observed rows.
+
+    The callback checks count AND physical anchors; no expected transcription
+    or plan reference is supplied to the OCR model.
+    """
+    try:
+        if isinstance(provider, GeminiOcrProvider):
+            body = provider._request_body(image_path.read_bytes(),
+                _MIME_BY_SUFFIX.get(image_path.suffix.lower(), "image/png"), template)
+            response = provider._call(body, lambda r: validate(provider._parse(r, template)))
+            return provider._parse(response, template)
+        result = provider.extract(image_path, template)
+        validate(result)
+        return result
+    except (OcrError, ValueError):
+        fallback = getattr(provider, "fallback", None)
+        if fallback is None:
+            raise
+        return extract_checked(fallback, image_path, template, validate)
 
 
 def get_provider() -> OcrProvider:

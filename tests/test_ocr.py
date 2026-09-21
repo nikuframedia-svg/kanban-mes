@@ -357,3 +357,28 @@ def test_get_provider_encadeia_pelas_chaves(monkeypatch):
     S.anthropic_api_key = ""
     p = mod.get_provider()
     assert p.name == "qwen" and p.fallback is None
+
+
+def test_checked_strip_uses_next_model_for_missing_or_misaligned_rows(tmp_path, monkeypatch):
+    from app.ocr.provider import GeminiOcrProvider, extract_checked, OcrError
+    from app.row_recovery import align_strip
+    from app.templates_spec import get_template
+    from tests.test_physical_rows import specimen_686
+    paper,sheet=specimen_686()
+    p=GeminiOcrProvider('test','first');p.models=['first','second','third']
+    called=[]
+    def response(model,body):
+        called.append(model)
+        rows=paper[1:] if model=='third' else (paper[1:2] if model=='first' else list(reversed(paper[1:])))
+        return {'candidates':[{'content':{'parts':[{'text':__import__('json').dumps({'rows':rows})}]}}]}
+    monkeypatch.setattr(p,'_call_model',response)
+    image=tmp_path/'strip.png';image.write_bytes(b'fake')
+    def validate(result):
+        rows=result['rows']
+        if len(rows)!=6:raise ValueError('Wrong count')
+        align_strip(rows,list(range(2,8)),sheet['raw_extraction']['rows'],sheet['sheet_data']['rows'])
+    result=extract_checked(p,image,get_template('cantoneiras_kanban'),validate)
+    assert called==['first','second','third'] and len(result['rows'])==6
+    called.clear();p.models=['first','second']
+    with pytest.raises(OcrError):extract_checked(p,image,get_template('cantoneiras_kanban'),validate)
+    assert called==['first','second']

@@ -71,6 +71,12 @@ def build_evidence(sheet: dict, human_events: list[dict]) -> Evidence:
     recovery = current.get("_coverage_recovery") or {}
     from ..ocr.coverage import sheet_identity
     if recovery.get("context") == sheet_identity(sheet):
+        for index, observation in recovery.get("anchor_observations", {}).items():
+            i = int(index)
+            if 0 <= i < len(rows):
+                rows[i].update(copy.deepcopy(observation))
+                for key in observation:
+                    sources[f"rows[{i}].{key}"] = {"source": "row_recovery"}
         for index, observation in recovery.get("observations", {}).items():
             i = int(index)
             if 0 <= i < len(rows):

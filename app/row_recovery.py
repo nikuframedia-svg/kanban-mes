@@ -7,20 +7,33 @@ from pathlib import Path
 from PIL import Image, ImageOps
 from .matching.geometry import canonical_code
 from .matching.similarity import parse_number
+from .matching.angle_geometry import parse_profile
+from .templates_spec import field_value, is_marked
 
 
 def key(row):
-    return canonical_code(row.get("modelo")), parse_number(row.get("qtd"))
+    if is_marked(field_value(row, "perf_comp")):
+        profile = parse_profile(row.get("perfil"))
+        # A complete profile is a physical row even without a piece reference
+        # or numeric quantity. Its X must never attach to a neighbouring piece.
+        if (profile.family == "L" and len(profile.dimensions) == 3
+                and all(d > 0 for d in profile.dimensions)
+                and not canonical_code(row.get("modelo"))
+                and parse_number(row.get("qtd")) is None):
+            return "full", profile.key
+        return None
+    model, qty = canonical_code(row.get("modelo")), parse_number(row.get("qtd"))
+    return ("piece", model, qty) if model and qty is not None else None
 
 
-def align_strip(candidates, positions, original, current):
+def align_strip(candidates, positions, original, current, anchor_observations=None):
     """Only interior omissions between consecutive, unique existing anchors."""
     anchors = []
     for offset, row in enumerate(candidates):
-        model, qty = key(row)
-        if not model or qty is None:
-            raise ValueError("A zona relida contém uma referência ou quantidade ambígua.")
-        hits = [i for i in range(len(original)) if key(row) in {key(original[i]), key(current[i])}]
+        identity = key(row)
+        if identity is None:
+            raise ValueError("A zona relida contém uma referência, quantidade ou perfil completo ambíguo.")
+        hits = [i for i in range(len(original)) if identity in {key(original[i]), key(current[i])}]
         if len(hits) > 1:
             raise ValueError("Referências repetidas impedem o alinhamento automático.")
         if hits:
@@ -38,14 +51,22 @@ def align_strip(candidates, positions, original, current):
                 # a following OF never identifies an earlier unmatched row.
                 source = current[left[1]]
                 for field in ("of", "ov", "cliente", "perfil"):
-                    if not row.get(field):
+                    if not row.get(field) or str(row[field]).strip() in {'"', '”', '〃', "''"}:
                         row[field] = source.get(field)
+                if (anchor_observations is not None and key(row)[0] == "full"
+                        and n == left[0] + 1
+                        and not candidates[left[0]].get("perfil")
+                        and parse_profile(original[left[1]].get("perfil")).key == key(row)[1]):
+                    # The reread proves that the original OCR put this full
+                    # profile on the preceding piece. Preserve current values;
+                    # correct only the evidence used by future cross-checks.
+                    anchor_observations[str(left[1])] = {"perfil": None}
                 row["_paper_position"] = positions[n]
                 additions.append((left[1], row))
     return additions
 
 
-def recover_missing(provider, image, template, sheet, detected):
+def recover_missing(provider, image, template, sheet, detected, anchor_observations=None):
     original = (sheet.get("raw_extraction") or {}).get("rows") or []
     current = (sheet.get("sheet_data") or {}).get("rows") or []
     if not detected or len(original) != len(current):
@@ -60,7 +81,7 @@ def recover_missing(provider, image, template, sheet, detected):
         source = ImageOps.exif_transpose(source).convert("RGB").rotate(
             detected["deskew_angle"], resample=Image.Resampling.BICUBIC, fillcolor="white")
         header = source.crop((0, 0, source.width, detected["header_bottom"]))
-        found = {}
+        found, anchor_reads = {}, {}
         for end in range(len(filled), 0, -4):
             window = filled[max(0, end-6):end]
             strip = source.crop((0, window[0][1]["top"], source.width, window[-1][1]["bottom"]))
@@ -68,10 +89,14 @@ def recover_missing(provider, image, template, sheet, detected):
             page.paste(header, (0, 0)); page.paste(strip, (0, header.height))
             path = Path(directory) / f"strip-{end}.png"
             page.save(path)
-            candidates = provider.extract(path, template).get("rows") or []
-            if len(candidates) != len(window):
-                raise ValueError("A leitura localizada não coincide com as linhas da grelha.")
-            additions = align_strip(candidates, [p for p, _ in window], original, current)
+            from .ocr.provider import extract_checked
+            def validate(reading):
+                candidates = reading.get("rows") or []
+                if len(candidates) != len(window):
+                    raise ValueError("A leitura localizada não coincide com as linhas da grelha.")
+                align_strip(candidates, [p for p, _ in window], original, current)
+            candidates = extract_checked(provider, path, template, validate).get("rows") or []
+            additions = align_strip(candidates, [p for p, _ in window], original, current, anchor_reads)
             for previous, row in additions:
                 position = row["_paper_position"]
                 if position in found and found[position] != (previous, row):
@@ -94,4 +119,6 @@ def recover_missing(provider, image, template, sheet, detected):
             raise ValueError("A posição física não confirma o alinhamento da leitura.")
     observations = {str(len(current)+j): row for j, (_, row) in enumerate(
         value for _, value in sorted(found.items()))}
+    if anchor_observations is not None:
+        anchor_observations.update(anchor_reads)
     return observations, positions

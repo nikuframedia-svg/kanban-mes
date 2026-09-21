@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-ALGORITHM_VERSION = 3
+ALGORITHM_VERSION = 4
 EXCLUSION_REASONS = {"out_of_scope", "duplicate", "ocr_artifact"}
 
 
@@ -237,8 +237,23 @@ def _detect(image_path: Path) -> tuple[dict | None, dict]:
         long_columns = sum(value > region.shape[0] * .9 for value in columns)
         if ratio < .025 and long_columns > width * .012:
             return None, diagnostics | {"reason": "grid_removal_unreliable"}
-        rows.append({"top": top, "bottom": bottom, "filled": ratio > .008,
-                     "ink_ratio": round(ratio, 6)})
+        # Sparse rows (only a short reference/quantity or a profile and X)
+        # must not be diluted by the width of all the empty cells. Measure
+        # handwriting components after removing the grid; discard isolated
+        # scanner specks instead of lowering a page-wide density threshold.
+        count, _, components, _ = cv2.connectedComponentsWithStats(region, 8)
+        strokes = [stat for stat in components[1:count]
+                   if stat[cv2.CC_STAT_WIDTH] >= 2
+                   and stat[cv2.CC_STAT_HEIGHT] >= max(3, region.shape[0] * .18)
+                   and stat[cv2.CC_STAT_AREA] >= 6
+                   and not (stat[cv2.CC_STAT_HEIGHT] > 3 * stat[cv2.CC_STAT_WIDTH]
+                            and any(abs(int(width*.03) + stat[cv2.CC_STAT_LEFT]
+                                        + stat[cv2.CC_STAT_WIDTH]/2 - x) < width*.012
+                                    for x in distinct_xs))]
+        written_area = sum(int(stat[cv2.CC_STAT_AREA]) for stat in strokes)
+        filled = written_area >= max(18, region.shape[0] * .8)
+        rows.append({"top": top, "bottom": bottom, "filled": filled,
+                     "ink_ratio": round(ratio, 6), "written_area": written_area})
     scale = original_size[1] / height
     detected = {"header_bottom": round(best[0]*scale), "table_bottom": round(best[-2]*scale),
                 "deskew_angle": float(angle),
