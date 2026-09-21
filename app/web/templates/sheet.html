@@ -181,8 +181,11 @@ setTimeout(function () {
         {% if sheet.image_path %}
         <a href="/sheet/{{ sheet.uid }}/photo" target="_blank" title="Abrir em tamanho real">
           <img class="review-photo" id="folha-img" src="/sheet/{{ sheet.uid }}/photo"
-               alt="Foto da folha kanban" loading="lazy">
+               alt="Foto da folha kanban" loading="lazy"
+               onerror="this.style.display='none'; document.getElementById('photo-unavailable').style.display='block'"
+               onload="this.style.display=''; document.getElementById('photo-unavailable').style.display='none'">
         </a>
+        <div id="photo-unavailable" class="alert warn" style="display:none">A imagem original está indisponível. Os dados e as correções da folha estão guardados; é necessário recuperar o ficheiro original.</div>
         {% else %}
         <div class="empty">Folha criada sem foto — preenchimento manual.</div>
         {% endif %}

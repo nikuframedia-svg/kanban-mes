@@ -2,8 +2,7 @@
 from __future__ import annotations
 import copy
 import hashlib
-from pathlib import Path
-from . import db, imaging
+from . import db, imaging, image_storage
 from .matching import header_cross
 from .ocr.provider import _crop_header_band, _clean_header_fields
 from .templates_spec import get_template
@@ -47,11 +46,11 @@ def evidence_observations(sheet):
 def prepare(sheet, protected, provider, employees, machines, assumed_date):
     if sheet['status'] not in {'extracted', 'in_review'}:
         raise ValueError('A folha não admite recuperação neste estado.')
-    if not sheet.get('image_path') or not Path(sheet['image_path']).is_file():
+    if image_storage.for_processing(sheet) is None:
         raise ValueError('Imagem original indisponível.')
     data = copy.deepcopy(sheet['sheet_data'])
     header = data.setdefault('header', {})
-    image = imaging.render_oriented(Path(sheet['image_path']), sheet.get('image_rotation') or 0)
+    image = imaging.render_oriented(image_storage.for_processing(sheet), sheet.get('image_rotation') or 0)
     image_hash = hashlib.sha256(image.read_bytes()).hexdigest()
     previous = current_recovery(sheet)
     if (previous.get('version') == VERSION and previous.get('image_sha256') == image_hash
