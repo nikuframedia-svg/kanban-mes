@@ -135,3 +135,13 @@ def test_recovery_client_simulates_then_restores_and_verifies(api, storage):
     assert not (storage / 'images/scan.png').exists()
     assert recover_one(client, row, apply=True)['status'] == 'restored'
     assert recover_one(client, row, apply=True)['status'] == 'already_available'
+
+
+def test_failed_audit_does_not_leave_unaudited_restoration(api, storage):
+    client, uid, connect, before = api
+    conn = connect()
+    conn.execute("CREATE TRIGGER reject_audit BEFORE INSERT ON edits BEGIN SELECT RAISE(ABORT, 'test audit failure'); END")
+    conn.commit(); conn.close()
+    response = client.post(f'/sheet/{uid}/photo/restore', data={'revision':9}, files={'image':('scan.png',png(),'image/png')})
+    assert response.status_code == 500
+    assert not list((storage/'images').iterdir())

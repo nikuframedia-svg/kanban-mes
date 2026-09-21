@@ -35,6 +35,7 @@ def register(app, connect):
         sha = hashlib.sha256(content).hexdigest()
         conn = connect()
         tmp = None
+        linked = False
         try:
             conn.execute('BEGIN IMMEDIATE')
             sheet = db.get_sheet(conn, uid)
@@ -66,6 +67,7 @@ def register(app, connect):
             # Atomic and exclusive on NTFS/Linux: never overwrite another file.
             try:
                 os.link(tmp, target)
+                linked = True
             except FileExistsError:
                 raise HTTPException(409, 'O destino mudou durante a recuperação.')
             conn.execute(
@@ -73,8 +75,11 @@ def register(app, connect):
                 (uid, 'image.original_restored', None, json.dumps({'sha256': sha, 'filename': target.name}),
                  'system', 'recovery:original-image', db.now_iso()))
             conn.commit()
+            linked = False
             return {'status': 'restored', 'sha256': sha}
         finally:
+            if linked and tmp and target.exists() and os.path.samefile(tmp, target):
+                target.unlink()  # No restored file without a committed audit event.
             if conn.in_transaction:
                 conn.rollback()
             conn.close()
