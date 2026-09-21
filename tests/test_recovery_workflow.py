@@ -3,7 +3,7 @@ import hashlib
 import pytest
 from app import db, coverage_recovery
 from app.matching.evidence import build_evidence
-from app.ocr.coverage import coverage_resolved, row_accounting
+from app.ocr.coverage import coverage_resolved, row_accounting, ALGORITHM_VERSION
 from tests.test_web import client
 from tests.test_physical_rows import FIXTURES, specimen
 
@@ -91,7 +91,7 @@ def test_legacy_exclusion_restore_keeps_id_and_blocks_unknown_order(client,monke
 
 def test_exclusion_accounting():
     rows=[{'qtd':1} for _ in range(6)]
-    data={'rows':rows,'_ocr_coverage':{'algorithm_version':3,'expected_rows':6}}
+    data={'rows':rows,'_ocr_coverage':{'algorithm_version':ALGORITHM_VERSION,'expected_rows':6}}
     assert coverage_resolved(data)
     rows[0]['_deleted']=rows[1]['_deleted']=True
     assert not coverage_resolved(data)

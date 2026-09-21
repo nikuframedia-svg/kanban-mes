@@ -10,7 +10,7 @@ from app.templates_spec import get_template
 FIXTURES = Path(__file__).parent / 'fixtures/physical_rows'
 
 
-@pytest.mark.parametrize('number,expected', [(661,15),(681,5),(677,3)])
+@pytest.mark.parametrize('number,expected', [(661,15),(681,5),(677,3),(686,7)])
 @pytest.mark.parametrize('angle', [0,-2,2])
 def test_real_tpl102_grid(number, expected, angle, tmp_path):
     image = FIXTURES/f'{number}.png'
@@ -66,3 +66,93 @@ def test_ambiguous_strip_aborts():
         def extract(self,*a): return {'rows':rows[9:-1]}
     with pytest.raises(ValueError):
         recover_missing(Provider(),FIXTURES/'661.png',get_template('cantoneiras_kanban'),sheet,table_rows(FIXTURES/'661.png'))
+
+
+def specimen_686():
+    partial = [dict(of='264857', cliente='TECPOLES', ov='2601327',
+                    perfil='L55X55X4' if i < 2 else 'L45X45X4', modelo=ref, qtd=str(qty))
+               for i, (ref, qty) in enumerate([('EA18F72',20), ('A18F31',16),
+                   ('A18F29',16), ('A18F28',16), ('A18F18',8), ('A18C124',8)])]
+    raw = copy.deepcopy(partial)
+    raw[0]['modelo'] = 'EA18F T2'
+    raw[1]['perfil'] = 'L65x5'  # The OCR fused two separate paper rows.
+    header = {'data':'18/09/2026','operador':'ARSHDEEP DHINDSA', 'n_operador':'2849',
+              'setor_maquina':'Peddi 8'}
+    sheet = {'raw_extraction':{'header':{},'rows':raw,'footer':{}},
+             'sheet_data':{'header':header,'rows':partial,'footer':{}}}
+    paper = copy.deepcopy(partial)
+    paper[1]['perfil'] = None  # Empty on paper; the profile was written on row 1.
+    paper.insert(2, {'of':'"','perfil':'L65x5','modelo':None,'qtd':None,'perf_comp':'X'})
+    return paper, sheet
+
+
+def test_686_recovers_full_profile_as_separate_row_preserving_all_existing_values():
+    paper, sheet = specimen_686(); before = copy.deepcopy(sheet)
+    class Provider:
+        def extract(self,*a): return {'rows':paper[1:]}
+    anchors = {}
+    additions,positions = recover_missing(Provider(),FIXTURES/'686.png',
+        get_template('cantoneiras_kanban'),sheet,table_rows(FIXTURES/'686.png'),anchors)
+    assert list(additions) == ['6']
+    full = additions['6']
+    assert full['of'] == '264857' and full['perfil'] == 'L65x5'
+    assert full['perf_comp'] == 'X' and full['modelo'] is None and full['qtd'] is None
+    assert full['_paper_position'] == 3
+    assert positions == {0:1,1:2,2:4,3:5,4:6,5:7}
+    assert anchors == {'1': {'perfil': None}}
+    assert sheet == before
+
+
+@pytest.mark.parametrize('changes', [dict(perfil=None),dict(perf_comp=None),
+    dict(modelo='A18F31'),dict(qtd=16)])
+def test_686_ambiguous_full_profile_never_invents_a_row(changes):
+    paper,sheet=specimen_686()
+    paper[2].update(changes)
+    class Provider:
+        def extract(self,*a):return {'rows':paper[1:]}
+    with pytest.raises(ValueError,match='ambíguo'):
+        recover_missing(Provider(),FIXTURES/'686.png',get_template('cantoneiras_kanban'),
+                        sheet,table_rows(FIXTURES/'686.png'))
+
+
+def test_existing_full_profile_can_anchor_recovery_but_repeated_profile_is_ambiguous():
+    from app.row_recovery import align_strip
+    full={'of':'264857','perfil':'L65X65X5','perf_comp':'X'}
+    last={'modelo':'AF1','qtd':'4'}
+    missing={'modelo':'AF0','qtd':'2'}
+    added=align_strip([full,missing,last],[1,2,3],[full,last],[full,last])
+    assert added[0][1]['modelo']=='AF0'
+    with pytest.raises(ValueError,match='repetidas'):
+        align_strip([full,missing,last],[1,2,3],[full,full,last],[full,full,last])
+
+
+def test_scanner_specks_do_not_fill_blank_rows(tmp_path):
+    with Image.open(FIXTURES/'686.png') as source:
+        array=np.asarray(source.convert('RGB')).copy()
+    random=np.random.default_rng(23)
+    array[random.random(array.shape[:2]) < .0005] = 0
+    image=tmp_path/'specks.png';Image.fromarray(array).save(image)
+    assert check_coverage(image,{})['expected_rows']==7
+
+
+def test_split_profile_evidence_preserves_raw_and_human_decisions():
+    from app.matching.evidence import build_evidence
+    from app.ocr.coverage import sheet_identity
+    paper,sheet=specimen_686();before=copy.deepcopy(sheet['raw_extraction'])
+    class Provider:
+        def extract(self,*a):return {'rows':paper[1:]}
+    anchors={}
+    additions,positions=recover_missing(Provider(),FIXTURES/'686.png',
+        get_template('cantoneiras_kanban'),sheet,table_rows(FIXTURES/'686.png'),anchors)
+    sheet['sheet_data']['rows'].append(additions['6'])
+    sheet['sheet_data']['_coverage_recovery']={'context':sheet_identity(sheet),
+        'observations':additions,'anchor_observations':anchors}
+    evidence=build_evidence(sheet,[])
+    assert evidence.data['rows'][1]['perfil'] is None
+    assert evidence.data['rows'][1]['modelo']=='A18F31'
+    assert evidence.provenance['field_sources']['rows[1].perfil']['source']=='row_recovery'
+    human=[{'id':1,'source':'human','field_path':'rows[1].perfil','new_value':'L70X70X7'}]
+    assert build_evidence(sheet,human).data['rows'][1]['perfil']=='L70X70X7'
+    sheet['extraction_generation']=2
+    assert build_evidence(sheet,[]).data['rows'][1]['perfil']=='L65x5'
+    assert sheet['raw_extraction']==before

@@ -26,11 +26,20 @@ O comando abaixo usa os mesmos serviços do navegador, serialmente. Sem `--apply
 
 Acrescentar `--apply` para executar os primeiros casos. A primeira linha da 681 fica com OF por confirmar; a escolha incompatível da linha seguinte não é herdada. A auditoria anterior da exclusão fica no relatório e em `/sheet/{uid}/rows/0/audit`.
 
+A folha 686 (`86781f537e79`) também é recuperável ao abrir ou através deste comando, acrescentando `--uid 86781f537e79`. O ajuste está sobre a atualização anterior: quem ainda não a instalou executa o update uma única vez para obter ambas.
+
 Depois de verificar esses resultados, executar sem `--uid` para inventariar as restantes pendentes. `--limit 20 --apply` processa no máximo vinte candidatas. Usar outro nome de relatório por lote. Em falha, conservar a base e o progresso auditado; corrigir a causa antes de retomar. Um rollback de código não autoriza restaurar uma base antiga por cima de trabalho posterior.
 
 ## Evidência de aceitação
 
-- Imagens reais: 661 → 15; 681 → 5; 677 → 3, também com inclinação ±2° e ruído.
+- Imagens reais: 661 → 15; 681 → 5; 677 → 3; 686 → 7, também com inclinação ±2° e ruído.
 - 661: recorte real relido por OCR confirmou H92HS4008AT / 4 na posição 12, entre H92HS3009AT e H92HS408P4AT.
 - 677: snapshot `mtg_51b541990c2d95d2`, carregado em 15/09/2026. EA8B78=54 + EA8B79=52 → 106; D13F32=20 + D13FP33=20 → 40.
+- 686: a terceira linha física é L65×5 / X. O OCR original colocou o perfil na linha A18F31 e omitiu o X. A recuperação conserva as seis linhas existentes, acrescenta a linha completa na posição 3 e regista a leitura do perfil deslocado como evidência, sem alterar o OCR original nem ultrapassar decisões humanas. Snapshot `mtg_024ee2ac695a038d` (17/09): A18B108=24 + A18B109=24 → 48 peças para a produção de 18/09.
 - Testes PostgreSQL usam exclusivamente contentores descartáveis (`RUN_PG_INTEGRATION=1`). O navegador é verificado com uma base SQLite descartável, sem permissão de validar no arquivo real.
+
+## Proteção de linhas de perfil completo
+
+O contador TPL102 versão 4 mede componentes de escrita depois de remover a grelha, sem diluir referências curtas pelas células vazias. Descarta pontos isolados e resíduos junto aos divisores. A recuperação distingue referências com quantidade de perfis com X, exige vizinhos inequívocos e mantém os identificadores existentes. Uma resposta OCR com contagem ou ordem incompatível passa ao próximo motor/modelo configurado; esgotada a cadeia, a folha permanece para revisão. Não se fornecem referências do plano ao OCR para preencher o papel.
+
+As novas observações são guardadas em `_coverage_recovery.observations` e, quando a releitura comprova deslocação de um perfil para a linha anterior, em `anchor_observations`. Ambas ficam vinculadas à imagem e à geração OCR e são aplicadas antes das decisões humanas. Os controlos de confiança do motor de cruzamento mantêm-se: completar a leitura não aprova uma associação duvidosa.
