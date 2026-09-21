@@ -276,12 +276,20 @@ class Scorer:
 
     # ---- decisão + posterior ----
 
-    def match_row(self, row: dict, top_k: int = 10) -> RowMatch:
+    def match_row(self, row: dict, top_k: int = 10, *, physical_profile: str | None = None) -> RowMatch:
         dim_memo: dict = {}
         id_memo: dict = {}
+        candidates = self.candidates(row, top_k=top_k)
+        if physical_profile:
+            from .angle_geometry import profile_key
+            # Keep this scorer's ranking, but a physical full-profile mark is
+            # not permission to substitute another section or thickness.
+            exact_order = self.index.exact_matches("of", row.get("of")) if row.get("of") else set()
+            source = exact_order if exact_order else candidates
+            candidates = [i for i in source if profile_key(self.index.entries[i].get("perfil")) == physical_profile]
         pool = [
             self.score_entry(row, idx, dim_memo, id_memo)
-            for idx in self.candidates(row, top_k=top_k)
+            for idx in candidates
         ]
         if not pool:
             return RowMatch(winner=None, p_correct=0.0, margin_bits=0.0,

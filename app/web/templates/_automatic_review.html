@@ -1,6 +1,5 @@
 {% if not is_raw and not readonly and automatic_review_needed %}
-<div class="alert info" data-automatic-review="/sheet/{{ sheet.uid }}/automatic-review" data-revision="{{ sheet.revision }}">A verificar automaticamente a folha…</div>
-<script src="/static/automatic-review.js" defer></script>
-{% elif not is_raw and not readonly and automatic_review_job and automatic_review_job.status == 'error' %}
-<div class="alert warn">{{ automatic_review_job.error }}</div>
+<div class="alert info" data-automatic-review="/sheet/{{ sheet.uid }}/automatic-review" data-revision="{{ sheet.revision }}" data-start="true">A preparar a verificação automática…</div>
+{% elif not is_raw and not readonly and automatic_review_job and automatic_review_job.status in ['error', 'conflict'] %}
+<div class="alert warn" data-automatic-review="/sheet/{{ sheet.uid }}/automatic-review" data-revision="{{ sheet.revision }}" data-status="{{ automatic_review_job.status }}">{{ automatic_review_job.error }}</div>
 {% endif %}

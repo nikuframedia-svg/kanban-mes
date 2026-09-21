@@ -232,5 +232,11 @@ def test_failed_automatic_header_attempt_does_not_loop(client,tmp_path,monkeypat
         if client.get(f'/sheet/{uid}/automatic-review').json()['status'] not in {'queued','running'}:break
         time.sleep(.02)
     page=client.get(f'/sheet/{uid}')
-    assert 'data-automatic-review=' not in page.text
+    assert 'data-start="true"' not in page.text
+    assert 'data-status="error"' in page.text
+    job = client.get(f'/sheet/{uid}/automatic-review').json()
+    assert job['status'] == 'error'
+    assert job['final_revision'] == job['current_revision']
+    repeated = client.post(f'/sheet/{uid}/automatic-review', data={'revision': job['final_revision']}).json()
+    assert repeated['job_id'] == job['job_id']
     assert 'Tentar leitura novamente' in page.text

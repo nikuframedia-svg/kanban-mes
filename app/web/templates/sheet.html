@@ -30,7 +30,7 @@
 
 {% from "_review_cells.html" import snap_mark, edit_cell with context %}
 
-<div class="page-h review-heading">
+<div class="page-h review-heading" data-review-region="header" data-revision="{{ sheet.revision }}">
   <div>
     <div class="page-eyebrow">Revisão · {{ t.label }}</div>
     <h1 class="page-title">Folha {{ sheet.sheet_no or sheet.uid[:8] }}</h1>
@@ -60,7 +60,7 @@
   </div>
 </div>
 
-<div class="page-content review-content">
+<div class="page-content review-content" data-review-region="body">
 
 {% if stored %}
 <div class="alert ok" style="margin-bottom:14px;">
@@ -75,17 +75,7 @@
 {% endif %}
 
 {% if sheet.status == 'pending' and sheet.image_path %}
-<div class="alert warn" style="margin-bottom:14px; align-items:center; gap:12px;">
-  <div class="spinner" style="width:20px;height:20px;border-width:2px;"></div>
-  <span><strong>A ler esta folha com OCR…</strong> A página actualiza-se sozinha quando estiver pronta.</span>
-</div>
-{# Só recarrega se não estiveres a escrever — senão perdias o que estavas a meter. #}
-<script>
-setTimeout(function () {
-  var el = document.activeElement;
-  if (!el || !["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName)) location.reload();
-}, 4000);
-</script>
+<div class="alert info" data-ocr-pending="/sheet/{{ sheet.uid }}/automatic-review" data-revision="{{ sheet.revision }}">A ler esta folha com OCR… Os resultados aparecem aqui quando estiver pronta.</div>
 {% endif %}
 
 {% if sheet.status == 'error' %}
@@ -442,6 +432,7 @@ setTimeout(function () {
 {% endblock %}
 {% block scripts %}
 <script src="/static/review.js?v={{ css_version }}" defer></script>
+<script src="/static/automatic-review.js?v={{ css_version }}" defer></script>
 <script>
 function acceptProposal(link) {
   const td = link.closest('td, .field');

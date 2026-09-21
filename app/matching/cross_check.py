@@ -244,8 +244,13 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     params = scorer.params
     index: PlanIndex = scorer.index
     scored_row = carryover.effective_row(row, identity) if identity else row
-    match: RowMatch = scorer.match_row(scored_row)
     linha_marcada = is_marked(field_value(scored_row, "perf_comp"))
+    from .angle_geometry import parse_profile
+    physical = parse_profile(scored_row.get("perfil"))
+    if linha_marcada and physical.family == "L" and len(physical.dimensions) == 3:
+        match: RowMatch = scorer.match_row(scored_row, physical_profile=physical.key)
+    else:
+        match = scorer.match_row(scored_row)
     binding = (
         row.get("_plan_binding")
         if not linha_marcada and isinstance(row.get("_plan_binding"), dict)

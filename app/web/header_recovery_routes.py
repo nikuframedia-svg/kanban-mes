@@ -26,21 +26,21 @@ def register(app, connect, provider, employees, machines, assumed_date, location
                    for field in ('operador', 'n_operador', 'setor_maquina', 'data'))
 
     def process(conn, uid, revision):
-        sheet = db.get_sheet(conn, uid)
-        result = {}
-        if header_eligible(conn, sheet) or header_recovery.current_recovery(sheet).get('status') == 'failed':
-            result['header'] = header_recovery.recover(conn, uid, revision, provider(),
+        from .automatic_review import run_stages
+        return run_stages(conn, uid, [
+            ('header', lambda sheet: header_recovery.recover(conn, uid, sheet['revision'], provider(),
                 _safe(employees, {}), _safe(machines, []), assumed_date(sheet))
-            sheet = db.get_sheet(conn, uid)
-        if coverage_recovery.needs_automatic(conn, sheet):
-            result['coverage'] = coverage_recovery.automatic(conn, uid, sheet['revision'], provider)
-        if not recheck(conn, uid):
-            raise ValueError('A folha mudou durante a verificação.')
-        return result
+                if header_eligible(conn, sheet) or header_recovery.current_recovery(sheet).get('status') == 'failed' else None),
+            ('coverage', lambda sheet: coverage_recovery.automatic(conn, uid, sheet['revision'], provider)
+                if coverage_recovery.needs_automatic(conn, sheet) else None),
+            ('cross_history', lambda sheet: recheck(conn, uid)),
+        ])
 
     def eligible(conn, sheet):
+        from ..full_profile_identity import corrections
         return (header_eligible(conn, sheet) or coverage_recovery.needs_automatic(conn, sheet)
-                or historical_quantities.needs_refresh(sheet))
+                or historical_quantities.needs_refresh(sheet)
+                or bool(corrections(sheet, db.evidence_edits(conn, sheet))))
 
     automatic = AutomaticReview(app, connect, eligible, process)
 

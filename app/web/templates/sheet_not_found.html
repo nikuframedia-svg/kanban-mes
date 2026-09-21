@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Folha não encontrada — Kanban MES{% endblock %}
+{% block content %}
+<div class="page-h"><h1>Não foi possível encontrar esta folha</h1></div>
+<div class="page-content">
+  <p>O endereço não está disponível. Volta à lista para abrir a folha novamente.</p>
+  <a class="btn primary" href="{{ back_url }}">Voltar à lista</a>
+  <p class="muted tiny">Identificador do pedido: {{ request_id }}</p>
+</div>
+{% endblock %}
