@@ -1,6 +1,6 @@
 # Correção dos incidentes 311 e 112
 
-Esta entrega altera o código dos dois sistemas. A instalação e a recuperação da base Windows têm de ser executadas no PC: esta sessão não tem acesso de consola. O GitHub do terminal não está autenticado e o conector disponível não tem acesso aos repositórios privados. O pacote contém bundles Git, commits e fingerprints verificáveis; não contém bases reais, credenciais ou confirmações inventadas.
+Esta entrega altera o código dos dois sistemas. A instalação e a recuperação da base Windows têm de ser executadas no PC: esta sessão não tem acesso de consola. As correções são publicadas em branches próprias no GitHub, para revisão antes da instalação. O pacote contém bundles Git, commits e fingerprints verificáveis; não contém bases reais, credenciais ou confirmações inventadas.
 
 ## Comportamento
 
