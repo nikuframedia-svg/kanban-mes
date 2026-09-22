@@ -221,7 +221,7 @@
           — são as que mais precisam de olho humano.
         </p>
         {% endif %}
-        <div class="scroll-x">
+        <div class="scroll-x" data-review-scroll="production">
           <table class="tbl">
             <thead>
               <tr>
@@ -250,7 +250,7 @@
                             aria-label="Corrigir linha {{ visible_i }} via OF"
                             data-uid="{{ sheet.uid }}" data-row="{{ i }}" data-of="{{ row.get('of') or '' }}"
                             data-revision="{{ sheet.revision }}" data-back="{{ back_url }}"
-                            onclick="abrirEditorOF(this)">✎</button>
+                            id="edit-row-{{ i }}" onclick="abrirEditorOF(this)">✎</button>
                     {% endif %}
                     {% if not readonly %}
                     {% set row_index = i %}{% include '_exclude_row_form.html' %}
@@ -273,7 +273,7 @@
                   {# Linha de perfil completo: vale por todas as referências
                      daquele perfil na obra, por isso há que as poder ver. #}
                   {% if f == 'perf_comp' and t.index_loader and is_marked(field_value(row, f)) %}
-                    <button type="button" class="btn ghost plano-btn"
+                    <button type="button" class="btn ghost plano-btn" id="references-{{ i }}-{{ f }}"
                             title="Ver as referências deste perfil na obra"
                             aria-label="Ver as referências deste perfil na obra"
                             onclick="abrirPlano('/sheet/{{ sheet.uid }}/plano/{{ i }}?origem=perf_comp&amp;back={{ back_url|urlencode }}')">→</button>
@@ -282,7 +282,7 @@
                      escolha explícita altera. Funciona mesmo com perfil vazio
                      para mostrar todas as referências da OF. #}
                   {% if f == 'modelo' and t.name == 'cantoneiras_kanban' %}
-                    <button type="button" class="btn ghost plano-btn"
+                    <button type="button" class="btn ghost plano-btn" id="references-{{ i }}-{{ f }}"
                             title="Ver referências desta OF/perfil"
                             onclick="abrirPlano('/sheet/{{ sheet.uid }}/plano/{{ i }}?back={{ back_url|urlencode }}')">Referências</button>
                   {% endif %}
@@ -404,12 +404,13 @@
           </form>
           {% endif %}
           <form method="post" action="/sheet/{{ sheet.uid }}/validate" id="validate-form"
-                style="display:flex; gap:8px; align-items:center; margin-left:auto;"
-                onsubmit="return confirm('Validar a folha? Depois de validada fica imutável.')">
+                style="display:flex; gap:8px; align-items:center; margin-left:auto;">
             <input type="hidden" name="back" value="{{ back_url }}">
             <input type="hidden" name="revision" value="{{ sheet.revision }}">
             <input type="hidden" name="history_back" value="">
-            <button type="submit" class="btn primary" id="validate-button">Validar folha</button>
+            <input type="hidden" name="review_token" value="{{ review_token(sheet) }}">
+            <span id="validation-status" role="status"></span>
+            <button type="button" class="btn primary" id="validate-button">Validar folha</button>
           </form>
         </div>
       </div>
@@ -427,6 +428,7 @@
 
 {% endblock %}
 {% block scripts %}
+<script src="/static/review_edits.js?v={{ css_version }}" defer></script>
 <script src="/static/review.js?v={{ css_version }}" defer></script>
 <script src="/static/row-actions.js?v={{ css_version }}" defer></script>
 <script src="/static/automatic-review.js?v={{ css_version }}" defer></script>

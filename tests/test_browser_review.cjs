@@ -45,7 +45,11 @@ const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
         assert.equal(await page.locator('#plano-modal').isVisible(), true);
         assert.equal(await page.locator('.plan-filter').inputValue(), 'REF-2');
         assert.equal(await page.locator('#tabela-plano tbody tr:visible').count(), 1);
-      } else await page.getByRole('button', {name:'Repetir verificação', exact:true}).waitFor();
+      } else {
+        await page.waitForFunction(() => document.querySelector('[data-automatic-review]')?.textContent.includes('Falha simulada'));
+        assert.equal(await page.getByRole('button', {name:'Repetir verificação', exact:true}).count(), 0);
+        assert.equal(await page.locator('[data-detail-key="reading"]').getAttribute('open'), null);
+      }
     } else if (state === 'dirty') {
       await page.waitForFunction(() => document.querySelector('[data-automatic-review]').textContent.includes('por guardar'));
       assert.equal(await page.locator('[name="header_operador"]').inputValue(),'RASCUNHO');

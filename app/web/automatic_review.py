@@ -6,7 +6,7 @@ import uuid
 from fastapi import Form, HTTPException, Request
 from .. import db
 from ..health import STARTUP_HEALTH
-from ..review_guard import ReviewConflict, revision_guard, check, request_id
+from ..review_guard import ReviewConflict, revision_guard, check, request_id, generation
 
 log = logging.getLogger("uvicorn.error.automatic_review")
 TERMINAL = {"complete", "error", "conflict"}
@@ -109,7 +109,7 @@ class AutomaticReview:
                 if not force and not self.needed(conn, sheet):
                     return dict(previous) if previous else {'status': 'idle', 'revision': revision, 'final_revision': revision}
                 job = {'status': 'queued', 'revision': revision, 'initial_revision': revision,
-                       'request_id': request_id or uuid.uuid4().hex, 'job_id': uuid.uuid4().hex, 'stages': {}}
+                       'request_id': request_id or uuid.uuid4().hex, 'job_id': uuid.uuid4().hex, 'stages': {}, 'generation': generation(uid)}
                 self.jobs[uid] = job
                 self.queue.put((uid, dict(job)))
                 if self.worker is None or not self.worker.is_alive():
@@ -125,8 +125,10 @@ class AutomaticReview:
             job = {**job, 'status': 'running'}
             self.jobs[uid] = job
             conn = None
-            with revision_guard(uid, job['revision'], job['request_id']) as guard:
+            with revision_guard(uid, job['revision'], job['request_id'],
+                                automatic_generation=job['generation']) as guard:
                 try:
+                    check(uid, job['revision'])
                     conn = self.connect()
                     result = self.process(conn, uid, job['revision']) or {}
                     stages = result.get('stages', {})

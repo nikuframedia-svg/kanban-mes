@@ -14,7 +14,8 @@ from ..ocr.coverage import EXCLUSION_REASONS
 from ..review_guard import revision_guard, ReviewConflict
 from ..templates_spec import get_template, is_marked
 from ..matching import loaders, similarity as sim
-from . import plan_review
+from . import plan_review, review_writes
+from ..review_guard import cancel_pending
 
 
 class NewRow(BaseModel):
@@ -26,14 +27,17 @@ class NewRow(BaseModel):
     snapshot_id: str | None = None
     plan_key: str | None = None
     back: str = ''
+    review_token: str = ''
 
 
-def editable(conn, uid, revision, unsupported):
+def editable(conn, uid, revision, unsupported, review_token=""):
+    cancel_pending(uid)
     sheet = db.get_sheet(conn, uid)
     if not sheet:
         raise HTTPException(404, 'Folha inexistente.')
     if sheet['status'] not in {'extracted', 'in_review'} or unsupported(sheet):
         raise HTTPException(409, 'A folha não admite alterações neste estado.')
+    revision = review_writes.revision_for(sheet, revision, review_token)
     if sheet['revision'] != revision:
         raise HTTPException(409, 'A folha foi alterada noutra aba. As tuas alterações por guardar foram mantidas; atualiza a folha antes de continuar.')
     return sheet
@@ -66,7 +70,7 @@ def register(app, connect, recheck, location, unsupported=lambda sheet: False):
         conn = connect()
         try:
             prior = db.get_sheet(conn, uid)
-            fingerprint = hashlib.sha256(json.dumps(payload.model_dump(exclude={'revision', 'back'}), sort_keys=True).encode()).hexdigest()
+            fingerprint = hashlib.sha256(json.dumps(payload.model_dump(exclude={'revision', 'back', 'review_token'}), sort_keys=True).encode()).hexdigest()
             # A lost response/repeated click cannot append the same row twice.
             for i, row in enumerate(((prior or {}).get('sheet_data') or {}).get('rows', [])):
                 entry = row.get('_manual_entry') or {}
@@ -75,7 +79,8 @@ def register(app, connect, recheck, location, unsupported=lambda sheet: False):
                         raise HTTPException(409, 'Este registo já foi guardado com outros valores.')
                     return {'ok': True, 'saved': True, 'replayed': True, 'revision': entry['saved_revision'],
                             'row_index': i, 'conflict': prior['revision'] != entry['saved_revision']}
-            sheet = editable(conn, uid, payload.revision, unsupported)
+            sheet = editable(conn, uid, payload.revision, unsupported, payload.review_token)
+            payload.revision = sheet['revision']
             data = deepcopy(sheet['sheet_data'])
             rows = data.setdefault('rows', [])
             if len(rows) >= 200:
@@ -146,10 +151,11 @@ def register(app, connect, recheck, location, unsupported=lambda sheet: False):
     @app.post('/sheet/{uid}/rows/{row_index}/delete')
     @app.post('/sheet/{uid}/rows/{row_index}/exclude')
     def exclude(request: Request, uid: str, row_index: int, revision: int = Form(...),
-                reason: str = Form(''), duplicate_of: str = Form(''), back: str = Form(''), actor: str = Form('revisor')):
+                reason: str = Form(''), duplicate_of: str = Form(''), back: str = Form(''), actor: str = Form('revisor'), review_token: str = Form('')):
         conn = connect()
         try:
-            sheet = editable(conn, uid, revision, unsupported)
+            sheet = editable(conn, uid, revision, unsupported, review_token)
+            revision = sheet['revision']
             data = deepcopy(sheet['sheet_data'])
             rows = data.get('rows') or []
             if not 0 <= row_index < len(rows) or (reason and reason not in EXCLUSION_REASONS):
@@ -179,10 +185,11 @@ def register(app, connect, recheck, location, unsupported=lambda sheet: False):
             conn.close()
 
     @app.post('/sheet/{uid}/rows/{row_index}/restore')
-    def restore(request: Request, uid: str, row_index: int, revision: int = Form(...), back: str = Form('')):
+    def restore(request: Request, uid: str, row_index: int, revision: int = Form(...), back: str = Form(''), review_token: str = Form('')):
         conn = connect()
         try:
-            sheet = editable(conn, uid, revision, unsupported)
+            sheet = editable(conn, uid, revision, unsupported, review_token)
+            revision = sheet['revision']
             data = deepcopy(sheet['sheet_data'])
             rows = data.get('rows') or []
             if not 0 <= row_index < len(rows):

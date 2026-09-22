@@ -3,7 +3,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   let active = null, origin = null, generation = 0, request = null, lastPlan = '';
-  let picker = null, busy = false;
+  let picker = null, busy = false, openIntent = 0;
   const text = (tag, value, className) => {
     const el = document.createElement(tag);
     el.textContent = value == null || value === '' ? '—' : String(value);
@@ -18,6 +18,7 @@
   function close() {
     // A submitted write must finish before navigating away from its result.
     if (busy) return;
+    openIntent++;
     cancelRequest();
     if (active) active.style.display = 'none';
     active = null;
@@ -49,7 +50,11 @@
   }
   window.abrirPlano = async url => {
     if (busy) return;
-    const button = active ? origin : document.activeElement;
+    let button = active ? origin : document.activeElement;
+    const intent = ++openIntent;
+    if (window.reviewEdits && !await window.reviewEdits.flush()) return;
+    if (intent !== openIntent) return;
+    button = document.getElementById(button?.id) || button;
     lastPlan = url;
     open('plano-modal', button);
     $('plano-modal-body').replaceChildren(text('p', 'A carregar referências…', 'muted'));
@@ -129,8 +134,12 @@
       showError(error.name === 'AbortError' ? 'A pesquisa demorou demasiado. Carrega em Procurar para tentar novamente.' : error.message);
     }
   }
-  window.abrirEditorOF = button => {
+  window.abrirEditorOF = async button => {
     if (busy) return;
+    const intent = ++openIntent;
+    if (window.reviewEdits && !await window.reviewEdits.flush()) return;
+    if (intent !== openIntent) return;
+    button = document.getElementById(button.id) || button;
     picker = {...button.dataset, selected: null, data: null};
     open('of-modal', button);
     $('of-row-label').textContent = `Linha ${Number(picker.row) + 1}`;
@@ -155,12 +164,19 @@
       cancelRequest();
       const response = await fetch(`/sheet/${encodeURIComponent(picker.uid)}/rows/${picker.row}/plan-selection`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({revision: picker.data.revision, snapshot_id: picker.data.snapshot_id,
+        body: JSON.stringify({revision: picker.data.revision, review_token: picker.data.review_token, snapshot_id: picker.data.snapshot_id,
           selection_kind: picker.data.selection_kind, plan_key: picker.selected, back: picker.back})
       });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.detail || 'Não foi possível guardar.');
-      location.assign(data.redirect_url);
+      const page = await fetch(location.href, {cache: 'no-store', headers: {'X-Review-Refresh': '1'}});
+      if (!page.ok) throw new Error('A escolha foi guardada, mas a tabela não pôde ser atualizada.');
+      picker.data.revision = window.reviewEdits.applyHTML(await page.text(), data.revision);
+      picker.data.review_token = window.reviewEdits.token();
+      picker.selected = null;
+      $('of-status').textContent = 'Referência guardada.';
+      busy = false;
+      $('of-cancel').disabled = false;
     } catch (error) {
       showError(error.message || 'Não foi possível confirmar a gravação. Reabre a pesquisa antes de aplicar novamente.');
       $('of-status').textContent = '';
@@ -186,48 +202,8 @@
       event.preventDefault(); first.focus();
     }
   });
-  // Header edits survive the page reload after an individual cell/OF edit.
-  const sheetId = location.pathname.split('/')[2], draftKey = `${document.body.dataset.historyKey}:header:${sheetId}`;
-  const headerInputs = () => [...document.querySelectorAll('#header-form input[name^="header_"]')];
-  window.guardarCabecalho = () => {
-    const headers = headerInputs();
-    if (busy || submitting || !headers.length) return;
-    const validation = $('validate-form');
-    const form = document.createElement('form');
-    form.method = 'post';
-    form.action = `/sheet/${encodeURIComponent(sheetId)}/header`;
-    const values = Object.fromEntries(headers.map(input => [input.name.replace(/^header_/, ''), input.value]));
-    values.revision = validation.querySelector('[name="revision"]').value;
-    values.back = validation.querySelector('[name="back"]').value;
-    values.actor = 'operador';
-    for (const [name, value] of Object.entries(values)) {
-      const input = document.createElement('input');
-      input.type = 'hidden'; input.name = name; input.value = value;
-      form.append(input);
-    }
-    document.body.append(form);
-    form.requestSubmit();
-  };
-  function restoreDraft() {
-    try {
-      const draft = JSON.parse(sessionStorage.getItem(draftKey) || '{}');
-      headerInputs().forEach(input => {
-        if (Object.hasOwn(draft, input.name)) input.value = draft[input.name];
-      });
-    } catch (_) { /* Explicit form values remain available without storage. */ }
-  }
-  restoreDraft();
-  document.addEventListener('input', event => {
-    if (!event.target.matches('#header-form input[name^="header_"]')) return;
-    try {
-      const draft = JSON.parse(sessionStorage.getItem(draftKey) || '{}');
-      draft[event.target.name] = event.target.value;
-      sessionStorage.setItem(draftKey, JSON.stringify(draft));
-    } catch (_) { /* Browser policy. */ }
-  });
   document.addEventListener('review:before-update', event => { if (busy || submitting) event.preventDefault(); });
   document.addEventListener('review:updated', async () => {
-    restoreDraft();
     if (!active || active.id !== 'plano-modal' || !lastPlan || busy) return;
     try {
       const result = await read(lastPlan);
@@ -245,10 +221,14 @@
     } catch (_) { /* Keep the currently visible references if the refresh fails. */ }
   });
   let submitting = false;
-  document.addEventListener('submit', event => {
+  document.addEventListener('submit', async event => {
     if (event.target.method !== 'post' || event.defaultPrevented || event.target.hasAttribute('data-row-action')) return;
-    if (submitting || busy) { event.preventDefault(); return; }
+    event.preventDefault();
+    if (submitting || busy) return;
     submitting = true;
-    window.setTimeout(() => { document.querySelectorAll('button[type="submit"]').forEach(b => { b.disabled = true; }); }, 0);
+    if (window.reviewEdits && !await window.reviewEdits.flush()) { submitting = false; return; }
+    const rev = event.target.querySelector('[name="revision"]');
+    if (rev && window.reviewEdits) rev.value = window.reviewEdits.revision();
+    HTMLFormElement.prototype.submit.call(event.target);
   });
 })();

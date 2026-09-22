@@ -1133,3 +1133,7 @@ body.dialog-open { overflow: hidden; }
 .row-dialog [hidden] { display:none !important; }
 #row-feedback { position:fixed; bottom:20px; left:20px; z-index:110; max-width:min(660px,calc(100vw - 40px)); padding:12px 18px; background:var(--surface); border:1px solid var(--rule); border-radius:8px; box-shadow:0 3px 16px #0002; }
 #row-feedback[hidden] { display:none; }
+
+.edit-status { display: block; font-size: 11px; white-space: normal; }
+.edit-status:empty { display: none; }
+.save-error { color: var(--danger, #b42318); }

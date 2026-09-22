@@ -8,8 +8,8 @@
 {% set pending_proposals = [] %}
 {% if header_recovery %}{% for field in (header_recovery.proposals or {}) %}{% if not header.get(field) %}{% set _ = pending_proposals.append(field) %}{% endif %}{% endfor %}{% endif %}
 {% if header_recovery and ((header_recovery.error and missing_header) or pending_proposals or recovery_date_pending) %}
-<div class="alert {{ 'crit' if header_recovery.status == 'failed' else 'info' }}" style="flex-direction:column; align-items:flex-start; gap:8px;">
-  <strong>Confirma estes dados do cabeçalho</strong>
+<details class="header-audit" data-detail-key="header-reading">
+  <summary>Detalhes da leitura do cabeçalho</summary>
   {% if header_recovery.error %}<div>Não foi possível ler o cabeçalho. Os dados anteriores foram preservados. Podes tentar novamente ou preencher os campos.</div>{% endif %}
   {% if header_recovery.error and sheet.image_path %}
   <form method="post" action="/sheet/{{ sheet.uid }}/header-recovery">
@@ -24,14 +24,8 @@
   {% endfor %}
   {% if recovery_date_pending %}
     <div>Data no papel: <strong>{{ header_recovery.date_conflict.written }}</strong> · Pela regra do dia útil anterior: <strong>{{ header_recovery.date_conflict.assumed }}</strong>.</div>
-    {% if recovery_date_pending %}
-    <div>Confirma a regra ou guarda uma exceção manual no campo Data antes de validar.</div>
-    <form method="post" action="/sheet/{{ sheet.uid }}/header-recovery/confirm-date">
-      <input type="hidden" name="revision" value="{{ sheet.revision }}"><input type="hidden" name="back" value="{{ back_url }}">
-      <button class="btn" type="submit">Confirmar data pela regra</button>
-    </form>
-    {% else %}<div>Decisão sobre a data registada.</div>{% endif %}
+    <div>O campo Data acima é o valor que será guardado ao validar a folha.</div>
   {% endif %}
-</div>
+</details>
 {% endif %}
 {% endif %}

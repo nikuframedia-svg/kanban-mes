@@ -582,7 +582,8 @@ def test_validar_guarda_o_cabecalho_visivel_sem_exigir_guardar_primeiro(
     revision = get_revision(client, uid)
     page = client.get(f"/sheet/{uid}")
     assert 'id="save-header"' in page.text, "guardar separadamente é opcional"
-    assert 'name="header_operador" form="validate-form"' in page.text
+    assert 'name="header_operador" form="validate-form"' not in page.text
+    assert 'id="header-form" method="post"' in page.text
     assert "validate.disabled" not in page.text
 
     response = client.post(f"/sheet/{uid}/validate", data={

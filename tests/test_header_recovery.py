@@ -128,16 +128,16 @@ def test_validated_refused_and_new_generation_invalidates_recovery(tmp_path):
         assert db.get_sheet(conn,uid)['sheet_data']==after['sheet_data']
 
 
-def test_ui_exposes_conflict_and_validation_requires_decision(client,tmp_path,monkeypatch):
+def test_ui_exposes_date_difference_without_separate_confirmation(client,tmp_path,monkeypatch):
     monkeypatch.setattr(main,'run_cross_check',lambda *a,**k:True)
     with db.connect() as conn:
         uid=create(conn,tmp_path);call(conn,uid);after=db.get_sheet(conn,uid)
     page=client.get(f'/sheet/{uid}')
     assert page.status_code==200
     assert '21/08/2026' in page.text and '20/08/2026' in page.text
-    assert 'Confirmar data pela regra' in page.text
+    assert 'Confirmar data pela regra' not in page.text
     result=client.post(f'/sheet/{uid}/validate',data={'revision':after['revision']})
-    assert 'diverg' in result.headers.get('location','')
+    assert 'diverg' not in result.headers.get('location','')
     assert not client.stored_calls
     confirmed=client.post(f'/sheet/{uid}/header-recovery/confirm-date',data={'revision':after['revision']})
     assert confirmed.status_code==303
@@ -206,7 +206,7 @@ def test_automatic_header_job_starts_once_and_only_date_exception_remains(client
     assert job['status']=='complete'
     page=client.get(f'/sheet/{uid}')
     assert 'data-automatic-review=' not in page.text
-    assert 'Confirmar data pela regra' in page.text
+    assert 'Confirmar data pela regra' not in page.text
     with db.connect() as conn:
         after=db.get_sheet(conn,uid)
         assert after['sheet_data']['rows']==before['sheet_data']['rows']

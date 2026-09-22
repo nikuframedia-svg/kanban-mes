@@ -366,6 +366,7 @@ def save_sheet_data_with_edits(
     review_guard.check(uid, expected_revision)
     try:
         conn.execute("BEGIN IMMEDIATE")
+        review_guard.check(uid, expected_revision)
         if guard is not None and not guard(conn):
             conn.rollback()
             return False
