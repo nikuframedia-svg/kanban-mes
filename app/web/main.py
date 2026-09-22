@@ -46,6 +46,8 @@ from ..templates_spec import TEMPLATES, field_value, get_template, is_marked
 from . import estado as estado_data
 from . import export as cpis_export
 from . import pdf as pdf_gen
+from . import review_writes
+from ..review_guard import cancel_pending
 
 class NoCacheStaticFiles(StaticFiles):
     """Estáticos com revalidação obrigatória — o link leva ?v=<hash>, e isto
@@ -88,10 +90,11 @@ def health():
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.globals["css_version"] = hashlib.sha1(
-    b"".join((_STATIC_DIR / name).read_bytes() for name in ("design.css", "review.js", "automatic-review.js", "row-actions.js"))
+    b"".join((_STATIC_DIR / name).read_bytes() for name in ("design.css", "review.js", "automatic-review.js", "row-actions.js", "review_edits.js"))
 ).hexdigest()[:10]
 # a folha decide o que é uma marca; o template não repete a regra
 templates.env.globals["is_marked"] = is_marked
+templates.env.globals["review_token"] = review_writes.token
 # OF/OV apresentam-se como números puros (convenção do planeamento)
 from ..matching import similarity as _sim  # noqa: E402
 templates.env.globals["strip_ref"] = _sim.strip_ref_prefix
@@ -1846,6 +1849,7 @@ def sheet_pdf(uid: str):
 
 
 @app.post("/sheet/{uid}/header")
+@review_writes.asynchronous(_conn, sheet_view)
 def sheet_header(
     request: Request,
     uid: str,
@@ -1856,7 +1860,7 @@ def sheet_header(
     turno: str = Form(""),
     revision: int = Form(...),
     actor: str = Form("operador"),
-    back: str = Form(""),
+    back: str = Form(""), review_token: str = Form(""),
 ):
     """Guarda todo o cabeçalho numa única transação CAS auditada."""
     posted = {
@@ -1935,10 +1939,11 @@ def sheet_header(
 
 
 @app.post("/sheet/{uid}/edit")
+@review_writes.asynchronous(_conn, sheet_view)
 def sheet_edit(request: Request, uid: str, field_path: str = Form(...),
                value: str = Form(""),
                revision: int = Form(...), actor: str = Form("operador"),
-               back: str = Form("")):
+               back: str = Form(""), review_token: str = Form("")):
     conn = _conn()
     saved = False
     focus = field_path
@@ -1997,6 +2002,12 @@ def sheet_edit(request: Request, uid: str, field_path: str = Form(...),
         # desligava a herança sem o revisor querer.
         old_clean = str(old).strip() or None if old is not None else None
         if old_clean == value_clean:
+            if "application/json" in request.headers.get("accept", ""):
+                # A previous write may have committed before its cross failed.
+                # Retrying the same value must finish that cross, without a new edit.
+                saved = True
+                if not run_cross_check(conn, uid):
+                    raise HTTPException(409, "A folha mudou durante a verificação. Tenta novamente.")
             return RedirectResponse(_sheet_location(uid, back), status_code=303)
         if sheet["revision"] != revision:
             return _render_sheet(
@@ -2108,7 +2119,7 @@ def recheck(uid: str, back: str = Form("")):
 
 @app.post("/sheet/{uid}/validate")
 def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
-             history_back: str = Form(""), revision: int | None = Form(None),
+             history_back: str = Form(""), revision: int | None = Form(None), review_token: str = Form(""),
              header_operador: str | None = Form(None),
              header_n_operador: str | None = Form(None),
              header_setor_maquina: str | None = Form(None),
@@ -2127,10 +2138,12 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
     outcome = "failed"
     row_count = 0
     validation_snapshot = None
+    cancel_pending(uid)
     conn = _conn()
     focus: str | None = None
     try:
         before = db.get_sheet(conn, uid)
+        revision = review_writes.revision_for(before, revision, review_token)
         if not before:
             raise HTTPException(404)
         if before["status"] == "validated":
@@ -2202,12 +2215,6 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
             raise HTTPException(404)
         if sheet["status"] == "validated":
             raise HTTPException(409, "Folha já validada.")
-        from ..header_recovery import date_needs_confirmation
-        if date_needs_confirmation(sheet, db.human_header_fields(conn, uid)):
-            raise HTTPException(422, "Confirma a divergência de data do cabeçalho recuperado antes de validar.")
-        from ..ocr.coverage import coverage_resolved
-        if not coverage_resolved(sheet.get("sheet_data") or {}, sheet):
-            raise HTTPException(422, "A leitura tem linhas por recuperar ou exclusões por esclarecer.")
         header = (sheet["sheet_data"] or {}).get("header") or {}
         if not str(header.get("operador") or "").strip():
             raise HTTPException(422, "Validação exige operador preenchido no cabeçalho.")

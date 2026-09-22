@@ -14,7 +14,7 @@
           <div class="proposal">plano: {{ cell.proposal }}</div>
         {% endif %}
       {% else %}
-        <form method="post" action="/sheet/{{ sheet.uid }}/edit">
+        <form method="post" action="/sheet/{{ sheet.uid }}/edit" class="cell-edit-form" data-field-path="{{ field_path }}">
           <input type="hidden" name="back" value="{{ back_url }}">
           <input type="hidden" name="field_path" value="{{ field_path }}">
           <input type="hidden" name="revision" value="{{ sheet.revision }}">
@@ -26,7 +26,8 @@
                  {% if herdado %}placeholder="{{ herdado }}"
                  title="Herdado da linha {{ cell.inherited_from + 1 }} — já vale para o cruzamento; só escreves se quiseres OUTRO valor"{% endif %}
                  {% if numeric %}inputmode="decimal"{% endif %}
-                 onchange="this.form.requestSubmit()">
+                 >
+          <span class="edit-status" role="status"></span>
         </form>{{ snap_mark(field_path) }}
         {% if cell and cell.status == 'over_limit' %}
           {# Sem link de aceitar: o plano diz o que estava previsto, não o que

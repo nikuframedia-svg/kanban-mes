@@ -7,45 +7,42 @@
   const endpoint = initial.dataset.automaticReview || initial.dataset.ocrPending;
   let revision = Number(initial.dataset.revision), dirty = false, submitting = false;
   let waitingOCR = Boolean(initial.dataset.ocrPending);
-  try {
-    const key = `${document.body.dataset.historyKey}:header:${location.pathname.split('/')[2]}`;
-    dirty = Object.keys(JSON.parse(sessionStorage.getItem(key) || '{}')).length > 0;
-  } catch (_) { /* Storage may be disabled. */ }
   function edited(event) {
     if (event.target.matches('.plan-filter, #of-query') || event.target.closest('#new-row-dialog')) return;
-    if (event.target.closest('[data-review-region], .review-dialog')) dirty = true;
+    if (!window.reviewEdits && event.target.closest('[data-review-region], .review-dialog')) dirty = true;
   }
   document.addEventListener('input', edited, true);
   document.addEventListener('change', edited, true);
   document.addEventListener('submit', event => {
     if (event.target.method === 'post' && !event.defaultPrevented) submitting = true;
   });
-  document.addEventListener('review:updated', event => { if (event.detail?.rowMutation) revision = event.detail.revision; });
-  function message(value, retry = false) {
+  document.addEventListener('review:updated', event => { if (event.detail?.revision != null) revision = event.detail.revision; });
+  function message(value) {
     let panel = document.querySelector('[data-automatic-review], [data-ocr-pending]');
     if (!panel) {
       panel = document.createElement('div');
       panel.dataset.automaticReview = endpoint;
-      document.querySelector('[data-review-region="header"]').append(panel);
+      const details = document.createElement('details'); details.className = 'header-audit'; details.dataset.detailKey = 'reading';
+      const summary = document.createElement('summary'); summary.textContent = 'Detalhes da leitura automática';
+      details.append(summary, panel);
+      document.querySelector('[data-review-region="header"]').append(details);
     }
-    panel.className = 'alert warn';
+    panel.className = 'muted';
     panel.textContent = value;
-    if (retry) {
-      const button = document.createElement('button');
-      button.type = 'button'; button.className = 'btn ghost';
-      button.textContent = 'Repetir verificação';
-      button.onclick = () => { button.disabled = true; start(true); };
-      panel.append(button);
-    }
+
   }
   async function refresh() {
-    if (dirty || submitting) return false;
+    if (dirty || submitting || window.reviewEdits?.hasDrafts() || window.reviewEdits?.busy()) return false;
     const response = await fetch(location.href, {cache: 'no-store', headers: {'X-Review-Refresh': '1'}});
     if (!response.ok) throw new Error('refresh');
     const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
-    if (dirty || submitting) return false;
+    if (dirty || submitting || window.reviewEdits?.hasDrafts() || window.reviewEdits?.busy()) return false;
     const permission = new CustomEvent('review:before-update', {cancelable: true});
     if (!document.dispatchEvent(permission)) return false;
+    if (window.reviewEdits) {
+      revision = window.reviewEdits.applyHTML(doc.documentElement.outerHTML, Number(doc.querySelector('[data-review-region="header"]').dataset.revision));
+      return true;
+    }
     const replacements = [...document.querySelectorAll('[data-review-region]')].map(old =>
       [old, doc.querySelector(`[data-review-region="${old.dataset.reviewRegion}"]`)]);
     if (replacements.some(([, next]) => !next)) throw new Error('regions');
@@ -75,7 +72,7 @@
     if (!updated) {
       message('A verificação terminou. As tuas alterações por guardar foram mantidas; os novos resultados serão apresentados depois de guardares.');
     } else if (job.status === 'error') {
-      message(job.error || 'Parte da verificação não terminou. Os resultados guardados foram preservados.', true);
+      message(job.error || 'Parte da verificação não terminou. Os resultados guardados foram preservados.');
     }
   }
   async function poll() {
@@ -97,7 +94,7 @@
     } catch (_) { message('Não foi possível acompanhar a verificação. Os dados guardados foram preservados.'); }
   }
   async function start(retry = false) {
-    if (submitting || dirty) { message('Verificação adiada para preservar as alterações por guardar.'); return; }
+    if (submitting || dirty || window.reviewEdits?.hasDrafts() || window.reviewEdits?.busy()) { message('Verificação adiada para preservar as alterações por guardar.'); return; }
     try {
       const response = await fetch(endpoint, {method: 'POST', body: new URLSearchParams({revision: String(revision), retry: String(retry)})});
       if (response.status === 409) { message('A folha mudou. As tuas alterações foram preservadas.'); return; }
@@ -105,7 +102,7 @@
       const job = await response.json();
       if (['queued', 'running'].includes(job.status)) {
         const panel = document.querySelector('[data-automatic-review]');
-        if (panel) { panel.className = 'alert info'; panel.textContent = 'A verificar automaticamente a folha…'; }
+        if (panel) { panel.className = 'muted'; panel.textContent = 'A verificar automaticamente a folha…'; }
         poll();
       }
       else await finished(job);
@@ -113,5 +110,5 @@
   }
   if (waitingOCR) poll();
   else if (initial.dataset.start === 'true') start();
-  else if (initial.dataset.status === 'error') message(initial.textContent, true);
+  else if (initial.dataset.status === 'error') message(initial.textContent);
 })();

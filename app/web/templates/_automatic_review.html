@@ -1,5 +1,13 @@
-{% if not is_raw and not readonly and automatic_review_needed %}
-<div class="alert info" data-automatic-review="/sheet/{{ sheet.uid }}/automatic-review" data-revision="{{ sheet.revision }}" data-start="true">A preparar a verificação automática…</div>
-{% elif not is_raw and not readonly and automatic_review_job and automatic_review_job.status in ['error', 'conflict'] %}
-<div class="alert warn" data-automatic-review="/sheet/{{ sheet.uid }}/automatic-review" data-revision="{{ sheet.revision }}" data-status="{{ automatic_review_job.status }}">{{ automatic_review_job.error }}</div>
+{% if not is_raw and not readonly and (automatic_review_needed or automatic_review_job) %}
+<details class="header-audit" data-detail-key="reading">
+  <summary>Detalhes da leitura automática</summary>
+  {% if automatic_review_needed %}
+  <div class="muted" data-automatic-review="/sheet/{{ sheet.uid }}/automatic-review" data-revision="{{ sheet.revision }}" data-start="true">A verificar a leitura.</div>
+  {% elif automatic_review_job.status in ['error', 'conflict'] %}
+  <div class="muted" data-automatic-review="/sheet/{{ sheet.uid }}/automatic-review" data-revision="{{ sheet.revision }}" data-status="{{ automatic_review_job.status }}">{{ automatic_review_job.error or 'Verificação terminada.' }}</div>
+  {% else %}<div class="muted">Verificação terminada.</div>
+  {% endif %}
+  <p class="muted">A contagem automática é informativa. Podes editar e validar a folha.</p>
+  {% if coverage_data.get('expected_rows') is not none %}<div class="muted">Linhas estimadas no papel: {{ coverage_data.expected_rows }}.</div>{% endif %}
+</details>
 {% endif %}

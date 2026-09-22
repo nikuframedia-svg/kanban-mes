@@ -13,7 +13,8 @@ from ..matching import loaders, similarity as sim
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
 from ..templates_spec import field_value, get_template, is_marked
-from . import plan_review
+from . import plan_review, review_writes
+from ..review_guard import cancel_pending
 
 
 class PlanSelection(BaseModel):
@@ -22,6 +23,7 @@ class PlanSelection(BaseModel):
     selection_kind: Literal["reference", "profile"]
     plan_key: str = Field(min_length=1, max_length=500)
     back: str = ""
+    review_token: str = ""
 
 
 def register(app, conn_fn, get_index, run_cross_check, sheet_location):
@@ -45,7 +47,7 @@ def register(app, conn_fn, get_index, run_cross_check, sheet_location):
             if not sid:
                 return JSONResponse({"detail": "Planeamento indisponível."}, status_code=503)
             result = plan_review.lookup(sid, q, include_done=include_done, offset=offset)
-            result.update(revision=sheet["revision"], mtg2=plan_review.IS_MTG2,
+            result.update(revision=sheet["revision"], review_token=review_writes.token(sheet), mtg2=plan_review.IS_MTG2,
                           selection_kind="profile" if row_index is not None and is_marked(field_value(rows[row_index], "perf_comp")) else "reference")
             return JSONResponse(jsonable_encoder(result))
         except Exception:
@@ -55,6 +57,7 @@ def register(app, conn_fn, get_index, run_cross_check, sheet_location):
     def select_plan(uid: str, row_index: int, payload: PlanSelection):
         conn = conn_fn()
         saved = False
+        cancel_pending(uid)
         try:
             sheet = db.get_sheet(conn, uid)
             if not sheet:
@@ -64,6 +67,7 @@ def register(app, conn_fn, get_index, run_cross_check, sheet_location):
             rows = (sheet.get("sheet_data") or {}).get("rows") or []
             if not 0 <= row_index < len(rows) or rows[row_index].get("_deleted"):
                 raise HTTPException(404, "Linha inexistente.")
+            payload.revision = review_writes.revision_for(sheet, payload.revision, payload.review_token)
             if sheet["revision"] != payload.revision:
                 raise HTTPException(409, "A folha foi alterada. Reabre a pesquisa para confirmar a escolha.")
             template = get_template(sheet["template_name"])

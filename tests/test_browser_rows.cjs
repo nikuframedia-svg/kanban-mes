@@ -23,7 +23,7 @@ const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
   await page.getByRole('button',{name:'Desfazer',exact:true}).waitFor();
   assert.equal(await page.locator('[name="header_operador"]').inputValue(),'RASCUNHO DO OPERADOR');
   assert.equal(await quantity.inputValue(),'987');
-  assert.equal(edits,0);
+  assert.equal(edits,1); // The latest cell draft was saved before removing the row.
   assert.equal(await page.locator('[data-detail-key="excluded"]').getAttribute('open'),null);
   await page.getByRole('button',{name:'Desfazer',exact:true}).click();
   await page.locator('#row-0').waitFor();
@@ -65,7 +65,7 @@ const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
   assert.equal(await quantity.inputValue(),'33');
   await other.locator('[name="header_operador"]').fill('OUTRA ABA');
   await other.getByRole('button',{name:'Retirar linha 2',exact:true}).click();
-  await other.waitForFunction(()=>document.querySelector('#row-feedback').textContent.includes('noutra aba'));
+  await other.waitForFunction(()=>document.querySelector('#header-save-status').textContent.includes('alterada'));
   assert.equal(await other.locator('[name="header_operador"]').inputValue(),'OUTRA ABA');
   assert.equal(await other.locator('#row-0').count(),1);
   assert.equal(navigations,1);

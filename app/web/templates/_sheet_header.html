@@ -1,4 +1,4 @@
-<div class="sheet-header-inline" id="header-form">
+<form class="sheet-header-inline" id="header-form" method="post" action="/sheet/{{ sheet.uid }}/header">
   {% for f in t.header_fields %}
     {% set hc = header_cells.get(f) if header_cells and not is_raw else none %}
     {% set color = {'confirmed':'cc-match', 'corrected':'cc-match', 'review':'cc-warn', 'ambiguous':'cc-warn', 'missing':'cc-na', 'no_reference':'cc-na'}.get(hc.status, 'cc-na') if hc else '' %}
@@ -7,7 +7,7 @@
       {% if readonly %}
         <span class="header-value mono">{{ header.get(f) or '—' }}</span>
       {% else %}
-        <input class="cell-input header-input" type="text" name="header_{{ f }}" form="validate-form"
+        <input class="cell-input header-input" type="text" name="header_{{ f }}"
                value="{{ header.get(f) or '' }}" aria-label="{{ header_labels.get(f, f) }}"
                {% if f in ('operador','data') %}required{% endif %}
                {% if f == 'data' %}placeholder="dd/mm/aaaa"{% endif %}>
@@ -17,10 +17,11 @@
   {% set ofs = [] %}
   {% for indexed in active_rows %}{% set of = indexed[1].get('of') %}{% if of and of not in ofs %}{% set _ = ofs.append(of) %}{% endif %}{% endfor %}
   {% if ofs %}<div class="hb-field sheet-ofs"><span class="lbl">OFs</span><div>{% for of in ofs %}<span class="pill neutral mono">{{ strip_ref(of) }}</span> {% endfor %}</div></div>{% endif %}
-</div>
+</form>
 {% if not readonly %}
 <div class="header-save-actions">
   <button type="button" class="btn ghost" id="save-header" onclick="guardarCabecalho()">Guardar cabeçalho</button>
+  <span id="header-save-status" class="edit-status" role="status"></span>
 </div>
 {% endif %}
 {% if header_cells or operator %}

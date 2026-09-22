@@ -34,6 +34,11 @@
       locked = true;
       throw new Error('A alteração foi guardada, mas a folha mudou noutra aba. Atualiza a folha antes de continuar; os campos em edição foram mantidos.');
     }
+    if (window.reviewEdits) {
+      window.reviewEdits.applyHTML(doc.documentElement.outerHTML, expected);
+      document.dispatchEvent(new CustomEvent('review:updated', {detail: {revision: expected, rowMutation: true}}));
+      return;
+    }
     const old = document.querySelector('[data-review-region="body"]');
     const position = {x: scrollX, y: scrollY};
     const scrolls = [...old.querySelectorAll('.scroll-x')].map(el => el.scrollLeft);
@@ -63,7 +68,13 @@
     window.scrollTo(position.x, position.y);
     document.dispatchEvent(new CustomEvent('review:updated', {detail: {revision: expected, rowMutation: true}}));
   }
-  async function mutate(url, body, message, undo, creation = false) {
+  async function mutate(...args) {
+    if (window.reviewEdits) return window.reviewEdits.mutate(() => perform(...args));
+    return perform(...args);
+  }
+  async function perform(url, body, message, undo, creation = false) {
+    if (body instanceof URLSearchParams) { body.set('revision', revision()); body.set('review_token', window.reviewEdits?.token() || ''); }
+    else if (creation) { const payload = JSON.parse(body); payload.revision = revision(); payload.review_token = window.reviewEdits?.token() || ''; body = JSON.stringify(payload); }
     if (state.busy || locked) { if (locked) feedback('A folha mudou. Atualiza-a antes de continuar; os campos em edição foram mantidos.'); return; }
     const allowed = document.dispatchEvent(new CustomEvent('review:before-update', {cancelable: true, detail: {rowMutation: true}}));
     if (!allowed) return;
@@ -111,9 +122,10 @@
     const remove = target.action.endsWith('/exclude');
     mutate(target.action, new URLSearchParams(new FormData(target)), remove ? 'Linha retirada — ' : 'Linha restaurada.', remove ? Number(target.dataset.row) : undefined);
   });
-  document.addEventListener('click', event => {
+  document.addEventListener('click', async event => {
     const button = event.target.closest('[data-new-row]');
     if (!button || state.busy || locked) return;
+    if (window.reviewEdits && !await window.reviewEdits.flush()) return;
     const select = $('new-row-position'); select.replaceChildren();
     const option = (value, label) => select.add(new Option(label, value));
     option('start', 'No início');
