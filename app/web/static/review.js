@@ -23,7 +23,8 @@
     if (active) active.style.display = 'none';
     active = null;
     document.body.classList.remove('dialog-open');
-    if (origin && origin.isConnected) origin.focus();
+    const target = origin?.isConnected ? origin : document.getElementById(origin?.id);
+    if (target) target.focus();
   }
   function open(id, button) {
     close();
@@ -158,6 +159,8 @@
     busy = true;
     showError('');
     $('of-apply').disabled = $('of-cancel').disabled = true;
+    document.querySelectorAll('#of-search-form input, #of-search-form button, #of-include-done, #of-prev, #of-next')
+      .forEach(el => { el.disabled = true; });
     $('of-status').textContent = 'A guardar e verificar a linha…';
     try {
       // Do not abort a write on a timer: the server may already have committed it.
@@ -175,14 +178,18 @@
       picker.data.review_token = window.reviewEdits.token();
       picker.selected = null;
       $('of-status').textContent = 'Referência guardada.';
-      busy = false;
-      $('of-cancel').disabled = false;
     } catch (error) {
       showError(error.message || 'Não foi possível confirmar a gravação. Reabre a pesquisa antes de aplicar novamente.');
       $('of-status').textContent = '';
       picker.selected = null;
+    } finally {
       busy = false;
       $('of-cancel').disabled = false;
+      $('of-apply').disabled = true;
+      document.querySelectorAll('#of-search-form input, #of-search-form button, #of-include-done')
+        .forEach(el => { el.disabled = false; });
+      $('of-prev').disabled = !picker.data || picker.data.offset === 0;
+      $('of-next').disabled = !picker.data?.has_more;
     }
   });
   document.querySelectorAll('.review-dialog').forEach(dialog => dialog.addEventListener('click', event => {
@@ -229,6 +236,7 @@
     if (window.reviewEdits && !await window.reviewEdits.flush()) { submitting = false; return; }
     const rev = event.target.querySelector('[name="revision"]');
     if (rev && window.reviewEdits) rev.value = window.reviewEdits.revision();
+    if (!event.target.isConnected) { event.target.hidden = true; document.body.append(event.target); }
     HTMLFormElement.prototype.submit.call(event.target);
   });
 })();

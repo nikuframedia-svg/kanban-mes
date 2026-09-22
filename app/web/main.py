@@ -2002,6 +2002,12 @@ def sheet_edit(request: Request, uid: str, field_path: str = Form(...),
         # desligava a herança sem o revisor querer.
         old_clean = str(old).strip() or None if old is not None else None
         if old_clean == value_clean:
+            if "application/json" in request.headers.get("accept", ""):
+                # A previous write may have committed before its cross failed.
+                # Retrying the same value must finish that cross, without a new edit.
+                saved = True
+                if not run_cross_check(conn, uid):
+                    raise HTTPException(409, "A folha mudou durante a verificação. Tenta novamente.")
             return RedirectResponse(_sheet_location(uid, back), status_code=303)
         if sheet["revision"] != revision:
             return _render_sheet(

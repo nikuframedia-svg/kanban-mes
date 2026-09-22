@@ -198,3 +198,24 @@ def test_browser_single_validation(client, monkeypatch, tmp_path):
     assert sheet['rows'][0]['qtd'] == '19'
     assert sheet['header']['operador'] == 'BROWSER FINAL'
     assert sheet['rows'][2]['_deleted'] is True
+
+
+def test_retry_completes_cross_after_committed_edit(client, monkeypatch):
+    uid = create()
+    headers = {'Accept': 'application/json'}
+    cross = main.run_cross_check
+    monkeypatch.setattr(main, 'run_cross_check', lambda *_: False)
+    result = client.post(f'/sheet/{uid}/edit', headers=headers, data={
+        'revision': current(uid)['revision'], 'field_path': 'rows[0].qtd', 'value': '19'})
+    assert result.status_code == 503 and result.json()['saved']
+    saved = current(uid)
+    assert saved['sheet_data']['rows'][0]['qtd'] == '19'
+    monkeypatch.setattr(main, 'run_cross_check', cross)
+    retry = client.post(f'/sheet/{uid}/edit', headers=headers, data={
+        'revision': result.json()['revision'], 'field_path': 'rows[0].qtd', 'value': '19'})
+    assert retry.status_code == 200 and retry.json()['ok'], retry.text
+    after = current(uid)
+    assert after['cross_check']['materialized_revision' if plan_review.IS_MTG2 else 'data_revision'] == after['revision']
+    assert after['sheet_data']['rows'][0]['qtd'] == '19'
+    assert after['raw_extraction'] == saved['raw_extraction']
+    assert not client.stored_calls
