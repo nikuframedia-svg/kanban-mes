@@ -120,3 +120,14 @@ def test_historico_atribui_o_numero_seguinte_quando_o_provisorio_esta_ocupado(cl
     second=pg_store.store_validated_sheet(make(7),template,0,'test',minimum_sheet_no=5)
     assert (first.sheet_no, first.next_sheet_no)==(7, 8)
     assert (second.sheet_no, second.next_sheet_no)==(8, 9)
+
+
+def test_registo_de_migracoes_marca_so_o_que_existe(postgres16):
+    admin_dsn, _app_dsn = postgres16
+    with psycopg.connect(admin_dsn) as conn:
+        versions = [r[0] for r in conn.execute(
+            'SELECT version FROM mes_kanban.schema_migrations ORDER BY version')]
+    assert versions == ['010_mes_kanban', '011_mes_paragens', '012_perfil_e_marca',
+                        '013_operador', '014_metros', '015_family_perfis',
+                        '016_mtg2_schema_v2', '017_plan_binding_sheet_numbers',
+                        '018_schema_migrations']

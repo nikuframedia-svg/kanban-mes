@@ -14,9 +14,9 @@ PLAN = [
      "maquinas": "Laser", "semana": None},
 ]
 VALIDATED = [
-    {"of": "OF250001", "familia": "cantoneiras", "cliente": "SILVA & VINHA SA",
+    {"of": "250001", "familia": "cantoneiras", "cliente": "SILVA & VINHA SA",
      "ov": "OV2400001", "qtd_validada": 55, "linhas": 3, "ultima_folha": "2026-08-06"},
-    {"of": "OF999999", "familia": "cantoneiras", "cliente": "FANTASMA",
+    {"of": "999999", "familia": "cantoneiras", "cliente": "FANTASMA",
      "ov": None, "qtd_validada": 7, "linhas": 1, "ultima_folha": "2026-08-01"},
 ]
 
@@ -30,7 +30,7 @@ def test_merge_by_of_junta_plano_e_validado():
     assert r1["qtd_validada"] == 55
     assert r1["sem_plano"] is False
     assert by_of["OF250002"]["progresso"] == 0.0
-    ghost = by_of["OF999999"]
+    ghost = by_of["999999"]
     assert ghost["sem_plano"] is True and ghost["qtd_planeada"] is None
     # atividade recente primeiro
     assert rows[0]["of"] == "OF250001"
@@ -93,7 +93,7 @@ def client(tmp_path, monkeypatch):
 def test_estado_renders(client):
     r = client.get("/estado")
     assert r.status_code == 200
-    assert "OF250001" in r.text and "OF999999" in r.text
+    assert "OF250001" in r.text and "999999" in r.text
     assert "sem plano" in r.text
 
 
@@ -131,3 +131,15 @@ def test_estado_pdf_503_sem_postgres(client, monkeypatch):
         raise RuntimeError("connection refused")
     monkeypatch.setattr(estado, "fetch_plan_rows", boom)
     assert client.get("/estado/pdf").status_code == 503
+
+
+def test_plano_com_prefixo_e_registo_sem_prefixo_sao_a_mesma_of():
+    """Caso real: o plano guarda «OF263210», production_records «263210»."""
+    rows = estado.merge_by_of(
+        [{"cliente": "C", "ov": None, "of": "OF263210", "familia": "x",
+          "qtd_planeada": 10, "qtd_restante": 4}],
+        [{"of": "263210", "familia": "x", "cliente": "C", "ov": None,
+          "qtd_validada": 6, "linhas": 2, "ultima_folha": 5}])
+    assert len(rows) == 1
+    assert rows[0]["of"] == "OF263210" and rows[0]["sem_plano"] is False
+    assert rows[0]["qtd_validada"] == 6
