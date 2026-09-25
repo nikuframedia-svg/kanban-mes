@@ -78,6 +78,18 @@ class Settings:
 
     cross_engine: str = field(default_factory=lambda: _env("MES_CROSS_ENGINE", "legacy").lower())
 
+    # Validada logo, grava depois (25/09). «background»: o clique grava só no
+    # SQLite e o sync_worker leva a folha ao Postgres por trás. «sync»: o
+    # mesmo passo do trabalhador corre dentro do pedido (para diagnóstico ou
+    # para voltar atrás; antes de instalar uma versão antiga, esperar que o
+    # /health mostre sync_pending=0).
+    validation_mode: str = field(
+        default_factory=lambda: _env("MES_VALIDATION_MODE", "background").lower())
+    # Folhas validadas COM avisos esperam isto antes de irem para o histórico
+    # (que só aceita INSERT): janela para «Reabrir» se foi engano.
+    sync_delay_with_warnings_s: float = field(
+        default_factory=lambda: float(_env("MES_SYNC_DELAY_WITH_WARNINGS_S", "600")))
+
     @property
     def sqlite_path(self) -> Path:
         return self.data_dir / "app.db"

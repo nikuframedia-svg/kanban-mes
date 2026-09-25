@@ -36,7 +36,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.gzip import GZipMiddleware
 
-from .. import db, imaging, image_storage, pg_store, production_facts, validation_warnings
+from .. import db, imaging, image_storage, pg_store, production_facts, sync_worker, validation_warnings
 from ..config import settings
 from ..health import STARTUP_HEALTH
 from ..matching import bindings as plan_bindings, carryover, header_cross, loaders, operador
@@ -86,7 +86,12 @@ async def _lifespan(app: FastAPI):
             threading.Thread(target=_process_batch, args=(stuck,), daemon=True).start()
     except Exception as exc:
         print(f"[arranque] retoma de pendentes falhou: {exc}", flush=True)
-    yield
+    # Validadas por gravar no histórico (inclui as que um restart apanhou).
+    sync_worker.start()
+    try:
+        yield
+    finally:
+        sync_worker.stop()
 
 
 app = FastAPI(title="Kanban MES", lifespan=_lifespan)
@@ -97,6 +102,18 @@ app.mount("/static", VersionedStaticFiles(directory=str(_STATIC_DIR)), name="sta
 @app.get("/health")
 def health():
     return dict(STARTUP_HEALTH)
+
+
+@app.get("/health/sync")
+def health_sync():
+    """Fila de gravação no histórico (para o Uptime Kuma): ``pending`` alto ou
+    ``oldest_validated_at`` antigo = o Postgres não está a receber. Fora do
+    /health, que o Caddy consulta a cada poucos segundos."""
+    conn = db.connect()
+    try:
+        return db.sync_summary(conn)
+    finally:
+        conn.close()
 
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -342,6 +359,15 @@ def _current_snapshot_id(*, strict: bool = False) -> str | None:
     if strict and not snapshot:
         raise RuntimeError("Planeamento indisponível: snapshot não identificado.")
     return str(snapshot) if snapshot is not None else None
+
+
+def _cached_snapshot_id(loader_name: str | None) -> str | None:
+    """Carga do plano que está em memória, sem ir ao Postgres."""
+    if not loader_name:
+        return None
+    with _index_lock:
+        hit = _index_cache.get(loader_name)
+    return getattr(hit[1], "snapshot_id", None) if hit else None
 
 
 def _current_index_snapshot(loader_name: str, *, strict: bool = False) -> str | None:
@@ -948,8 +974,9 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
 def home(request: Request, status: str = "", operador: str = "", setor: str = "",
          data: str = "", data_captura: str = "", of: str = "",
          created: str = "", deleted: str = "", validated: str = "",
-         stored: str = "", avisos: str = "", page: int = 1):
-    status = status if status in {"", "pending", "validated", "avisos", "error"} else ""
+         stored: str = "", avisos: str = "", renumbered_from: str = "",
+         a_gravar: str = "", sync_erro: str = "", page: int = 1):
+    status = status if status in {"", "pending", "validated", "avisos", "a_gravar", "error"} else ""
     page = max(1, page)
     conn = _conn()
     try:
@@ -977,7 +1004,7 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
         "history_url": history_url,
         "status_urls": {
             value: _history_location(page=1, **(filters | {"status": value}))
-            for value in ("", "pending", "validated", "avisos", "error")
+            for value in ("", "pending", "validated", "avisos", "a_gravar", "error")
         },
         "clear_url": _history_location(status=status),
         "pagination": {
@@ -987,6 +1014,7 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
         },
         "created": created, "deleted": deleted,
         "validated": validated, "stored": stored, "avisos": avisos,
+        "renumbered_from": renumbered_from, "a_gravar": a_gravar, "sync_erro": sync_erro,
         "tunnel_url": tunnel_url(),
     })
 
@@ -1091,6 +1119,8 @@ def _pdf_to_images(content: bytes, stem: str) -> list[tuple[bytes, str]]:
 # lote de PDF real (12 páginas × 2 chamadas Gemini) demora minutos. O upload
 # responde já; o worker preenche as folhas e o Histórico (auto-refresh) mostra-as.
 PROCESS_IN_BACKGROUND = True
+# «background» | «sync» — ver Settings.validation_mode e app/sync_worker.py.
+VALIDATION_MODE = settings.validation_mode
 
 
 def _process_sheet(uid: str, force_ocr: bool = False) -> None:
@@ -2264,23 +2294,24 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
              header_setor_maquina: str | None = Form(None),
              header_data: str | None = Form(None),
              header_turno: str | None = Form(None)):
-    """Re-cross atual + reserva CAS + INSERT PG + imutabilidade local.
+    """Valida a folha: fica imutável já, e vai para o Postgres por trás.
 
     Nada de negócio bloqueia (decisão de 25/09): operador ou data em falta,
     linhas sem candidato, identidade por confirmar, saldo histórico, plano
     que mudou, cruzamento instável… ficam como avisos gravados com a folha
     (app/validation_warnings.py). Só se recusa o que impediria gravar a folha
-    que o operador está a ver — outra janela alterou-a nesse instante — ou
-    quando o Postgres não confirma.
+    que o operador está a ver — outra janela alterou-a nesse instante.
+
+    O clique não toca no Postgres (decisão de 25/09, «validada logo, grava
+    depois»): a folha fica validada no SQLite com ``sync_state='pending'`` e
+    o app/sync_worker.py grava-a no histórico, com novas tentativas. Com
+    ``MES_VALIDATION_MODE=sync`` esse mesmo passo corre dentro do pedido.
     """
     # «Quem valida» deixou de existir no form: valida-se sem entidade e o
     # registo interno fica «operador».
     actor = actor.strip() or "operador"
     validation_started = time.monotonic()
-    timings = {
-        "index_ms": 0.0, "cross_ms": 0.0,
-        "sqlite_lock_wait_ms": 0.0, "pg_store_ms": 0.0,
-    }
+    timings = {"index_ms": 0.0, "cross_ms": 0.0}
     _validation_timing.current = timings
     outcome = "failed"
     row_count = 0
@@ -2372,14 +2403,15 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                 if not before:
                     raise HTTPException(404)
 
-        # A validação confirma o snapshot atual. Se for o mesmo, reutiliza o
-        # índice já construído; se mudou, constrói exatamente o novo snapshot.
-        # Com o plano em baixo, vale o cruzamento que estava na folha (aviso).
-        # (plano indisponível fica no plan_reference do cross → aviso; um
-        # erro do próprio cruzamento é técnico e continua a travar)
+        # O cruzamento só se refaz se a folha mudou desde o último (cabeçalho
+        # confirmado agora, data assumida) — sobre o plano em memória, sem ir
+        # ao Postgres: vale a carga do plano que o operador estava a ver.
+        # Plano indisponível fica no plan_reference do cross → aviso; um erro
+        # do próprio cruzamento é técnico e continua a travar.
         cross_started = time.monotonic()
-        if not run_cross_check(conn, uid, force_plan=True):
-            raise HTTPException(409, _CHANGED_ELSEWHERE)
+        if (before.get("cross_check") or {}).get("materialized_revision") != before["revision"]:
+            if not run_cross_check(conn, uid):
+                raise HTTPException(409, _CHANGED_ELSEWHERE)
         timings["cross_ms"] = max(
             0.0,
             (time.monotonic() - cross_started) * 1000.0 - timings["index_ms"],
@@ -2389,64 +2421,26 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
             raise HTTPException(404)
         template = get_template(sheet["template_name"])
         warnings = validation_warnings.collect(
-            sheet,
-            current_snapshot=(_current_index_snapshot(template.index_loader)
-                              if template.index_loader else None),
+            sheet, current_snapshot=_cached_snapshot_id(template.index_loader),
             assumed_date=assumed_date)
         cross = sheet.get("cross_check") or {}
         cross["validation_warnings"] = warnings
-        if not db.save_cross_check(conn, uid, cross, expected_revision=sheet["revision"]):
-            raise HTTPException(409, _CHANGED_ELSEWHERE)
-        expected_revision = sheet["revision"]
-
-        lock_started = time.monotonic()
-        conn.execute("BEGIN IMMEDIATE")
-        timings["sqlite_lock_wait_ms"] = (
-            time.monotonic() - lock_started
-        ) * 1000.0
-        sheet = db.get_sheet(conn, uid)
-        if not sheet:
-            raise HTTPException(404)
-        if sheet["status"] == "validated" or sheet["revision"] != expected_revision:
-            raise HTTPException(409, _CHANGED_ELSEWHERE)
-        cross = sheet.get("cross_check") or {}
         validation_snapshot = cross.get("snapshot_id")
         row_count = len((sheet.get("sheet_data") or {}).get("rows") or [])
-        try:
-            store_started = time.monotonic()
-            n = pg_store.store_validated_sheet(
-                sheet, template, db.edit_count(conn, uid), actor)
-            timings["pg_store_ms"] = (
-                time.monotonic() - store_started
-            ) * 1000.0
-        except pg_store.InvalidSheetDate as exc:
-            raise HTTPException(
-                422, f"Data «{exc}» não é interpretável — escreve dd/mm/aaaa.")
-        except pg_store.SheetNumberConflict as exc:
-            raise HTTPException(
-                409,
-                f"O número público {exc.sheet_no} está associado a outra folha "
-                "no histórico. A validação não foi gravada; atualiza a lista "
-                "e tenta novamente.",
-            )
-        except Exception:
-            traceback.print_exc()
-            raise HTTPException(
-                503,
-                "Não foi possível gravar a validação no histórico. Nenhuma "
-                "linha parcial foi aceite; tenta novamente.",
-            )
-        if not db.mark_validated(
-            conn, uid, actor, expected_revision=sheet["revision"]
-        ):
-            raise HTTPException(
-                409, "A folha mudou durante a validação — tenta novamente."
-            )
-        outcome = "validated"
+        # Validada logo, grava depois: aqui só o SQLite. Com avisos, a ida
+        # para o histórico (só INSERT) espera uns minutos — janela para
+        # «Reabrir» se foi engano.
+        delay = (settings.sync_delay_with_warnings_s
+                 if warnings and VALIDATION_MODE == "background" else 0)
+        if not db.mark_validated_local(conn, uid, actor, expected_revision=sheet["revision"],
+                                       cross=cross, sync_delay_s=delay):
+            raise HTTPException(409, _CHANGED_ELSEWHERE)
+        provisional_no = sheet.get("sheet_no")
+        outcome = "validated_local"
     except HTTPException as exc:
-        # As recusas técnicas (409/422/503) voltam à folha como banner: o form
+        # As recusas técnicas (409/422) voltam à folha como banner: o form
         # navega para o POST, e a resposta JSON crua lê-se como crash. Só 404
-        # sobe. Os 5xx de escrita já foram registados no log.
+        # sobe.
         if exc.status_code == 404:
             raise
         return RedirectResponse(
@@ -2461,8 +2455,8 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         return RedirectResponse(
             _sheet_location(
                 uid, back,
-                erro=("Não foi possível concluir a validação. Nenhuma linha "
-                      "parcial foi aceite; tenta novamente."),
+                erro=("Não foi possível concluir a validação. A folha e as "
+                      "edições ficaram preservadas; tenta novamente."),
                 focus=focus,
             ),
             status_code=303,
@@ -2479,15 +2473,51 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
             **{key: round(value, 2) for key, value in timings.items()},
         }, ensure_ascii=False), flush=True)
         _validation_timing.current = None
+
+    avisos = len(warnings) or None
+    if VALIDATION_MODE == "sync":
+        result = sync_worker.sync_one(uid)
+        if result.state == "done":
+            return RedirectResponse(
+                _with_query(
+                    destination, validated=result.sheet_no, stored=result.row_count,
+                    avisos=avisos,
+                    renumbered_from=(result.previous_no
+                                     if result.previous_no not in (None, result.sheet_no)
+                                     else None)),
+                status_code=303)
+        return RedirectResponse(
+            _with_query(destination, validated=provisional_no, a_gravar=1,
+                        avisos=avisos, sync_erro=result.error),
+            status_code=303)
+    sync_worker.wake()
     return RedirectResponse(
-        _with_query(
-            destination,
-            validated=sheet.get("sheet_no") or uid[:8],
-            stored=n,
-            avisos=len(warnings) or None,
-        ),
-        status_code=303,
-    )
+        _with_query(destination, validated=provisional_no, a_gravar=1, avisos=avisos),
+        status_code=303)
+
+
+@app.post("/sheet/{uid}/reopen")
+def reopen_validated(uid: str, back: str = Form("")):
+    """Reabre uma validada que ainda não chegou ao histórico (erro ao gravar,
+    ou dentro da janela das folhas com avisos)."""
+    refused = sync_worker.reopen(uid, "operador")
+    return RedirectResponse(
+        _sheet_location(uid, back, erro=refused) if refused else _sheet_location(uid, back),
+        status_code=303)
+
+
+@app.post("/sheet/{uid}/sync-retry")
+def retry_sync(uid: str, back: str = Form("")):
+    conn = _conn()
+    try:
+        db.retry_sync_now(conn, uid)
+    finally:
+        conn.close()
+    if VALIDATION_MODE == "sync":
+        sync_worker.sync_one(uid)
+    else:
+        sync_worker.wake()
+    return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
 from . import plan_picker  # noqa: E402

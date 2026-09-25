@@ -24,16 +24,25 @@
   {% if deleted %}
   <div class="alert ok" style="margin-bottom:14px;"><span>Folha apagada.</span></div>
   {% endif %}
-  {% if validated %}
+  {% if validated and a_gravar %}
+  <div class="alert {{ 'warn' if sync_erro else 'ok' }}" style="margin-bottom:14px;"><span>
+    <strong>Folha {{ validated }} validada{% if avisos %} com {{ avisos }} aviso(s){% endif %}.</strong>
+    {% if sync_erro %}A gravação no histórico falhou ({{ sync_erro }}); a folha está no filtro «Por gravar».
+    {% elif avisos %}Vai para o histórico daqui a uns minutos — até lá pode ser reaberta. Os avisos ficam na folha e no filtro «Com avisos».
+    {% else %}A gravar no histórico em segundo plano; podes continuar.{% endif %}
+  </span></div>
+  {% elif validated %}
   <div class="alert ok" style="margin-bottom:14px;">
-    <span><strong>Folha {{ validated }} validada{% if avisos %} com {{ avisos }} aviso(s){% endif %}.</strong> {{ stored or 0 }} linha(s) gravadas.
+    <span><strong>Folha {{ validated }} validada{% if avisos %} com {{ avisos }} aviso(s){% endif %}.</strong>
+    {% if renumbered_from %}O número provisório {{ renumbered_from }} foi atualizado para {{ validated }}. {% endif %}
+    {{ stored or 0 }} linha(s) gravadas.
     {% if avisos %}Os avisos ficam na folha e no filtro «Com avisos».{% endif %}</span>
   </div>
   {% endif %}
 
   {# Os botões de estado levam consigo todos os outros filtros activos. #}
   <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; align-items:center;">
-    {% for value, label in [('', 'Todas'), ('pending', 'Pendentes'), ('validated', 'Validadas'), ('avisos', 'Com avisos'), ('error', 'Erro')] %}
+    {% for value, label in [('', 'Todas'), ('pending', 'Pendentes'), ('validated', 'Validadas'), ('avisos', 'Com avisos'), ('a_gravar', 'Por gravar'), ('error', 'Erro')] %}
       <a href="{{ status_urls[value] }}"
          class="btn {% if f.status == value %}primary{% endif %}">{{ label }}</a>
     {% endfor %}
@@ -122,7 +131,11 @@
               </span>
             </td>
             <td>
-              {% if s.status == 'validated' and s.avisos %}
+              {% if s.status == 'validated' and s.sync_state == 'error' %}
+                <span class="pill crit" title="{{ s.sync_error or '' }}">validada · erro ao gravar</span>
+              {% elif s.status == 'validated' and s.sync_state in ('pending', 'retry') %}
+                <span class="pill neutral" title="{{ s.sync_error or 'A gravar no histórico em segundo plano' }}">validada · a gravar</span>
+              {% elif s.status == 'validated' and s.avisos %}
                 <span class="pill warn" title="Validada com avisos: abre para rever">validada · {{ s.avisos }} aviso(s)</span>
               {% elif s.status == 'validated' %}
                 <span class="pill ok">validada</span>
@@ -174,7 +187,7 @@
   </div>
   {% endif %}
 </div>
-{% if created or deleted or validated or stored or avisos %}
+{% if created or deleted or validated or stored or avisos or a_gravar %}
 <script>
   (function () {
     var url = new URL(window.location.href);
@@ -183,6 +196,9 @@
     url.searchParams.delete('validated');
     url.searchParams.delete('stored');
     url.searchParams.delete('avisos');
+    url.searchParams.delete('renumbered_from');
+    url.searchParams.delete('a_gravar');
+    url.searchParams.delete('sync_erro');
     history.replaceState(null, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams : ''));
   })();
 </script>

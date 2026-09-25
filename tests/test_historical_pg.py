@@ -20,7 +20,7 @@ def test_historical_parent_children_and_repeat_preserve_facts(clean_history):
            'cross_check':{'snapshot_id':'current-zero','rows':[{'row_index':0,'matched_plan_key':'current-key','cells':[]}]}}
     historical_quantities.apply(sheet,sheet['sheet_data'],sheet['cross_check'],
         snapshot_loader=lambda day:{'snapshot_id':'snapshot-15sep'}, order_loader=lambda *a:entries())
-    assert pg_store.store_validated_sheet(sheet,template,0,'test')==1
+    assert pg_store.store_validated_sheet(sheet,template,0,'test').row_count==1
     with psycopg.connect(clean_history) as conn:
         records=conn.execute('SELECT quantity,plan_snapshot_id FROM mes_kanban.production_records WHERE sheet_uid=%s',(sheet['uid'],)).fetchall()
         refs=conn.execute('SELECT component_ref,assumed_quantity,plan_snapshot_id FROM mes_kanban.production_record_plan_refs WHERE sheet_uid=%s ORDER BY component_ref',(sheet['uid'],)).fetchall()
@@ -30,7 +30,7 @@ def test_historical_parent_children_and_repeat_preserve_facts(clean_history):
     sheet['status']='validated'
     historical_quantities.apply(sheet,sheet['sheet_data'],sheet['cross_check'],snapshot_loader=lambda *_:pytest.fail('validated'))
     assert sheet['cross_check']==frozen['cross_check']
-    assert pg_store.store_validated_sheet(sheet,template,0,'test')==1
+    assert pg_store.store_validated_sheet(sheet,template,0,'test').row_count==1
     from app import production_facts
     if pg_store.SOURCE_APP.endswith('mtg2'):
         exported=production_facts.materialize_sheet(sheet)[0]['export_rows']
@@ -84,3 +84,39 @@ def test_row_warnings_are_stored_with_the_production_record(clean_history):
     assert record[0]['warnings']==[{'code':'sem_ligacao_ao_plano','message':'Linha 1: sem correspondência.'}]
     assert record[1] is None and record[2]=='(desconhecido)'
     assert [w['code'] for w in stored]==['operador_vazio','sem_ligacao_ao_plano']
+
+
+def test_click_time_is_stored_and_second_attempt_only_confirms(clean_history):
+    template=get_template('tpl999_kanban' if pg_store.SOURCE_APP.endswith('mtg2') else 'cantoneiras_kanban')
+    uid=uuid.uuid4().hex[:12]
+    sheet={'uid':uid, 'sheet_no':4, 'template_name':template.name,
+           'image_sha256':'e'*64, 'raw_extraction':{}, 'status':'validated',
+           'sheet_data':{'header':{'data':'16/09/2026','operador':'ANA'}, 'footer':{},
+                         'rows':[{'of':'264534','perfil':'L55X55X5','modelo':'EA8B78','qtd':'2'}]},
+           'cross_check':{'snapshot_id':'current','rows':[{'row_index':0,'cells':[]}]}}
+    clicked='2026-09-16T10:15:00+00:00'
+    first=pg_store.store_validated_sheet(sheet,template,0,'test',validated_at=clicked)
+    # O sync_worker caiu antes de confirmar localmente: a nova tentativa não duplica.
+    again=pg_store.store_validated_sheet(sheet,template,0,'test',validated_at=clicked)
+    assert not first.already_stored and again.already_stored
+    assert again.sheet_no==first.sheet_no and again.row_count==first.row_count
+    with psycopg.connect(clean_history) as conn:
+        sheet_at=conn.execute('SELECT validated_at FROM mes_kanban.validated_sheets WHERE sheet_uid=%s',(uid,)).fetchone()[0]
+        rows=conn.execute('SELECT validated_at FROM mes_kanban.production_records WHERE sheet_uid=%s',(uid,)).fetchall()
+    assert sheet_at.isoformat()==clicked and [r[0].isoformat() for r in rows]==[clicked]
+
+
+def test_historico_atribui_o_numero_seguinte_quando_o_provisorio_esta_ocupado(clean_history):
+    """Antes, um número local já usado no histórico era um erro que o
+    operador não conseguia resolver; agora o histórico dá o seguinte livre."""
+    template=get_template('cantoneiras_kanban')
+    def make(sheet_no):
+        return {'uid':uuid.uuid4().hex[:12], 'sheet_no':sheet_no, 'template_name':template.name,
+                'image_sha256':uuid.uuid4().hex*2, 'raw_extraction':{}, 'status':'validated',
+                'sheet_data':{'header':{'data':'16/09/2026','operador':'ANA'}, 'footer':{},
+                              'rows':[{'of':'264534','perfil':'L55X55X5','modelo':'EA8B78','qtd':'2'}]},
+                'cross_check':{'snapshot_id':'current','rows':[{'row_index':0,'cells':[]}]}}
+    first=pg_store.store_validated_sheet(make(7),template,0,'test')
+    second=pg_store.store_validated_sheet(make(7),template,0,'test',minimum_sheet_no=5)
+    assert (first.sheet_no, first.next_sheet_no)==(7, 8)
+    assert (second.sheet_no, second.next_sheet_no)==(8, 9)

@@ -13,7 +13,7 @@ import sqlite3
 import threading
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .config import settings
@@ -37,7 +37,14 @@ CREATE TABLE IF NOT EXISTS sheets (
     created_at      TEXT NOT NULL,
     extracted_at    TEXT,
     validated_at    TEXT,
-    validated_by    TEXT
+    validated_by    TEXT,
+    -- Validada logo, grava depois: NULL/done = já está no Postgres;
+    -- pending|retry|error = validada localmente, à espera do sync_worker.
+    sync_state      TEXT,
+    sync_attempts   INTEGER NOT NULL DEFAULT 0,
+    sync_next_at    TEXT,
+    sync_error      TEXT,
+    synced_at       TEXT
 );
 CREATE TABLE IF NOT EXISTS edits (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +73,7 @@ CREATE TABLE IF NOT EXISTS ingested_files (
 # elas (estão no SCHEMA); as antigas precisam de ALTER, e o SQLite não tem
 # "ADD COLUMN IF NOT EXISTS". A escada por user_version corre uma vez por
 # ficheiro de base; o try/except cobre a corrida entre processos.
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 10
 _MIGRATIONS = (
     (1, "ALTER TABLE sheets ADD COLUMN image_rotation INTEGER NOT NULL DEFAULT 0"),
     # v2: ingested_files já nasce no SCHEMA (CREATE TABLE IF NOT EXISTS corre
@@ -75,7 +82,18 @@ _MIGRATIONS = (
     (3, "ALTER TABLE sheets ADD COLUMN sheet_no INTEGER"),
     (4, "ALTER TABLE sheets ADD COLUMN extraction_generation INTEGER NOT NULL DEFAULT 0"),
     (5, "ALTER TABLE sheets ADD COLUMN evidence_event_floor INTEGER NOT NULL DEFAULT 0"),
+    (6, "ALTER TABLE sheets ADD COLUMN sync_state TEXT"),
+    (7, "ALTER TABLE sheets ADD COLUMN sync_attempts INTEGER NOT NULL DEFAULT 0"),
+    (8, "ALTER TABLE sheets ADD COLUMN sync_next_at TEXT"),
+    (9, "ALTER TABLE sheets ADD COLUMN sync_error TEXT"),
+    (10, "ALTER TABLE sheets ADD COLUMN synced_at TEXT"),
 )
+# Estados da gravação no Postgres de uma folha validada.
+SYNC_WAITING = ("pending", "retry", "error")
+
+
+class LocalSheetNumberConflict(RuntimeError):
+    """O número definitivo já identifica outra folha validada no staging."""
 _migrated: set[str] = set()
 _migrate_lock = threading.Lock()
 
@@ -123,6 +141,9 @@ def _migrate(conn: sqlite3.Connection, key: str) -> None:
                 "max(app_counters.next_value, excluded.next_value)",
                 (next_no,),
             )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS sheets_sync_idx ON sheets(sync_state, sync_next_at)"
+        )
         if version < _SCHEMA_VERSION:
             version = _SCHEMA_VERSION
         conn.execute(f"PRAGMA user_version = {version}")
@@ -272,6 +293,7 @@ def list_sheets(conn: sqlite3.Connection, status: str | None = None,
     validado nem em erro (o que o Histórico chama «Pendentes»)."""
     sql = (
         "SELECT uid, sheet_no, template_name, status, image_path, created_at, validated_at, revision, "
+        "  sync_state, sync_error, "
         "  json_extract(sheet_data, '$.header.operador')      AS operador, "
         "  json_extract(sheet_data, '$.header.data')          AS data_folha, "
         "  json_extract(sheet_data, '$.header.setor_maquina') AS setor, "
@@ -286,6 +308,9 @@ def list_sheets(conn: sqlite3.Connection, status: str | None = None,
         # validadas com avisos (25/09: nada bloqueia; isto é o que fica para rever)
         sql += (" AND status = 'validated' AND "
                 "COALESCE(json_array_length(cross_check, '$.validation_warnings'), 0) > 0")
+    elif status == "a_gravar":
+        # validadas que ainda não chegaram ao histórico (Postgres)
+        sql += " AND status = 'validated' AND sync_state IN ('pending', 'retry', 'error')"
     elif status:
         sql += " AND status = ?"
         args.append(status)
@@ -554,6 +579,208 @@ def mark_validated(conn: sqlite3.Connection, uid: str, actor: str,
     cur = conn.execute(sql, args)
     conn.commit()
     return cur.rowcount == 1
+
+
+def minimum_sheet_number(conn: sqlite3.Connection) -> int:
+    """Limite inferior seguro para um número atribuído pelo histórico."""
+    counter = conn.execute(
+        "SELECT next_value FROM app_counters WHERE name = 'sheet_no'"
+    ).fetchone()
+    local_next = int(conn.execute(
+        "SELECT COALESCE(MAX(sheet_no), 0) + 1 FROM sheets"
+    ).fetchone()[0])
+    return max(1, local_next, int(counter["next_value"]) if counter else 1)
+
+
+def _take_definitive_number(conn: sqlite3.Connection, uid: str, old_number: int,
+                            definitive_sheet_no: int, next_sheet_no: int) -> None:
+    """Dá à folha o número definitivo do histórico; quem o tinha provisoriamente
+    (rascunho ou validada ainda por gravar) recebe um número novo, auditado."""
+    definitive_sheet_no = int(definitive_sheet_no)
+    if definitive_sheet_no < 1:
+        raise ValueError("número definitivo inválido")
+    occupant = conn.execute(
+        "SELECT uid, sheet_no, status, sync_state FROM sheets "
+        "WHERE sheet_no = ? AND uid <> ?",
+        (definitive_sheet_no, uid),
+    ).fetchone()
+    if occupant is not None:
+        if (occupant["status"] == "validated"
+                and occupant["sync_state"] not in SYNC_WAITING):
+            raise LocalSheetNumberConflict(
+                f"o número definitivo {definitive_sheet_no} pertence localmente "
+                f"à folha validada {occupant['uid']}"
+            )
+        provisional = max(minimum_sheet_number(conn), int(next_sheet_no), 1)
+        conn.execute(
+            "UPDATE sheets SET sheet_no = ? WHERE uid = ?",
+            (provisional, occupant["uid"]),
+        )
+        conn.execute(
+            "INSERT INTO edits (sheet_uid, field_path, old_value, new_value, "
+            "source, actor, edited_at) VALUES (?, 'sheet_no', ?, ?, "
+            "'system', 'sheet-numbering', ?)",
+            (occupant["uid"], _edit_value(occupant["sheet_no"]),
+             _edit_value(provisional), now_iso()),
+        )
+
+    if old_number != definitive_sheet_no:
+        conn.execute(
+            "UPDATE sheets SET sheet_no = ? WHERE uid = ?",
+            (definitive_sheet_no, uid),
+        )
+        conn.execute(
+            "INSERT INTO edits (sheet_uid, field_path, old_value, new_value, "
+            "source, actor, edited_at) VALUES (?, 'sheet_no', ?, ?, "
+            "'system', 'sheet-numbering', ?)",
+            (uid, _edit_value(old_number or None), _edit_value(definitive_sheet_no),
+             now_iso()),
+        )
+
+    floor = max(minimum_sheet_number(conn), int(next_sheet_no),
+                definitive_sheet_no + 1)
+    conn.execute(
+        "INSERT INTO app_counters(name, next_value) VALUES ('sheet_no', ?) "
+        "ON CONFLICT(name) DO UPDATE SET next_value = "
+        "MAX(app_counters.next_value, excluded.next_value)",
+        (floor,),
+    )
+
+
+# --- Validada logo, grava depois -------------------------------------------
+# O clique em Validar só escreve aqui (SQLite local). O sync_worker grava no
+# Postgres por trás e confirma o número definitivo com confirm_sync().
+
+def mark_validated_local(conn: sqlite3.Connection, uid: str, actor: str, *,
+                         expected_revision: int, cross: dict,
+                         sync_delay_s: float = 0) -> bool:
+    """Avisos, cruzamento final e estado «validada, por gravar» num só commit."""
+    now = datetime.now(timezone.utc)
+    next_at = (now + timedelta(seconds=max(0.0, sync_delay_s))).isoformat(timespec="seconds")
+    cur = conn.execute(
+        "UPDATE sheets SET cross_check = ?, status = 'validated', validated_at = ?, "
+        "validated_by = ?, sync_state = 'pending', sync_attempts = 0, "
+        "sync_next_at = ?, sync_error = NULL, synced_at = NULL "
+        "WHERE uid = ? AND revision = ? AND status != 'validated'",
+        (json.dumps(cross, ensure_ascii=False), now.isoformat(timespec="seconds"),
+         actor, next_at, uid, expected_revision),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def due_syncs(conn: sqlite3.Connection, now: str | None = None) -> list[str]:
+    """Folhas validadas cuja gravação no Postgres já pode ser tentada."""
+    return [r[0] for r in conn.execute(
+        "SELECT uid FROM sheets WHERE status = 'validated' "
+        "AND sync_state IN ('pending', 'retry') "
+        "AND (sync_next_at IS NULL OR sync_next_at <= ?) "
+        "ORDER BY validated_at, sheet_no, uid",
+        (now or now_iso(),),
+    )]
+
+
+def next_sync_at(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        "SELECT MIN(COALESCE(sync_next_at, '')) FROM sheets WHERE status = 'validated' "
+        "AND sync_state IN ('pending', 'retry')"
+    ).fetchone()
+    return None if row[0] is None else row[0]
+
+
+def save_sync_cross(conn: sqlite3.Connection, uid: str, cross: dict) -> bool:
+    """Completa o cruzamento de uma folha validada ainda por gravar (saldo
+    histórico que faltou por o túnel estar em baixo). Não mexe em valores."""
+    cur = conn.execute(
+        "UPDATE sheets SET cross_check = ? WHERE uid = ? AND status = 'validated' "
+        "AND sync_state IN ('pending', 'retry', 'error')",
+        (json.dumps(cross, ensure_ascii=False), uid),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def schedule_sync_retry(conn: sqlite3.Connection, uid: str, error: str,
+                        next_at: str | None, *, final: bool = False) -> None:
+    conn.execute(
+        "UPDATE sheets SET sync_state = ?, sync_attempts = sync_attempts + 1, "
+        "sync_next_at = ?, sync_error = ? "
+        "WHERE uid = ? AND status = 'validated' AND sync_state IN ('pending', 'retry')",
+        ("error" if final else "retry", next_at, error[:500], uid),
+    )
+    conn.commit()
+
+
+def confirm_sync(conn: sqlite3.Connection, uid: str, *, definitive_sheet_no: int,
+                 next_sheet_no: int) -> int | None:
+    """O Postgres confirmou: número definitivo e «gravada», num só commit.
+
+    Devolve o número provisório anterior, ou None se a folha já não está à
+    espera (outra tentativa confirmou-a ou foi reaberta)."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        target = conn.execute(
+            "SELECT sheet_no, status, sync_state FROM sheets WHERE uid = ?", (uid,)
+        ).fetchone()
+        if (target is None or target["status"] != "validated"
+                or target["sync_state"] not in SYNC_WAITING):
+            conn.rollback()
+            return None
+        old_number = int(target["sheet_no"]) if target["sheet_no"] is not None else 0
+        _take_definitive_number(conn, uid, old_number, definitive_sheet_no, next_sheet_no)
+        conn.execute(
+            "UPDATE sheets SET sync_state = 'done', synced_at = ?, sync_error = NULL, "
+            "sync_next_at = NULL WHERE uid = ?",
+            (now_iso(), uid),
+        )
+        conn.commit()
+        return old_number
+    except BaseException:
+        conn.rollback()
+        raise
+
+
+def retry_sync_now(conn: sqlite3.Connection, uid: str) -> bool:
+    cur = conn.execute(
+        "UPDATE sheets SET sync_state = 'pending', sync_next_at = NULL, sync_error = NULL "
+        "WHERE uid = ? AND status = 'validated' AND sync_state IN ('retry', 'error')",
+        (uid,),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def reopen_unsynced(conn: sqlite3.Connection, uid: str, actor: str) -> bool:
+    """Volta a pôr em revisão uma validada que ainda não chegou ao Postgres.
+    O chamador garante que o Postgres não a tem (sync_worker.reopen)."""
+    cur = conn.execute(
+        "UPDATE sheets SET status = 'in_review', validated_at = NULL, validated_by = NULL, "
+        "sync_state = NULL, sync_attempts = 0, sync_next_at = NULL, sync_error = NULL, "
+        "revision = revision + 1 "
+        "WHERE uid = ? AND status = 'validated' AND sync_state IN ('pending', 'retry', 'error')",
+        (uid,),
+    )
+    if cur.rowcount == 1:
+        conn.execute(
+            "INSERT INTO edits (sheet_uid, field_path, old_value, new_value, "
+            "source, actor, edited_at) VALUES (?, 'status', 'validated', 'in_review', "
+            "'human', ?, ?)",
+            (uid, actor, now_iso()),
+        )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def sync_summary(conn: sqlite3.Connection) -> dict:
+    row = conn.execute(
+        "SELECT "
+        " SUM(CASE WHEN sync_state IN ('pending', 'retry') THEN 1 ELSE 0 END) AS pending, "
+        " SUM(CASE WHEN sync_state = 'error' THEN 1 ELSE 0 END) AS errors, "
+        " MIN(CASE WHEN sync_state IN ('pending', 'retry', 'error') THEN validated_at END) AS oldest "
+        "FROM sheets WHERE status = 'validated'"
+    ).fetchone()
+    return {"pending": int(row["pending"] or 0), "errors": int(row["errors"] or 0),
+            "oldest_validated_at": row["oldest"]}
 
 
 def ingested_shas(conn: sqlite3.Connection) -> set[str]:

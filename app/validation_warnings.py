@@ -109,3 +109,14 @@ def for_row(warnings: list[dict] | None, row_index: int) -> list[dict]:
         {"code": w["code"], "message": w["message"]}
         for w in warnings or () if w.get("row_index") == row_index
     ]
+
+
+_BALANCE_CODES = frozenset({"saldo_por_confirmar", "saldo_aproximado"})
+
+
+def refresh_balance(warnings: list[dict] | None, sheet: dict) -> list[dict]:
+    """Depois de o sync_worker completar o saldo histórico: os avisos de saldo
+    passam a refletir o saldo calculado; os restantes ficam como estavam."""
+    kept = [w for w in warnings or () if w.get("code") not in _BALANCE_CODES]
+    fresh = [w for w in collect(sheet) if w.get("code") in _BALANCE_CODES]
+    return kept + fresh

@@ -331,7 +331,7 @@ def test_validation_returns_to_history_context_and_sanitizes_destination(client)
         assert main._safe_history_back(hostile) is None
 
 
-def test_pg_archive_wins_over_local_draft_and_basedados_never_needs_sqlite(client, monkeypatch):
+def test_pg_archive_wins_over_local_draft_and_basedados_never_exports_drafts(client, monkeypatch):
     local = sheet(False)
     local["status"] = "review"
     local["sheet_data"]["rows"][0]["qtd"] = "99"
@@ -342,7 +342,11 @@ def test_pg_archive_wins_over_local_draft_and_basedados_never_needs_sqlite(clien
     result = export_routes.export_sheets(main._conn, drafts=True)
     assert len(result) == 1
     assert list(export_routes.facts_for(result[0]))[0][1]["qtd"] == "4"
-    assert len(export_routes.export_sheets(lambda: pytest.fail("BaseDados must not read SQLite"))) == 1
+    # BaseDados lê o SQLite só para as validadas ainda por gravar no
+    # histórico (sync_worker); o rascunho local nunca entra.
+    assert [s["uid"] for s in export_routes.export_sheets(main._conn)] == [uid]
+    monkeypatch.setattr(export_source, "load_validated_sheets", lambda *_: [])
+    assert export_routes.export_sheets(main._conn) == []
 
 
 def test_historical_key_locates_snapshot_but_ambiguous_key_is_a_diagnostic(monkeypatch, capsys):

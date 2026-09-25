@@ -102,7 +102,7 @@ def fingerprint(value):
 
 
 def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loader=None,
-          later_loader=None):
+          later_loader=None, complete_validated=False):
     """Saldo (quantidade em falta antes da produção) das linhas Perf. Comp.
 
     Regra única (25/09): a última carga do plano antes do dia de produção; se
@@ -110,7 +110,10 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
     que é cortada —, a primeira carga seguinte que a tenha, marcada como saldo
     aproximado. Se nenhuma tiver, a linha fica sem saldo e a validação avisa.
     """
-    if sheet.get("status") == "validated":
+    # Uma folha validada tem os factos congelados. A única exceção é o
+    # sync_worker a completar um saldo que falhou por falta de ligação
+    # (``transient``) antes de gravar no Postgres.
+    if sheet.get("status") == "validated" and not complete_validated:
         return
     if later_loader is None:
         # Com um loader de teste explícito não se vai ao Postgres por omissão.
@@ -193,6 +196,9 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
         except Exception as exc:
             # Failure cannot silently reuse current-plan quantities or invent zero.
             basis["diagnostic"] = str(exc)[:300] if isinstance(exc, ValueError) else "Histórico do plano indisponível. Tenta verificar novamente."
+            if not isinstance(exc, ValueError):
+                # Falha de ligação, não dos dados: o sync_worker volta a tentar.
+                basis["transient"] = True
             rc.update(plan_refs=[], plan_refs_valid=False, plan_refs_error=basis["diagnostic"],
                       full_profile_quantity=None, plan_length_mm=None,
                       plan_line_meters=None, line_meters=None)
@@ -208,6 +214,11 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
         measured = summary.get("metros_produzidos")
         summary["desperdicio_m"] = (round(measured-total, 2) if measured is not None
             and total is not None and not summary["metros_parciais"] else None)
+
+
+def has_transient_gap(cross) -> bool:
+    return any((r.get("quantity_basis") or {}).get("transient")
+               for r in (cross or {}).get("rows", []))
 
 
 def needs_refresh(sheet):

@@ -30,28 +30,38 @@ def export_sheets(conn_fn, de="", ate="", operador="", *, drafts=False):
             pg_store.normalize_sheet_date(value)
     sheets = export_source.load_validated_sheets(de, ate, operador)
     seen = {sheet["uid"] for sheet in sheets}
-    if drafts:
-        conn = conn_fn()
-        try:
-            for meta in db.list_sheets(conn):
-                if meta["status"] == "validated" or meta["uid"] in seen or "paragens" in meta["template_name"]:
-                    continue
-                sheet = db.get_sheet(conn, meta["uid"])
-                if not sheet or not sheet.get("sheet_data"):
-                    continue
-                header = sheet["sheet_data"].get("header") or {}
-                if operador and str(header.get("operador") or "").strip() != operador:
-                    continue
-                try:
-                    date = pg_store.normalize_sheet_date(header.get("data"))
-                except pg_store.InvalidSheetDate:
-                    date = None
-                if (de and (not date or date < de)) or (ate and (not date or date > ate)):
-                    continue
-                sheets.append(sheet)
-        finally:
-            conn.close()
-    return export_source.prepare_sheets(sheets) if drafts else sheets
+    added = False
+    # Validadas que ainda não chegaram ao histórico (sync_worker) entram
+    # sempre a partir do SQLite: validadas não podem desaparecer da exportação
+    # só porque o túnel esteve em baixo. Rascunhos só quando pedidos.
+    conn = conn_fn()
+    try:
+        for meta in db.list_sheets(conn):
+            if meta["uid"] in seen or "paragens" in meta["template_name"]:
+                continue
+            unsynced = (meta["status"] == "validated"
+                        and meta.get("sync_state") in db.SYNC_WAITING)
+            if meta["status"] == "validated" and not unsynced:
+                continue
+            if not drafts and not unsynced:
+                continue
+            sheet = db.get_sheet(conn, meta["uid"])
+            if not sheet or not sheet.get("sheet_data"):
+                continue
+            header = sheet["sheet_data"].get("header") or {}
+            if operador and str(header.get("operador") or "").strip() != operador:
+                continue
+            try:
+                date = pg_store.normalize_sheet_date(header.get("data"))
+            except pg_store.InvalidSheetDate:
+                date = None
+            if (de and (not date or date < de)) or (ate and (not date or date > ate)):
+                continue
+            sheets.append(sheet)
+            added = True
+    finally:
+        conn.close()
+    return export_source.prepare_sheets(sheets) if added else sheets
 
 
 def workbook(kind, sheets):

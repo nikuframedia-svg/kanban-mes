@@ -54,12 +54,15 @@ def client(tmp_path, monkeypatch):
         return result
     monkeypatch.setattr(export_source, "load_validated_sheets", archive)
 
-    def fake_store(sheet, template, edit_count, actor):
+    def fake_store(sheet, template, edit_count, actor, **kwargs):
         stored_calls.append({"sheet": sheet, "template": template,
-                             "edit_count": edit_count, "actor": actor})
+                             "edit_count": edit_count, "actor": actor,
+                             "validated_at": kwargs.get("validated_at")})
         rows = (sheet["sheet_data"] or {}).get("rows") or []
-        return sum(1 for r in rows
-                   if any(v is not None and str(v).strip() != "" for v in r.values()))
+        count = sum(1 for r in rows
+                    if any(v is not None and str(v).strip() != "" for v in r.values()))
+        return pg_store.StoredSheetResult(
+            count, sheet["sheet_no"], sheet["sheet_no"] + 1, False)
 
     monkeypatch.setattr(pg_store, "store_validated_sheet", fake_store)
     monkeypatch.setattr(main, "PROCESS_IN_BACKGROUND", False)  # determinístico
@@ -871,21 +874,24 @@ def test_validate_colisao_de_numero_volta_a_folha_e_permite_retry(
         response = client.post(
             f"/sheet/{uid}/validate", data={"actor": "luis"}
         )
+    # O número é atribuído pelo histórico; um conflito que persiste depois
+    # das novas tentativas do pg_store fica «a gravar» e volta a tentar.
     assert response.status_code == 303
-    assert "erro=" in response.headers["location"]
-    page = client.get(response.headers["location"])
-    assert page.status_code == 200
-    assert "número público 1" in page.text
-    assert "Internal Server Error" not in page.text
+    assert "a_gravar=1" in response.headers["location"]
     conn = db.connect()
     try:
-        assert db.get_sheet(conn, uid)["status"] != "validated"
+        sheet = db.get_sheet(conn, uid)
+        assert sheet["status"] == "validated" and sheet["sync_state"] == "retry"
     finally:
         conn.close()
 
-    retry = client.post(f"/sheet/{uid}/validate", data={"actor": "luis"})
+    retry = client.post(f"/sheet/{uid}/sync-retry")
     assert retry.status_code == 303
-    assert "stored=" in retry.headers["location"]
+    conn = db.connect()
+    try:
+        assert db.get_sheet(conn, uid)["sync_state"] == "done"
+    finally:
+        conn.close()
 
 
 def test_validate_excecao_do_cross_nunca_devolve_erro_500(
@@ -972,26 +978,26 @@ def test_confirmacao_de_validacao_e_transitoria_sem_apagar_filtros(client):
     assert "url.searchParams.delete('operador')" not in page.text
 
 
-def test_validate_com_plano_indisponivel_grava_com_aviso(
+def test_validar_nao_consulta_o_plano_e_vale_a_carga_que_o_operador_viu(
     client, monkeypatch
 ):
     uid = create_sheet(client)
     edit(client, uid, "header.operador", "Ana")
     edit(client, uid, "header.data", "2026-08-31")
     edit(client, uid, "rows[0].of", "250001")
+    # Entretanto entrou outra carga: o clique não vai ao Postgres saber disso
+    # (decisão de 25/09) e grava o cruzamento que estava na folha.
     monkeypatch.setattr(
         main.loaders, "plan_snapshot_info",
-        lambda: {"snapshot_id": "snapshot-novo", "age_hours": 0.0},
+        lambda: pytest.fail("validar não sonda o plano no Postgres"),
     )
-    # O plano não se consegue confirmar: valida na mesma, com aviso (25/09).
     response = client.post(f"/sheet/{uid}/validate", data={
         "revision": get_revision(client, uid),
     })
     assert response.status_code == 303
     assert "erro=" not in response.headers["location"]
     assert len(client.stored_calls) == 1
-    codes = {w["code"] for w in client.stored_calls[0]["sheet"]["cross_check"]["validation_warnings"]}
-    assert codes & {"plano_indisponivel", "plano_mudou"}
+    assert client.stored_calls[0]["sheet"]["cross_check"]["snapshot_id"] == "test-snapshot"
     conn = db.connect()
     try:
         assert db.get_sheet(conn, uid)["status"] == "validated"
