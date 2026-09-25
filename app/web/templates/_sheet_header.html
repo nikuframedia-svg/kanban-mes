@@ -3,13 +3,12 @@
     {% set hc = header_cells.get(f) if header_cells and not is_raw else none %}
     {% set color = {'confirmed':'cc-match', 'corrected':'cc-match', 'review':'cc-warn', 'ambiguous':'cc-warn', 'missing':'cc-na', 'no_reference':'cc-na'}.get(hc.status, 'cc-na') if hc else '' %}
     <label class="hb-field header-field-{{ f }} {{ color }}">
-      <span class="lbl">{{ header_labels.get(f, (t.field_labels or {}).get(f, f)) }}{% if f in ('operador','data') %} *{% endif %}</span>
+      <span class="lbl">{{ header_labels.get(f, (t.field_labels or {}).get(f, f)) }}</span>
       {% if readonly %}
         <span class="header-value mono">{{ header.get(f) or '—' }}</span>
       {% else %}
         <input class="cell-input header-input" type="text" name="header_{{ f }}"
                value="{{ header.get(f) or '' }}" aria-label="{{ header_labels.get(f, f) }}"
-               {% if f in ('operador','data') %}required{% endif %}
                {% if f == 'data' %}placeholder="dd/mm/aaaa"{% endif %}>
       {% endif %}
     </label>

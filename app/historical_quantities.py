@@ -44,13 +44,35 @@ def select_snapshot(snapshots, value):
             "cutoff": cutoff.isoformat(), "timezone": "Europe/Lisbon"}
 
 
-def load_snapshot(value):
+def _plan_snapshots():
     from .pg_store import SOURCE_APP
     condition, params = (("dataset_id = %s", ("ds-met2-perfis",))
                          if SOURCE_APP == "kanban-mes-mtg2" else
                          ("snapshot_id LIKE %s", (loaders._CANTONEIRAS_LIKE,)))
-    snapshots = loaders._fetch("SELECT snapshot_id, loaded_at FROM audit_mtg.snapshots WHERE " + condition, params)
-    return select_snapshot(snapshots, value)
+    return loaders._fetch("SELECT snapshot_id, loaded_at FROM audit_mtg.snapshots WHERE " + condition, params)
+
+
+def load_snapshot(value):
+    return select_snapshot(_plan_snapshots(), value)
+
+
+def select_later_snapshots(snapshots, value):
+    """Cargas a partir do dia de produção, da mais antiga para a mais recente."""
+    cutoff = production_cutoff(value)
+    later = []
+    for item in snapshots:
+        loaded = item.get("loaded_at") or item.get("snapshot_loaded_at")
+        if isinstance(loaded, str):
+            loaded = datetime.fromisoformat(loaded.replace("Z", "+00:00"))
+        if loaded is not None and loaded.tzinfo is not None and loaded >= cutoff:
+            later.append((loaded, str(item["snapshot_id"])))
+    return [{"snapshot_id": sid, "loaded_at": loaded.isoformat(),
+             "cutoff": cutoff.isoformat(), "timezone": "Europe/Lisbon"}
+            for loaded, sid in sorted(later)]
+
+
+def load_later_snapshots(value):
+    return select_later_snapshots(_plan_snapshots(), value)
 
 
 def load_order(snapshot_id, order):
@@ -79,13 +101,42 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loader=None):
-    if sheet.get("status") == "validated":
+def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loader=None,
+          later_loader=None, complete_validated=False):
+    """Saldo (quantidade em falta antes da produção) das linhas Perf. Comp.
+
+    Regra única (25/09): a última carga do plano antes do dia de produção; se
+    essa não tiver a OF + perfil — uma OF que entra no plano no próprio dia em
+    que é cortada —, a primeira carga seguinte que a tenha, marcada como saldo
+    aproximado. Se nenhuma tiver, a linha fica sem saldo e a validação avisa.
+    """
+    # Uma folha validada tem os factos congelados. A única exceção é o
+    # sync_worker a completar um saldo que falhou por falta de ligação
+    # (``transient``) antes de gravar no Postgres.
+    if sheet.get("status") == "validated" and not complete_validated:
         return
+    if later_loader is None:
+        # Com um loader de teste explícito não se vai ao Postgres por omissão.
+        later_loader = load_later_snapshots if snapshot_loader is None else (lambda value: [])
     snapshot_loader = snapshot_loader or load_snapshot
     order_loader = order_loader or load_order
     previous = {r["row_index"]: r for r in (sheet.get("cross_check") or {}).get("rows", [])}
-    selected, orders = None, {}
+    loaded_snapshots: dict[str, object] = {}
+    orders = {}
+
+    def candidates(day):
+        """(carga, aproximado) por ordem de preferência; cada lista uma vez."""
+        if "before" not in loaded_snapshots:
+            try:
+                loaded_snapshots["before"] = snapshot_loader(day)
+            except ValueError:
+                loaded_snapshots["before"] = None
+        if loaded_snapshots["before"] is not None:
+            yield loaded_snapshots["before"], False
+        if "later" not in loaded_snapshots:
+            loaded_snapshots["later"] = later_loader(day)
+        for later in loaded_snapshots["later"]:
+            yield later, True
     for rc in cross.get("rows", []):
         i = rc["row_index"]
         row = data["rows"][i]
@@ -110,15 +161,21 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
                 continue
             if not ctx["of"] or not ctx["profile"] or ctx["unresolved"]:
                 raise ValueError("OF e perfil físico precisam de identificação inequívoca.")
-            if not rc.get("matched_plan_key") or rc.get("mode") in {"weak_guess", "no_match"} or rc.get("review_required"):
-                raise ValueError("A correspondência da linha precisa de confirmação.")
-            if selected is None:
-                selected = snapshot_loader(ctx["date"])
+            # O saldo é da OF + perfil escritos na linha, não da ligação ao
+            # plano: uma correspondência fraca já não o impede (aviso à parte).
+            chosen = None
+            for snapshot, approximate in candidates(ctx["date"]):
+                key = (snapshot["snapshot_id"], ctx["of"])
+                if key not in orders:
+                    orders[key] = order_loader(*key)
+                found = [e for e in orders[key] if profile_key(e.get("profile_type")) == ctx["profile"]]
+                if found:
+                    chosen = (snapshot, approximate, found)
+                    break
+            if chosen is None:
+                raise ValueError("Sem referências para OF + perfil em nenhuma carga guardada do plano.")
+            selected, approximate, entries = chosen
             basis.update(selected)
-            key = (selected["snapshot_id"], ctx["of"])
-            if key not in orders:
-                orders[key] = order_loader(*key)
-            entries = [e for e in orders[key] if profile_key(e.get("profile_type")) == ctx["profile"]]
             identities = [(canonical_code(e.get("component_ref")), profile_key(e.get("profile_type")),
                            str(e.get("length_mm"))) for e in entries]
             for entry in entries:
@@ -133,10 +190,15 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
             if not expanded["plan_refs_valid"]:
                 raise ValueError(expanded["plan_refs_error"])
             rc.update(expanded)
-            basis.update(status="ready", diagnostic="last_snapshot_before_production_day")
+            basis.update(status="ready", approximate=approximate,
+                         diagnostic=("first_snapshot_with_order_after_production_day"
+                                     if approximate else "last_snapshot_before_production_day"))
         except Exception as exc:
             # Failure cannot silently reuse current-plan quantities or invent zero.
             basis["diagnostic"] = str(exc)[:300] if isinstance(exc, ValueError) else "Histórico do plano indisponível. Tenta verificar novamente."
+            if not isinstance(exc, ValueError):
+                # Falha de ligação, não dos dados: o sync_worker volta a tentar.
+                basis["transient"] = True
             rc.update(plan_refs=[], plan_refs_valid=False, plan_refs_error=basis["diagnostic"],
                       full_profile_quantity=None, plan_length_mm=None,
                       plan_line_meters=None, line_meters=None)
@@ -152,6 +214,11 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
         measured = summary.get("metros_produzidos")
         summary["desperdicio_m"] = (round(measured-total, 2) if measured is not None
             and total is not None and not summary["metros_parciais"] else None)
+
+
+def has_transient_gap(cross) -> bool:
+    return any((r.get("quantity_basis") or {}).get("transient")
+               for r in (cross or {}).get("rows", []))
 
 
 def needs_refresh(sheet):

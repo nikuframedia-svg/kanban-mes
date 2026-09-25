@@ -15,9 +15,11 @@ def client(tmp_path, monkeypatch):
         AssertionError("paragens não deviam pedir índice do plano")))
     stored: list = []
 
-    def fake_store(sheet, template, edit_count, actor):
+    def fake_store(sheet, template, edit_count, actor, **_kwargs):
         stored.append(template.name)
-        return len((sheet["sheet_data"] or {}).get("rows") or [])
+        return pg_store.StoredSheetResult(
+            len((sheet["sheet_data"] or {}).get("rows") or []),
+            sheet["sheet_no"], sheet["sheet_no"] + 1, False)
 
     monkeypatch.setattr(pg_store, "store_validated_sheet", fake_store)
     monkeypatch.setattr(main, "PROCESS_IN_BACKGROUND", False)  # determinístico

@@ -14,6 +14,7 @@ from typing import Iterator
 
 from fpdf import FPDF
 
+from .. import db
 from ..templates_spec import KanbanTemplate
 
 _LOCAL_FONT_DIR = Path(__file__).resolve().parent / "fonts"
@@ -178,10 +179,13 @@ def sheet_pdf(sheet: dict, template: KanbanTemplate, edit_count: int) -> bytes:
     # imprime; um nome escrito de propósito (dados antigos) continua a sair.
     quem = sheet.get("validated_by")
     quem_s = f" · {quem}" if quem and quem != "operador" else ""
-    estado = (
-        f"VALIDADA{quem_s} · {sheet.get('validated_at')}"
-        if validated else "RASCUNHO — ainda não validada"
-    )
+    if not validated:
+        estado = "RASCUNHO — ainda não validada"
+    elif sheet.get("sync_state") in db.SYNC_WAITING:
+        # O número só é definitivo quando o histórico o confirmar.
+        estado = f"VALIDADA{quem_s} · {sheet.get('validated_at')} · a gravar (n.º provisório)"
+    else:
+        estado = f"VALIDADA{quem_s} · {sheet.get('validated_at')}"
     public_no = sheet.get("sheet_no") or sheet.get("uid", "")[:8]
     _brand_header(pdf, family, template.label, f"Folha {public_no} · {estado}")
 

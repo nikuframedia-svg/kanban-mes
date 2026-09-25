@@ -6,40 +6,47 @@ Todas as funções degradam graciosamente: Postgres em baixo → {"available": F
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 
-from ..config import settings
+from .. import pg
+from ..matching import loaders
+from ..matching.similarity import strip_ref_prefix
 
-# regex em vez de LIKE: um '%' literal no SQL colide com os placeholders do psycopg
-_LATEST_KANBAN_MTG3 = (
-    "(SELECT snapshot_id FROM analytics_mtg.kanban_plan_lines "
-    "WHERE source_app = 'kanban-mes' "
-    "ORDER BY snapshot_loaded_at DESC, snapshot_id DESC LIMIT 1)"
-)
+
+def of_key(value: object) -> str:
+    """OF sem prefixo: o plano guarda «OF263210», os registos «263210».
+
+    Sem isto, o Estado nunca juntava plano e produção da mesma OF (cada uma
+    aparecia duas vezes: uma «sem produção», outra «sem plano»)."""
+    return strip_ref_prefix(value).upper()
+
+
+def _of_variants(of: str) -> list[str]:
+    bare = of_key(of)
+    return [bare, "OF" + bare]
+
 _LATEST_CHAPA_BATCH = (
     "(SELECT batch_id FROM audit_mtg.chapa_batches ORDER BY loaded_at DESC LIMIT 1)"
 )
 
 
-def _dsn() -> str:
-    return os.environ.get("MES_PG_DSN") or settings.pg_dsn
-
-
 def _fetch(sql: str, params: tuple = ()) -> list[dict]:
-    import psycopg
-    from psycopg.rows import dict_row
-
-    with psycopg.connect(_dsn(), row_factory=dict_row, connect_timeout=5) as conn:
-        conn.read_only = True
-        with conn.cursor() as cur:
-            cur.execute(sql, params if params else None)
-            return cur.fetchall()
+    return pg.fetch(sql, params if params else None)
 
 
-def fetch_plan_rows() -> list[dict]:
+def _current_snapshot_id() -> str | None:
+    """O mesmo snapshot do índice do plano (uma linha de audit_mtg.snapshots).
+
+    Perguntá-lo à vista kanban_plan_lines obrigava o Postgres a percorrer
+    todas as cargas guardadas de perfis e cantoneiras (~1,2 s medidos).
+    """
+    return (loaders.plan_snapshot_info() or {}).get("snapshot_id")
+
+
+def fetch_plan_rows(snapshot_id: str | None = None) -> list[dict]:
     """Plano agregado por OF, ambas as famílias, snapshot mais recente."""
-    cantoneiras = _fetch(f"""
+    snapshot_id = snapshot_id or _current_snapshot_id()
+    cantoneiras = _fetch("""
         SELECT max(customer_name) AS cliente, max(sales_order_no) AS ov,
                production_order_no AS of, 'cantoneiras' AS familia,
                CASE WHEN bool_and(quantity_planned IS NOT NULL)
@@ -51,9 +58,9 @@ def fetch_plan_rows() -> list[dict]:
                min(planning_week) AS semana
         FROM analytics_mtg.kanban_plan_lines
         WHERE source_app = 'kanban-mes'
-          AND snapshot_id = {_LATEST_KANBAN_MTG3}
+          AND snapshot_id = %s
         GROUP BY production_order_no
-    """)
+    """, (snapshot_id,)) if snapshot_id else []
     chapa = _fetch(f"""
         SELECT max(customer_name) AS cliente, max(sales_order_no) AS ov,
                production_order_no AS of, 'chapa' AS familia,
@@ -94,9 +101,11 @@ def fetch_mes_kpis() -> dict:
     return rows[0] if rows else {"folhas": 0, "registos": 0}
 
 
-def fetch_of_detail(of: str) -> dict:
+def fetch_of_detail(of: str, snapshot_id: str | None = None) -> dict:
+    variants = _of_variants(of)
     """Drill-down de uma OF: componentes do plano + folhas validadas."""
-    plan = _fetch(f"""
+    snapshot_id = snapshot_id or _current_snapshot_id()
+    plan = _fetch("""
         SELECT component_ref AS modelo, profile_type AS perfil,
                length_mm AS comp_mm, quantity_planned AS qtd_planeada,
                CASE WHEN remaining_valid IS TRUE THEN remaining_quantity
@@ -107,31 +116,31 @@ def fetch_of_detail(of: str) -> dict:
                plan_key, snapshot_id
         FROM analytics_mtg.kanban_plan_lines
         WHERE source_app = 'kanban-mes'
-          AND snapshot_id = {_LATEST_KANBAN_MTG3}
-          AND production_order_no = %s
+          AND snapshot_id = %s
+          AND production_order_no = ANY(%s)
         ORDER BY component_ref, plan_key
         LIMIT 200
-    """, (of,))
+    """, (snapshot_id, variants)) if snapshot_id else []
     if not plan:
         plan = _fetch(f"""
             SELECT component_ref AS modelo, material_quality AS perfil,
                    thickness_mm AS comp_mm, quantity_plan AS qtd_planeada,
                    cut_remaining_quantity AS qtd_restante, cutting_machine AS maquina
             FROM core_mtg.chapa_components
-            WHERE batch_id = {_LATEST_CHAPA_BATCH} AND production_order_no = %s
+            WHERE batch_id = {_LATEST_CHAPA_BATCH} AND production_order_no = ANY(%s)
             ORDER BY component_ref
             LIMIT 200
-        """, (of,))
+        """, (variants,))
     produced = _fetch("""
         SELECT p.sheet_uid, s.sheet_no, p.row_index, p.sheet_date,
                p.operator_name, p.machine, p.model_ref, p.quantity,
                p.match_confidence
         FROM mes_kanban.production_records p
         JOIN mes_kanban.validated_sheets s ON s.sheet_uid = p.sheet_uid
-        WHERE s.source_app = 'kanban-mes' AND p.production_order = %s
+        WHERE s.source_app = 'kanban-mes' AND p.production_order = ANY(%s)
         ORDER BY p.sheet_date DESC, p.sheet_uid, p.row_index
         LIMIT 200
-    """, (of,))
+    """, (variants,))
     return {"plan": plan, "produced": produced}
 
 
@@ -139,7 +148,8 @@ def merge_by_of(plan_rows: list[dict], validated_rows: list[dict]) -> list[dict]
     """Full outer join por OF. OFs validadas sem plano ficam assinaladas."""
     out: dict[str, dict] = {}
     for p in plan_rows:
-        of = str(p["of"])
+        of = of_key(p["of"])
+        shown = str(p["of"])
         planeada = (float(p["qtd_planeada"])
                     if p.get("qtd_planeada") is not None else None)
         restante = (float(p["qtd_restante"])
@@ -149,7 +159,7 @@ def merge_by_of(plan_rows: list[dict], validated_rows: list[dict]) -> list[dict]
             if planeada is not None and restante is not None else None
         )
         out[of] = {
-            "of": of,
+            "of": shown,
             "cliente": p.get("cliente"),
             "ov": p.get("ov"),
             "familia": p.get("familia"),
@@ -168,11 +178,12 @@ def merge_by_of(plan_rows: list[dict], validated_rows: list[dict]) -> list[dict]
             "sem_plano": False,
         }
     for v in validated_rows:
-        of = str(v["of"])
+        of = of_key(v["of"])
+        shown = str(v["of"])
         row = out.get(of)
         if row is None:
             row = out[of] = {
-                "of": of,
+                "of": shown,
                 "cliente": v.get("cliente"),
                 "ov": v.get("ov"),
                 "familia": v.get("familia"),

@@ -1,22 +1,23 @@
 """A ÚNICA porta de escrita para o Postgres.
 
-Chamado exclusivamente no ato de validação humana: insere a folha validada e as
-suas linhas em mes_kanban (append-only). Tudo o resto da app só lê do Postgres.
+Chamado pelo sync_worker depois da validação humana: insere a folha validada e
+as suas linhas em mes_kanban (append-only). Tudo o resto da app só lê do Postgres.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from pathlib import PurePath
 
 import psycopg
 
-from .config import settings
+from . import pg
 from .matching import similarity as sim
 from .production_facts import materialize_sheet
+from .validation_warnings import for_row as warnings_for_row
 from .templates_spec import LEGACY_FIELD_ALIASES, KanbanTemplate, is_marked
 
 APP_VERSION = "kanban-mes 0.1.0"
@@ -51,10 +52,16 @@ _OPTIONAL_COLUMNS = ("profile_type", "full_profile", "plan_quantity",
                      "plan_snapshot_id")
 
 SOURCE_APP = "kanban-mes"
+# Numeração pública atribuída pelo histórico (como nos perfis): um número
+# provisório local já ocupado deixa de ser um erro que o operador não
+# consegue resolver. Chave própria desta app para o bloqueio consultivo.
+_SHEET_NUMBER_LOCK_KEY = 323417719601
+_SHEET_NUMBER_INDEX = "validated_sheets_source_app_sheet_no_uidx"
+_STORE_ATTEMPTS = 3
 
 
 def _dsn() -> str:
-    return os.environ.get("MES_PG_DSN") or settings.pg_dsn
+    return pg.dsn()
 
 
 # dd/mm/aaaa, dd-mm-aa, aaaa-mm-dd… — o que os operadores escrevem de facto
@@ -73,6 +80,22 @@ class SheetNumberConflict(RuntimeError):
     def __init__(self, sheet_no: object):
         self.sheet_no = sheet_no
         super().__init__(f"número público {sheet_no} já utilizado")
+
+
+class SheetNumberingConfigurationError(RuntimeError):
+    """O histórico não oferece o contrato necessário para numerar folhas."""
+
+
+class SheetIdentityConflict(RuntimeError):
+    """O UID já existe no histórico, mas não pertence a esta aplicação."""
+
+
+@dataclass(frozen=True)
+class StoredSheetResult:
+    row_count: int
+    sheet_no: int
+    next_sheet_no: int
+    already_stored: bool
 
 
 def normalize_sheet_date(raw: object) -> str:
@@ -100,13 +123,43 @@ def normalize_sheet_date(raw: object) -> str:
         raise InvalidSheetDate(text) from exc
 
 
-def _columns_present(cur, table: str = "production_records") -> set[str]:
+_SCHEMA_TABLES = ("validated_sheets", "production_records",
+                  "production_record_plan_refs", "stoppage_records")
+_INDEXES = "__indexes__"
+
+
+def _schema(cur) -> dict[str, set[str]]:
+    """Colunas das tabelas de escrita e índice de numeração numa só ida.
+
+    Continua a ser sondado em cada gravação (a ordem entre o deploy do código e
+    o SQL não pode importar), mas numa consulta e não numa por tabela: pelo
+    túnel da fábrica cada ida custa ~70 ms.
+    """
     cur.execute(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = 'mes_kanban' AND table_name = %s",
-        (table,),
+        "SELECT table_name::text, column_name::text FROM information_schema.columns "
+        "WHERE table_schema = 'mes_kanban' AND table_name = ANY(%s) "
+        "UNION ALL "
+        "SELECT %s, indexname::text FROM pg_indexes "
+        "WHERE schemaname = 'mes_kanban' AND tablename = 'validated_sheets' "
+        "AND indexname = %s",
+        (list(_SCHEMA_TABLES), _INDEXES, _SHEET_NUMBER_INDEX),
     )
-    return {r[0] for r in cur.fetchall()}
+    schema: dict[str, set[str]] = {name: set() for name in (*_SCHEMA_TABLES, _INDEXES)}
+    for table, column in cur.fetchall():
+        schema.setdefault(table, set()).add(column)
+    return schema
+
+
+def _insert_returning_ids(cur, sql: str, params_seq: list[tuple]) -> list[int]:
+    """INSERT … RETURNING id de várias linhas numa só ida (pipeline)."""
+    if not params_seq:
+        return []
+    cur.executemany(sql, params_seq, returning=True)
+    ids = []
+    while True:
+        ids.append(cur.fetchone()[0])
+        if not cur.nextset():
+            return ids
 
 
 # Como o upload/ingest gravam as páginas de PDF: {sha16}_{stem-do-pdf}_pNN.png
@@ -134,39 +187,117 @@ def source_from_image_path(image_path: object) -> tuple[str | None, int | None]:
 
 def _store_stoppages(cur, sheet: dict, header: dict, filled: list,
                      sheet_date: str | None, operator: str,
-                     operator_pernr: str | None = None) -> int:
+                     operator_pernr: str | None = None,
+                     validated_at: str | None = None) -> int:
     """Linhas do verso da folha (paragens) → mes_kanban.stoppage_records."""
     machine = str(header.get("setor_maquina") or "").strip() or None
-    n = 0
-    for i, row in filled:
-        cur.execute(
+    params = [
+        (
+            sheet["uid"], i, sheet_date, machine,
+            operator or "(desconhecido)",
+            str(row.get("motivo") or "").strip() or None,
+            str(row.get("inicio") or "").strip() or None,
+            str(row.get("fim") or "").strip() or None,
+            sim.parse_number(row.get("duracao")),
+            str(row.get("resolvido") or "").strip() or None,
+            operator_pernr, validated_at,
+        )
+        for i, row in filled
+    ]
+    if params:
+        # executemany envia as linhas em pipeline: uma ida para todas
+        cur.executemany(
             """
             INSERT INTO mes_kanban.stoppage_records
                 (sheet_uid, row_index, sheet_date, machine, operator_name,
                  motivo, inicio, fim, duracao_horas, resolvido,
                  operator_pernr, validated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    COALESCE(%s::timestamptz, now()))
             """,
-            (
-                sheet["uid"], i, sheet_date, machine,
-                operator or "(desconhecido)",
-                str(row.get("motivo") or "").strip() or None,
-                str(row.get("inicio") or "").strip() or None,
-                str(row.get("fim") or "").strip() or None,
-                sim.parse_number(row.get("duracao")),
-                str(row.get("resolvido") or "").strip() or None,
-                operator_pernr,
-            ),
+            params,
         )
-        n += 1
-    return n
+    return len(params)
+
+
+def _numbering_schema_ready(schema: dict[str, set[str]]) -> bool:
+    return ({"source_app", "sheet_no"} <= schema["validated_sheets"]
+            and _SHEET_NUMBER_INDEX in schema[_INDEXES])
+
+
+def _next_number(cur, sheet_no: int, minimum_sheet_no: int) -> int:
+    cur.execute(
+        "SELECT COALESCE(MAX(sheet_no), 0) FROM mes_kanban.validated_sheets "
+        "WHERE source_app = %s", (SOURCE_APP,),
+    )
+    return max(int(cur.fetchone()[0] or 0), sheet_no, minimum_sheet_no - 1) + 1
+
+
+def _existing(cur, sheet: dict, minimum_sheet_no: int) -> StoredSheetResult | None:
+    """A folha JÁ está no Postgres (o commit anterior confirmou e o que falhou
+    foi a confirmação local): devolve-se o que existe, sem duplicar."""
+    cur.execute(
+        "SELECT source_app, sheet_no FROM mes_kanban.validated_sheets "
+        "WHERE sheet_uid = %s",
+        (sheet["uid"],),
+    )
+    existing = cur.fetchone()
+    if not existing:
+        return None
+    source_app, raw_sheet_no = existing
+    if source_app != SOURCE_APP:
+        raise SheetIdentityConflict(
+            f"a folha {sheet['uid']} já existe no histórico com source_app={source_app!r}")
+    try:
+        historic_sheet_no = int(raw_sheet_no)
+    except (TypeError, ValueError) as exc:
+        raise SheetIdentityConflict(
+            f"a folha {sheet['uid']} existe no histórico sem número válido") from exc
+    if historic_sheet_no < 1:
+        raise SheetIdentityConflict(
+            f"a folha {sheet['uid']} existe no histórico sem número válido")
+    cur.execute(
+        "SELECT (SELECT count(*) FROM mes_kanban.production_records WHERE sheet_uid = %s), "
+        "       (SELECT count(*) FROM mes_kanban.stoppage_records WHERE sheet_uid = %s)",
+        (sheet["uid"], sheet["uid"]),
+    )
+    n_prod, n_stop = cur.fetchone()
+    return StoredSheetResult(int(n_prod or n_stop), historic_sheet_no,
+                             _next_number(cur, historic_sheet_no, minimum_sheet_no), True)
 
 
 def store_validated_sheet(sheet: dict, template: KanbanTemplate,
-                          edit_count: int, actor: str) -> int:
-    """Insere a folha + linhas. Devolve o nº de linhas de produção gravadas.
-    Lança em caso de erro — o chamador não deve marcar a folha como validada
-    sem este INSERT ter sido confirmado."""
+                          edit_count: int, actor: str, *,
+                          minimum_sheet_no: int = 1,
+                          validated_at: str | None = None) -> StoredSheetResult:
+    """Grava uma folha e atribui o número definitivo no mesmo commit.
+
+    ``validated_at`` é a hora do clique em Validar (a gravação pode ser
+    minutos depois, pelo sync_worker). Idempotente pelo UID."""
+    try:
+        minimum_sheet_no = max(1, int(minimum_sheet_no))
+    except (TypeError, ValueError):
+        minimum_sheet_no = 1
+    last_error: psycopg.errors.UniqueViolation | None = None
+    for attempt in range(_STORE_ATTEMPTS):
+        try:
+            return _store_validated_sheet_once(
+                sheet, template, edit_count, actor, minimum_sheet_no, validated_at)
+        except psycopg.errors.UniqueViolation as exc:
+            if exc.diag.constraint_name not in {
+                    _SHEET_NUMBER_INDEX, "validated_sheets_pkey"}:
+                raise
+            last_error = exc
+            if attempt + 1 == _STORE_ATTEMPTS:
+                break
+    raise SheetNumberConflict(sheet.get("sheet_no")) from last_error
+
+
+def _store_validated_sheet_once(sheet: dict, template: KanbanTemplate,
+                                edit_count: int, actor: str, minimum_sheet_no: int,
+                                validated_at: str | None) -> StoredSheetResult:
+    """Uma tentativa transacional de gravar a folha e as suas linhas.
+    Lança em caso de erro — nada fica meio gravado."""
     data = sheet["sheet_data"] or {}
     header = data.get("header") or {}
     rows = data.get("rows") or []
@@ -195,32 +326,41 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 for k, v in row.items())
     ]
 
-    with psycopg.connect(_dsn(), connect_timeout=10) as conn:
+    with pg.write_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT 1 FROM mes_kanban.validated_sheets WHERE sheet_uid = %s",
-                (sheet["uid"],),
-            )
-            if cur.fetchone():
-                # A folha JÁ está no Postgres (o INSERT anterior confirmou e o
-                # que falhou foi marcar o staging): o commit é atómico, por
-                # isso as linhas também lá estão — repetir daria colisão de PK
-                # e um 500 permanente. Devolve-se o que existe.
-                cur.execute(
-                    "SELECT count(*) FROM mes_kanban.production_records WHERE sheet_uid = %s",
-                    (sheet["uid"],),
-                )
-                n_prod = cur.fetchone()[0]
-                if n_prod:
-                    return n_prod
-                cur.execute(
-                    "SELECT count(*) FROM mes_kanban.stoppage_records WHERE sheet_uid = %s",
-                    (sheet["uid"],),
-                )
-                return cur.fetchone()[0]
             # Proveniência sondada como as outras colunas opcionais: a ordem
             # entre deploy do código e aplicação do sql/016 não pode importar.
-            validated_present = _columns_present(cur, "validated_sheets")
+            schema = _schema(cur)
+            if not _numbering_schema_ready(schema):
+                raise SheetNumberingConfigurationError(
+                    "faltam source_app, sheet_no ou o índice único de numeração")
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (_SHEET_NUMBER_LOCK_KEY,))
+            stored = _existing(cur, sheet, minimum_sheet_no)
+            if stored is not None:
+                return stored
+            validated_present = schema["validated_sheets"]
+            cur.execute(
+                "SELECT COALESCE(MAX(sheet_no), 0) FROM mes_kanban.validated_sheets "
+                "WHERE source_app = %s", (SOURCE_APP,),
+            )
+            historic_max = int(cur.fetchone()[0] or 0)
+            try:
+                proposed_no = int(sheet.get("sheet_no"))
+            except (TypeError, ValueError):
+                proposed_no = 0
+            number_free = False
+            if proposed_no > 0:
+                cur.execute(
+                    "SELECT 1 FROM mes_kanban.validated_sheets "
+                    "WHERE source_app = %s AND sheet_no = %s",
+                    (SOURCE_APP, proposed_no),
+                )
+                number_free = cur.fetchone() is None
+            # O número local é só uma proposta: se já está usado no
+            # histórico, o histórico dá o seguinte livre.
+            sheet_no = (proposed_no if number_free else
+                        max(minimum_sheet_no, historic_max + 1, 1))
+            next_sheet_no = max(historic_max, sheet_no, minimum_sheet_no - 1) + 1
             source_columns = [
                 name for name in (
                     "source_filename", "source_page", "source_app",
@@ -233,13 +373,13 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
             source_values = {"source_filename": source_filename,
                              "source_page": source_page,
                              "source_app": SOURCE_APP,
-                             "sheet_no": sheet.get("sheet_no"),
+                             "sheet_no": sheet_no,
                              "plan_snapshot_id": cross.get("snapshot_id")}
             validated_columns = (
                 "sheet_uid, sheet_date, template_name, family, operator_name, "
                 "operator_no, sector_machine, shift, image_sha256, "
                 "raw_extraction, sheet_data, cross_check, edit_count, "
-                "validated_by, app_version, operator_pernr, operator_match_rule"
+                "validated_by, app_version, operator_pernr, operator_match_rule, validated_at"
                 + "".join(f", {name}" for name in source_columns)
             )
             validated_values = (
@@ -254,35 +394,21 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 json.dumps(cross, ensure_ascii=False, default=str),
                 edit_count, actor, APP_VERSION,
                 operator_pernr, operator_rule,
+                # A hora do clique em Validar, não a da gravação por trás.
+                validated_at or datetime.now(timezone.utc).isoformat(),
                 *[source_values[name] for name in source_columns],
             )
-            sheet_no = sheet.get("sheet_no")
-            if ({"source_app", "sheet_no"}.issubset(validated_present)
-                    and sheet_no is not None):
-                cur.execute(
-                    "SELECT sheet_uid FROM mes_kanban.validated_sheets "
-                    "WHERE source_app = %s AND sheet_no = %s AND sheet_uid <> %s",
-                    (SOURCE_APP, sheet_no, sheet["uid"]),
-                )
-                if cur.fetchone():
-                    raise SheetNumberConflict(sheet_no)
-            try:
-                cur.execute(
-                    f"INSERT INTO mes_kanban.validated_sheets ({validated_columns}) "
-                    f"VALUES ({', '.join(['%s'] * len(validated_values))})",
-                    validated_values,
-                )
-            except psycopg.errors.UniqueViolation as exc:
-                # Cobre duas validações concorrentes entre a sonda e o INSERT.
-                if exc.diag.constraint_name == "validated_sheets_source_app_sheet_no_uidx":
-                    raise SheetNumberConflict(sheet_no) from exc
-                raise
+            cur.execute(
+                f"INSERT INTO mes_kanban.validated_sheets ({validated_columns}) "
+                f"VALUES ({', '.join(['%s'] * len(validated_values))})",
+                validated_values,
+            )
             if template.name == "cantoneiras_paragens":
                 n = _store_stoppages(cur, sheet, header, filled, sheet_date, operator,
-                                     operator_pernr)
+                                     operator_pernr, validated_at)
                 conn.commit()
-                return n
-            present = _columns_present(cur)
+                return StoredSheetResult(n, sheet_no, next_sheet_no, False)
+            present = schema["production_records"]
             optional = [c for c in _OPTIONAL_COLUMNS if c in present]
             sql = (
                 "INSERT INTO mes_kanban.production_records "
@@ -293,7 +419,7 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 " scrap, hours_worked, extra, operator_pernr, validated_at"
                 + "".join(f", {c}" for c in optional)
                 + ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-                  "%s, %s, %s, %s, %s, %s, %s, %s, %s, now()"
+                  "%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s::timestamptz, now())"
                 + ", %s" * len(optional)
                 + ") RETURNING id"
             )
@@ -301,11 +427,12 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
             refs_by_row: dict[int, list[dict]] = {}
             for ref in materialized["plan_refs"]:
                 refs_by_row.setdefault(ref["row_index"], []).append(ref)
-            if refs_by_row and not _columns_present(cur, "production_record_plan_refs"):
+            if refs_by_row and not schema["production_record_plan_refs"]:
                 raise RuntimeError(
                     "Migração production_record_plan_refs ainda não foi aplicada."
                 )
-            n = 0
+            record_params: list[tuple] = []
+            record_rows: list[int] = []
             for fact in materialized["parents"]:
                 i, row, cr = fact["row_index"], fact["row"], fact["cross"]
                 cells = {c["field"]: c for c in cr.get("cells", [])}
@@ -313,6 +440,9 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 extra: dict[str, object] = {"plan_identity": cr["plan_identity"]} if cr.get("plan_identity") else {}
                 if cr.get("quantity_basis"):
                     extra["quantity_basis"] = cr["quantity_basis"]
+                row_warnings = warnings_for_row(cross.get("validation_warnings"), i)
+                if row_warnings:
+                    extra["warnings"] = row_warnings
                 for f, value in row.items():
                     if value is None or str(value).strip() == "":
                         continue
@@ -349,51 +479,56 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                         cols[ref_col] = sim.strip_ref_prefix(cols[ref_col])
 
                 machine = row.get("maquina") or header.get("setor_maquina")
-                cur.execute(
-                    sql,
-                    (
-                        sheet["uid"], i, sheet_date, template.family,
-                        operator or "(desconhecido)",
-                        str(machine).strip() if machine else None,
-                        cols.get("production_order"), cols.get("sales_order"),
-                        cols.get("customer_name"), cols.get("model_ref"),
-                        cr.get("matched_plan_key"), cr.get("p_correct"),
-                        cols.get("quantity"), cols.get("length_mm"),
-                        cols.get("width_mm"), cols.get("thickness_mm"),
-                        cols.get("lot_ref"), cols.get("scrap"),
-                        hours_worked,
-                        json.dumps(extra, ensure_ascii=False, default=str) if extra else None,
-                        operator_pernr,
-                        *[cols.get(c) for c in optional],
-                    ),
+                record_params.append((
+                    sheet["uid"], i, sheet_date, template.family,
+                    operator or "(desconhecido)",
+                    str(machine).strip() if machine else None,
+                    cols.get("production_order"), cols.get("sales_order"),
+                    cols.get("customer_name"), cols.get("model_ref"),
+                    cr.get("matched_plan_key"), cr.get("p_correct"),
+                    cols.get("quantity"), cols.get("length_mm"),
+                    cols.get("width_mm"), cols.get("thickness_mm"),
+                    cols.get("lot_ref"), cols.get("scrap"),
+                    hours_worked,
+                    json.dumps(extra, ensure_ascii=False, default=str) if extra else None,
+                    operator_pernr, validated_at,
+                    *[cols.get(c) for c in optional],
+                ))
+                record_rows.append(i)
+            # Todas as linhas numa ida (pipeline) em vez de uma ida por linha;
+            # os ids voltam pela mesma ordem para ligar as referências.
+            record_ids = _insert_returning_ids(cur, sql, record_params)
+            ref_params = [
+                (
+                    production_record_id, sheet["uid"], i,
+                    ref.get("plan_snapshot_id"), ref.get("plan_key"),
+                    ref.get("component_ref"), ref.get("profile_type"),
+                    ref.get("length_mm"), ref.get("quantity_planned"),
+                    ref.get("quantity_made_before"),
+                    ref.get("remaining_before"),
+                    ref.get("overproduction_before"),
+                    ref.get("assumed_quantity"),
+                    ref.get("remaining_rule"),
+                    json.dumps({"source_app": SOURCE_APP, "plan_identity": ref}, ensure_ascii=False, default=str),
                 )
-                production_record_id = cur.fetchone()[0]
-                for ref in refs_by_row.get(i, ()):
-                    cur.execute(
-                        """
-                        INSERT INTO mes_kanban.production_record_plan_refs
-                            (production_record_id, sheet_uid, row_index,
-                             plan_snapshot_id, plan_key, component_ref,
-                             profile_type, length_mm, quantity_planned,
-                             quantity_made_before, remaining_before,
-                             overproduction_before, assumed_quantity,
-                             remaining_rule, extra)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            production_record_id, sheet["uid"], i,
-                            ref.get("plan_snapshot_id"), ref.get("plan_key"),
-                            ref.get("component_ref"), ref.get("profile_type"),
-                            ref.get("length_mm"), ref.get("quantity_planned"),
-                            ref.get("quantity_made_before"),
-                            ref.get("remaining_before"),
-                            ref.get("overproduction_before"),
-                            ref.get("assumed_quantity"),
-                            ref.get("remaining_rule"),
-                            json.dumps({"source_app": SOURCE_APP, "plan_identity": ref}, ensure_ascii=False, default=str),
-                        ),
-                    )
-                n += 1
+                for production_record_id, i in zip(record_ids, record_rows)
+                for ref in refs_by_row.get(i, ())
+            ]
+            if ref_params:
+                cur.executemany(
+                    """
+                    INSERT INTO mes_kanban.production_record_plan_refs
+                        (production_record_id, sheet_uid, row_index,
+                         plan_snapshot_id, plan_key, component_ref,
+                         profile_type, length_mm, quantity_planned,
+                         quantity_made_before, remaining_before,
+                         overproduction_before, assumed_quantity,
+                         remaining_rule, extra)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s)
+                    """,
+                    ref_params,
+                )
+            n = len(record_params)
         conn.commit()
-    return n
+    return StoredSheetResult(n, sheet_no, next_sheet_no, False)

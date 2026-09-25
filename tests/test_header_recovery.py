@@ -136,12 +136,16 @@ def test_ui_exposes_date_difference_without_separate_confirmation(client,tmp_pat
     assert page.status_code==200
     assert '21/08/2026' in page.text and '20/08/2026' in page.text
     assert 'Confirmar data pela regra' not in page.text
-    result=client.post(f'/sheet/{uid}/validate',data={'revision':after['revision']})
-    assert 'diverg' not in result.headers.get('location','')
-    assert not client.stored_calls
     confirmed=client.post(f'/sheet/{uid}/header-recovery/confirm-date',data={'revision':after['revision']})
     assert confirmed.status_code==303
     assert 'Confirmar data pela regra' not in client.get(f'/sheet/{uid}').text
+    # Nada bloqueia (25/09): validar não pede uma confirmação à parte da data.
+    with db.connect() as conn:
+        revision=db.get_sheet(conn,uid)['revision']
+    result=client.post(f'/sheet/{uid}/validate',data={'revision':revision})
+    assert 'diverg' not in result.headers.get('location','')
+    assert 'erro=' not in result.headers.get('location','')
+    assert len(client.stored_calls)==1
 
 
 def test_only_one_worker_and_lock_is_released_after_failure(tmp_path):

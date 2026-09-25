@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .. import db
+from ..matching import bindings as plan_bindings
 from ..matching import loaders, similarity as sim
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
@@ -107,7 +108,8 @@ def register(app, conn_fn, get_index, run_cross_check, sheet_location):
                 # binding, so these events are also their explicit group choice.
                 edits.append((f"rows[{row_index}].{field}", row.get(field), value, "human", "plan-picker"))
                 row[field] = value
-            binding = None if full else {"snapshot_id": sid, "plan_key": payload.plan_key, "selected_explicitly": True}
+            binding = None if full else {"snapshot_id": sid, "plan_key": payload.plan_key, "selected_explicitly": True,
+                                         "identity": plan_bindings.identity_of(chosen)}
             old_binding = row.pop("_plan_binding", None)
             if binding is not None:
                 row["_plan_binding"] = binding

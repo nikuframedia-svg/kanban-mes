@@ -20,7 +20,7 @@ import traceback
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from urllib.parse import unquote_plus, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -33,11 +33,13 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 
-from .. import db, imaging, image_storage, pg_store, production_facts
+from .. import db, imaging, image_storage, pg_store, production_facts, sync_worker, validation_warnings
 from ..config import settings
 from ..health import STARTUP_HEALTH
-from ..matching import carryover, header_cross, loaders, operador
+from ..matching import bindings as plan_bindings, carryover, header_cross, loaders, operador
 from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
@@ -49,13 +51,19 @@ from . import pdf as pdf_gen
 from . import review_writes
 from ..review_guard import cancel_pending
 
-class NoCacheStaticFiles(StaticFiles):
-    """Estáticos com revalidação obrigatória — o link leva ?v=<hash>, e isto
-    impede o browser/edge da Cloudflare de servir CSS velho a quem tem o URL antigo."""
+class VersionedStaticFiles(StaticFiles):
+    """Estáticos pedidos com ?v=<hash do conteúdo> ficam em cache para sempre:
+    o hash muda quando o ficheiro muda, portanto o URL antigo nunca serve CSS
+    velho. Sem ?v= revalida-se sempre (resposta 304 se não mudou).
+
+    Antes revalidava-se tudo, sempre: cada página aberta repetia meia dúzia de
+    pedidos pelo túnel só para ouvir «não mudou»."""
 
     async def get_response(self, path: str, scope):
         response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "no-cache"
+        versioned = "v" in dict(parse_qsl(scope.get("query_string", b"").decode()))
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable" if versioned else "no-cache")
         return response
 
 
@@ -78,20 +86,48 @@ async def _lifespan(app: FastAPI):
             threading.Thread(target=_process_batch, args=(stuck,), daemon=True).start()
     except Exception as exc:
         print(f"[arranque] retoma de pendentes falhou: {exc}", flush=True)
-    yield
+    # Validadas por gravar no histórico (inclui as que um restart apanhou).
+    sync_worker.start()
+    try:
+        yield
+    finally:
+        sync_worker.stop()
 
 
 app = FastAPI(title="Kanban MES", lifespan=_lifespan)
-app.mount("/static", NoCacheStaticFiles(directory=str(_STATIC_DIR)), name="static")
+# HTML e JSON comprimidos (uma página de revisão ~100 KB → ~15 KB). Imagens e
+# PDFs já comprimidos ficam de fora (lista por omissão do Starlette).
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.mount("/static", VersionedStaticFiles(directory=str(_STATIC_DIR)), name="static")
 @app.get("/health")
 def health():
     return dict(STARTUP_HEALTH)
 
 
+@app.get("/health/sync")
+def health_sync():
+    """Fila de gravação no histórico (para o Uptime Kuma): ``pending`` alto ou
+    ``oldest_validated_at`` antigo = o Postgres não está a receber. Fora do
+    /health, que o Caddy consulta a cada poucos segundos."""
+    conn = db.connect()
+    try:
+        return db.sync_summary(conn)
+    finally:
+        conn.close()
+
+
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-templates.env.globals["css_version"] = hashlib.sha1(
-    b"".join((_STATIC_DIR / name).read_bytes() for name in ("design.css", "review.js", "automatic-review.js", "row-actions.js", "review_edits.js"))
-).hexdigest()[:10]
+def _static_version() -> str:
+    """Hash de TODOS os estáticos: com cache «para sempre», um ficheiro fora
+    do hash chegaria velho aos browsers depois de uma atualização."""
+    digest = hashlib.sha1()
+    for path in sorted(p for p in _STATIC_DIR.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(_STATIC_DIR).as_posix().encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:10]
+
+
+templates.env.globals["css_version"] = _static_version()
 # a folha decide o que é uma marca; o template não repete a regra
 templates.env.globals["is_marked"] = is_marked
 templates.env.globals["review_token"] = review_writes.token
@@ -136,6 +172,18 @@ async def _html_post_validation_errors(request: Request,
     return JSONResponse({"detail": exc.errors()}, status_code=422)
 
 
+def _sheet_watermark() -> int:
+    try:
+        conn = _conn()
+        try:
+            row = conn.execute("SELECT MAX(rowid) AS m FROM sheets").fetchone()
+            return int(row["m"] or 0)
+        finally:
+            conn.close()
+    except Exception:
+        return 0
+
+
 @app.middleware("http")
 async def _attach_watermark(request: Request, call_next):
     """Marca de água = folha mais recente no momento do pedido.
@@ -152,15 +200,9 @@ async def _attach_watermark(request: Request, call_next):
         return await call_next(request)
     watermark = 0
     if request.method == "GET" and path in {"/", "/estado"}:
-        try:
-            conn = _conn()
-            try:
-                row = conn.execute("SELECT MAX(rowid) AS m FROM sheets").fetchone()
-                watermark = int(row["m"] or 0)
-            finally:
-                conn.close()
-        except Exception:
-            watermark = 0
+        # SQLite fora do event loop: um middleware async que bloqueia atrasa
+        # todos os pedidos em curso, não só este.
+        watermark = await run_in_threadpool(_sheet_watermark)
     request.state.watermark = watermark
     response = await call_next(request)
     response.headers["X-Sheet-Watermark"] = str(watermark)
@@ -182,6 +224,11 @@ _index_cache: dict[str, tuple[float, object, str | None]] = {}
 _index_lock = threading.Lock()
 _index_build_locks: dict[str, threading.Lock] = {}
 _validation_timing = threading.local()
+# Índices pesados: quando chega um plano novo, reconstroem-se por trás e a
+# revisão continua a usar o anterior até o novo estar pronto (o plano de
+# cantoneiras são ~76 mil linhas, 18 MB pelo túnel). A validação, que exige o
+# plano atual, espera pela construção em vez de a repetir.
+_BACKGROUND_REBUILD = {"load_cantoneiras_index"}
 
 
 def _conn():
@@ -228,39 +275,78 @@ def get_index(loader_name: str, *, require_current: bool = False):
                         time.monotonic(), index, snapshot,
                     )
                 return index
-
-        # Só uma thread constrói cada índice. O lock global protege apenas os
-        # dicionários; SQL e construção do PlanIndex decorrem fora dele.
-        with _index_build_lock(loader_name):
-            with _index_lock:
-                latest = _index_cache.get(loader_name)
-            if latest and current is not None and latest[2] == current:
+            if not require_current and loader_name in _BACKGROUND_REBUILD:
+                # Plano novo: a revisão continua com o anterior (e só volta a
+                # sondar daqui a _FRESHNESS_PROBE_SECONDS) enquanto o novo se
+                # constrói por trás.
                 with _index_lock:
                     _index_cache[loader_name] = (
-                        time.monotonic(), latest[1], latest[2],
+                        time.monotonic(), index, snapshot,
                     )
-                return latest[1]
-
-            loader = getattr(loaders, loader_name)
-            if loader_name == "load_cantoneiras_index" and current:
-                index = loader(snapshot_id=current)
-            else:
-                index = loader()
-            loaded_snapshot = getattr(index, "snapshot_id", None)
-            snapshot = (
-                str(loaded_snapshot) if loaded_snapshot is not None else current
-            )
-            if require_current and snapshot != current:
-                raise RuntimeError(
-                    "O índice carregado não corresponde ao snapshot atual."
-                )
-            with _index_lock:
-                _index_cache[loader_name] = (
-                    time.monotonic(), index, snapshot,
-                )
-            return index
+                _rebuild_in_background(loader_name, current)
+                return index
+        return _build_index(loader_name, current, require_current=require_current)
     finally:
         _record_index_time(started)
+
+
+def _build_index(loader_name: str, current: str | None, *,
+                 require_current: bool = False):
+    """Só uma thread constrói cada índice. O lock global protege apenas os
+    dicionários; SQL e construção do PlanIndex decorrem fora dele."""
+    with _index_build_lock(loader_name):
+        with _index_lock:
+            latest = _index_cache.get(loader_name)
+        if latest and current is not None and latest[2] == current:
+            with _index_lock:
+                _index_cache[loader_name] = (
+                    time.monotonic(), latest[1], latest[2],
+                )
+            return latest[1]
+
+        loader = getattr(loaders, loader_name)
+        if loader_name == "load_cantoneiras_index" and current:
+            index = loader(snapshot_id=current)
+        else:
+            index = loader()
+        loaded_snapshot = getattr(index, "snapshot_id", None)
+        snapshot = (
+            str(loaded_snapshot) if loaded_snapshot is not None else current
+        )
+        if require_current and snapshot != current:
+            raise RuntimeError(
+                "O índice carregado não corresponde ao snapshot atual."
+            )
+        with _index_lock:
+            _index_cache[loader_name] = (
+                time.monotonic(), index, snapshot,
+            )
+        return index
+
+
+def _rebuild_in_background(loader_name: str, current: str) -> None:
+    if _index_build_lock(loader_name).locked():
+        return  # já há uma construção em curso
+
+    def run() -> None:
+        try:
+            _build_index(loader_name, current)
+        except Exception as exc:
+            # O índice anterior continua em uso; a sonda seguinte volta a tentar.
+            print(f"[index] reconstrução de {loader_name} falhou: "
+                  f"{type(exc).__name__}: {exc}", flush=True)
+
+    threading.Thread(target=run, name=f"rebuild-{loader_name}", daemon=True).start()
+
+
+def _current_plan_index(loader_name: str, current_id: str | None):
+    """Índice da carga ``current_id``: o da cache se for essa, senão o novo
+    (esperando pela reconstrução que já estiver em curso, se houver)."""
+    cached = get_index(loader_name)
+    if current_id and str(getattr(cached, "snapshot_id", None) or "") == str(current_id):
+        return cached
+    return _build_index(loader_name, str(current_id) if current_id else None,
+                        require_current=bool(current_id))
 
 
 def _current_snapshot_id(*, strict: bool = False) -> str | None:
@@ -273,6 +359,15 @@ def _current_snapshot_id(*, strict: bool = False) -> str | None:
     if strict and not snapshot:
         raise RuntimeError("Planeamento indisponível: snapshot não identificado.")
     return str(snapshot) if snapshot is not None else None
+
+
+def _cached_snapshot_id(loader_name: str | None) -> str | None:
+    """Carga do plano que está em memória, sem ir ao Postgres."""
+    if not loader_name:
+        return None
+    with _index_lock:
+        hit = _index_cache.get(loader_name)
+    return getattr(hit[1], "snapshot_id", None) if hit else None
 
 
 def _current_index_snapshot(loader_name: str, *, strict: bool = False) -> str | None:
@@ -315,8 +410,10 @@ def make_scorer(template_name: str, *, require_current: bool = False) -> Scorer:
             index = get_index(template.index_loader, require_current=True)
     else:
         index = get_index(template.index_loader)
-    active = loaders.load_active_ofs() if template.family == "cantoneiras" else set()
-    return Scorer(index, CrossParams.load(), active_primary=active)
+    # O bónus de «OF com atividade recente» ficou desligado: o plano guarda a
+    # OF como «OF265171» e os registos validados como «265171», portanto nunca
+    # coincidiam — cada verificação pagava uma consulta por um bónus nulo.
+    return Scorer(index, CrossParams.load())
 
 
 def make_fresh_scorer(template_name: str) -> Scorer:
@@ -437,6 +534,26 @@ def resolve_operator(conn, uid: str, sheet: dict) -> dict | None:
 _HISTORY_AUTO = object()
 
 
+def _human_paths(evidence) -> set[str]:
+    return {path for path, source in evidence.provenance["field_sources"].items()
+            if source.get("source") == "human"}
+
+
+def _plan_may_replace(is_human: bool, scorer, field_name: str, current, proposal) -> bool:
+    """A substituição pelo plano nunca troca uma decisão humana por outro valor.
+
+    Só lhe aplica o formato canónico do plano quando é a mesma identidade
+    («200 X 20» → «L200X200X20»). Se o operador escreveu outra coisa, fica o
+    que escreveu e a célula mostra a diferença — decide ele. Um campo que a
+    pessoa esvaziou volta a poder ser preenchido (herança ou plano).
+    """
+    if not is_human or not str(current or "").strip():
+        return True
+    if scorer is None:
+        return False
+    return scorer.index.same_identity(field_name, current, proposal)
+
+
 def run_cross_check(conn, uid: str, *, force_plan: bool = False, scorer_override: Scorer | None = None,
                     engine_override: str | None = None,
                     historical_context_override=_HISTORY_AUTO) -> bool:
@@ -446,9 +563,14 @@ def run_cross_check(conn, uid: str, *, force_plan: bool = False, scorer_override
         return False
     if engine == "v3" and sheet["template_name"] == "cantoneiras_kanban":
         if force_plan and scorer_override is None:
-            scorer_override = make_scorer(
-                sheet["template_name"], require_current=True,
-            )
+            try:
+                scorer_override = make_scorer(
+                    sheet["template_name"], require_current=True,
+                )
+            except Exception:
+                # Plano indisponível: segue com o índice em cache (ou sem
+                # plano); a validação regista o aviso em vez de recusar.
+                scorer_override = None
 
         return _run_cross_check_v3(
             conn, uid, scorer_override=scorer_override,
@@ -470,6 +592,7 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
         return False
     template = get_template(base["template_name"])
     evidence = build_evidence(base, db.evidence_edits(conn, base))
+    human_paths = _human_paths(evidence)
     data = copy.deepcopy(base["sheet_data"])
     rows = data.get("rows") or []
     observed_header = evidence.data.get("header") or {}
@@ -497,7 +620,8 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
             history = historical_context_override
         cross = check_sheet_v3(
             evidence.data, scorer.params, index=scorer.index,
-            historical_context=history, explicit_bindings=evidence.explicit_bindings,
+            historical_context=history,
+            explicit_bindings=plan_bindings.reattach(evidence.explicit_bindings, scorer.index),
             provenance=evidence.provenance,
         )
     else:
@@ -548,6 +672,8 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
             path = f"rows[{i}].{key}"
             new = cell.get("proposal")
             before = (evidence.data.get("rows") or [])[i].get(key)
+            if not _plan_may_replace(path in human_paths, scorer, key, before, new):
+                continue
             apply_value(path, rows[i], key, new, "cross:v3")
             if before != new:
                 cell["applied"] = True
@@ -652,10 +778,18 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
                 "status": "no_reference",
                 "message": "Plano indisponível; linhas mantidas sem cruzamento.",
             }
+    human_rows = db.human_fields_by_row(conn, uid)
     if scorer is not None:
-        # Edições anteriores de identidade são evidência de auditoria, não um
-        # veto sobre campos que pertencem ao planeamento. Também não desligam
-        # a herança que o cross precisa de resolver.
+        # Escolhas feitas antes da última carga do Excel voltam a valer se a
+        # mesma linha existir na carga atual (app/matching/bindings.py).
+        chosen = {i: row["_plan_binding"] for i, row in enumerate(rows)
+                  if isinstance(row.get("_plan_binding"), dict)
+                  and row["_plan_binding"].get("selected_explicitly")}
+        for i, binding in plan_bindings.reattach(chosen, scorer.index).items():
+            rows[i]["_plan_binding"] = binding
+        # Edições anteriores de identidade não desligam a herança que o cross
+        # precisa de resolver; um valor escrito por pessoa só é trocado pelo
+        # mesmo valor noutro formato (ver _plan_may_replace).
         cross = check_sheet(rows, scorer, {}, footer=data.get("footer"))
         plan_reference["snapshot_id"] = scorer.index.snapshot_id
     else:
@@ -755,6 +889,9 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
                     proposal = cell["proposal"]
                     if str(rows[i].get(f) or "").strip() == str(proposal).strip():
                         continue
+                    if not _plan_may_replace(f in human_rows.get(i, ()), scorer, f,
+                                             rows[i].get(f), proposal):
+                        continue
                     key = (i, f)
                     original_values.setdefault(key, rows[i].get(f))
                     rows[i][f] = proposal if str(proposal).strip() else None
@@ -837,8 +974,9 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
 def home(request: Request, status: str = "", operador: str = "", setor: str = "",
          data: str = "", data_captura: str = "", of: str = "",
          created: str = "", deleted: str = "", validated: str = "",
-         stored: str = "", page: int = 1):
-    status = status if status in {"", "pending", "validated", "error"} else ""
+         stored: str = "", avisos: str = "", renumbered_from: str = "",
+         a_gravar: str = "", sync_erro: str = "", page: int = 1):
+    status = status if status in {"", "pending", "validated", "avisos", "a_gravar", "error"} else ""
     page = max(1, page)
     conn = _conn()
     try:
@@ -866,7 +1004,7 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
         "history_url": history_url,
         "status_urls": {
             value: _history_location(page=1, **(filters | {"status": value}))
-            for value in ("", "pending", "validated", "error")
+            for value in ("", "pending", "validated", "avisos", "a_gravar", "error")
         },
         "clear_url": _history_location(status=status),
         "pagination": {
@@ -875,7 +1013,8 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
             "next": _history_location(page=page + 1, **filters) if page < pages else None,
         },
         "created": created, "deleted": deleted,
-        "validated": validated, "stored": stored,
+        "validated": validated, "stored": stored, "avisos": avisos,
+        "renumbered_from": renumbered_from, "a_gravar": a_gravar, "sync_erro": sync_erro,
         "tunnel_url": tunnel_url(),
     })
 
@@ -980,6 +1119,8 @@ def _pdf_to_images(content: bytes, stem: str) -> list[tuple[bytes, str]]:
 # lote de PDF real (12 páginas × 2 chamadas Gemini) demora minutos. O upload
 # responde já; o worker preenche as folhas e o Histórico (auto-refresh) mostra-as.
 PROCESS_IN_BACKGROUND = True
+# «background» | «sync» — ver Settings.validation_mode e app/sync_worker.py.
+VALIDATION_MODE = settings.validation_mode
 
 
 def _process_sheet(uid: str, force_ocr: bool = False) -> None:
@@ -1572,6 +1713,7 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     recovery_date_pending = header_recovery.date_needs_confirmation(sheet, protected_header)
     return templates.TemplateResponse(request, "sheet.html", {
         "sheet": sheet, "t": template, "cross_rows": cross_rows,
+        "photo_v": photo_version(sheet),
         "summary": cross.get("summary"),
         "review_order": cross.get("review_order", []),
         "plan_reference": cross.get("plan_reference") or {},
@@ -1597,8 +1739,17 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     }, status_code=status_code)
 
 
+def photo_version(sheet: dict) -> str:
+    """Versão do URL da foto: muda se mudar a imagem, a rotação ou o render."""
+    sha = str(sheet.get("image_sha256") or "")[:12]
+    return f"d{imaging.DISPLAY_QUALITY}-{sha}-{int(sheet.get('image_rotation') or 0)}"
+
+
 @app.get("/sheet/{uid}/photo")
-def sheet_photo(uid: str, original: int = 0):
+def sheet_photo(uid: str, original: int = 0, full: int = 0, v: str = "",
+                request: Request = None):
+    """Foto da folha: JPEG de ecrã por omissão, PNG com ``full=1``, ficheiro
+    tal como chegou com ``original=1``."""
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -1611,7 +1762,17 @@ def sheet_photo(uid: str, original: int = 0):
         raise HTTPException(404, "Imagem original indisponível; os dados da folha estão preservados.")
     if not original:
         path = imaging.render_oriented(path, int(sheet.get("image_rotation") or 0))
-    return FileResponse(path)
+        if not full:
+            path = imaging.render_display(path)
+    # O URL com a versão atual pode ficar em cache para sempre; os outros
+    # revalidam com ETag e recebem 304 sem voltar a transferir a imagem.
+    cache = ("private, max-age=31536000, immutable" if v and v == photo_version(sheet)
+             else "private, no-cache")
+    stat = path.stat()
+    etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    if request is not None and request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": cache})
+    return FileResponse(path, headers={"ETag": etag, "Cache-Control": cache})
 
 
 @app.post("/sheet/{uid}/rotate")
@@ -1717,9 +1878,10 @@ def sheet_reference(
         try:
             current_info = loaders.plan_snapshot_info() or {}
             current_snapshot = current_info.get("snapshot_id")
-            with _index_lock:
-                _index_cache.pop("load_cantoneiras_index", None)
-            index = get_index("load_cantoneiras_index")
+            # Reaproveita o índice em memória se for desta carga; antes
+            # deitava-se fora a cache e cada escolha descarregava o plano
+            # inteiro (~18 MB) pelo túnel.
+            index = _current_plan_index("load_cantoneiras_index", current_snapshot)
         except Exception as exc:
             raise HTTPException(
                 422, "Planeamento indisponível; tenta novamente mais tarde."
@@ -1774,6 +1936,8 @@ def sheet_reference(
             "snapshot_id": str(current_snapshot),
             "plan_key": plan_key,
             "selected_explicitly": True,
+            # para religar a escolha à mesma linha depois de uma carga nova
+            "identity": plan_bindings.identity_of(entry),
         }
         row["modelo"] = model
         row["_plan_binding"] = binding
@@ -2117,6 +2281,11 @@ def recheck(uid: str, back: str = Form("")):
     return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
+_CHANGED_ELSEWHERE = (
+    "A folha foi alterada noutra janela; confirma os valores atuais e valida de novo."
+)
+
+
 @app.post("/sheet/{uid}/validate")
 def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
              history_back: str = Form(""), revision: int | None = Form(None), review_token: str = Form(""),
@@ -2125,19 +2294,30 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
              header_setor_maquina: str | None = Form(None),
              header_data: str | None = Form(None),
              header_turno: str | None = Form(None)):
-    """Re-cross atual + reserva CAS + INSERT PG + imutabilidade local."""
+    """Valida a folha: fica imutável já, e vai para o Postgres por trás.
+
+    Nada de negócio bloqueia (decisão de 25/09): operador ou data em falta,
+    linhas sem candidato, identidade por confirmar, saldo histórico, plano
+    que mudou, cruzamento instável… ficam como avisos gravados com a folha
+    (app/validation_warnings.py). Só se recusa o que impediria gravar a folha
+    que o operador está a ver — outra janela alterou-a nesse instante.
+
+    O clique não toca no Postgres (decisão de 25/09, «validada logo, grava
+    depois»): a folha fica validada no SQLite com ``sync_state='pending'`` e
+    o app/sync_worker.py grava-a no histórico, com novas tentativas. Com
+    ``MES_VALIDATION_MODE=sync`` esse mesmo passo corre dentro do pedido.
+    """
     # «Quem valida» deixou de existir no form: valida-se sem entidade e o
     # registo interno fica «operador».
     actor = actor.strip() or "operador"
     validation_started = time.monotonic()
-    timings = {
-        "index_ms": 0.0, "cross_ms": 0.0,
-        "sqlite_lock_wait_ms": 0.0, "pg_store_ms": 0.0,
-    }
+    timings = {"index_ms": 0.0, "cross_ms": 0.0}
     _validation_timing.current = timings
     outcome = "failed"
     row_count = 0
     validation_snapshot = None
+    warnings: list[dict] = []
+    destination = _safe_history_back(back) or _safe_history_back(history_back) or "/"
     cancel_pending(uid)
     conn = _conn()
     focus: str | None = None
@@ -2147,11 +2327,13 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         if not before:
             raise HTTPException(404)
         if before["status"] == "validated":
-            raise HTTPException(409, "Folha já validada.")
+            # Um segundo clique ou um retry não é um erro: a folha já está.
+            outcome = "already_validated"
+            return RedirectResponse(
+                _with_query(destination, validated=before.get("sheet_no") or uid[:8]),
+                status_code=303)
         if revision is not None and revision != before["revision"]:
-            raise HTTPException(
-                409, "A folha foi alterada; confirma novamente os valores."
-            )
+            raise HTTPException(409, _CHANGED_ELSEWHERE)
         # O botão Validar também confirma o que estiver atualmente escrito no
         # formulário do cabeçalho. Assim o utilizador nunca é obrigado a
         # carregar primeiro em «Guardar cabeçalho», nem perde o rascunho que
@@ -2188,150 +2370,81 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                 if not db.save_sheet_data_with_edits(
                     conn, uid, data_doc, before["revision"], edits
                 ):
-                    raise HTTPException(
-                        409, "A folha foi alterada; confirma novamente os valores."
-                    )
+                    raise HTTPException(409, _CHANGED_ELSEWHERE)
                 before = db.get_sheet(conn, uid)
                 if not before:
                     raise HTTPException(404)
-        # A validação confirma o snapshot atual. Se for o mesmo, reutiliza o
-        # índice já construído; se mudou, constrói exatamente o novo snapshot.
+
+        # Data: a gravação exige uma data interpretável. Se a folha não a tem
+        # (apagada ou ilegível), usa-se a regra da casa — dia útil anterior à
+        # digitalização — como edição do sistema, auditada, antes do cruzamento
+        # (o saldo histórico depende dela).
+        assumed_date = None
+        header = (before.get("sheet_data") or {}).get("header") or {}
+        try:
+            date_ok = bool(pg_store.normalize_sheet_date(header.get("data")))
+        except pg_store.InvalidSheetDate:
+            date_ok = False
+        if not date_ok:
+            assumed_date = _assumed_sheet_date(before)
+            if assumed_date:
+                data_doc = copy.deepcopy(before.get("sheet_data") or {
+                    "header": {}, "rows": [], "footer": {},
+                })
+                data_doc.setdefault("header", {})["data"] = assumed_date
+                if not db.save_sheet_data_with_edits(
+                    conn, uid, data_doc, before["revision"],
+                    [("header.data", header.get("data"), assumed_date,
+                      "system", "validacao:data_assumida")],
+                    cross_check=before.get("cross_check"), write_cross=True,
+                ):
+                    raise HTTPException(409, _CHANGED_ELSEWHERE)
+                before = db.get_sheet(conn, uid)
+                if not before:
+                    raise HTTPException(404)
+
+        # O cruzamento só se refaz se a folha mudou desde o último (cabeçalho
+        # confirmado agora, data assumida) — sobre o plano em memória, sem ir
+        # ao Postgres: vale a carga do plano que o operador estava a ver.
+        # Plano indisponível fica no plan_reference do cross → aviso; um erro
+        # do próprio cruzamento é técnico e continua a travar.
         cross_started = time.monotonic()
-        if not run_cross_check(conn, uid, force_plan=True):
-            raise HTTPException(
-                409, "A folha mudou durante o cross-check; tenta novamente."
-            )
+        if (before.get("cross_check") or {}).get("materialized_revision") != before["revision"]:
+            if not run_cross_check(conn, uid):
+                raise HTTPException(409, _CHANGED_ELSEWHERE)
         timings["cross_ms"] = max(
             0.0,
             (time.monotonic() - cross_started) * 1000.0 - timings["index_ms"],
         )
-        lock_started = time.monotonic()
-        conn.execute("BEGIN IMMEDIATE")
-        timings["sqlite_lock_wait_ms"] = (
-            time.monotonic() - lock_started
-        ) * 1000.0
         sheet = db.get_sheet(conn, uid)
         if not sheet:
             raise HTTPException(404)
-        if sheet["status"] == "validated":
-            raise HTTPException(409, "Folha já validada.")
-        header = (sheet["sheet_data"] or {}).get("header") or {}
-        if not str(header.get("operador") or "").strip():
-            raise HTTPException(422, "Validação exige operador preenchido no cabeçalho.")
-        if not str(header.get("data") or "").strip():
-            raise HTTPException(422, "Validação exige data preenchida no cabeçalho.")
         template = get_template(sheet["template_name"])
+        warnings = validation_warnings.collect(
+            sheet, current_snapshot=_cached_snapshot_id(template.index_loader),
+            assumed_date=assumed_date)
         cross = sheet.get("cross_check") or {}
+        cross["validation_warnings"] = warnings
         validation_snapshot = cross.get("snapshot_id")
         row_count = len((sheet.get("sheet_data") or {}).get("rows") or [])
-        if template.index_loader:
-            plan_ref = cross.get("plan_reference") or {}
-            if plan_ref.get("status") != "available" or not cross.get("snapshot_id"):
-                raise HTTPException(
-                    422, "Validação bloqueada: o planeamento está indisponível."
-                )
-            if cross.get("data_revision") != sheet["revision"]:
-                raise HTTPException(
-                    409, "A folha mudou durante o cross-check; tenta novamente."
-                )
-            if cross.get("engine") != "cross-v3" and cross.get("fixed_point") is False:
-                raise HTTPException(
-                    422, "O cross-check não estabilizou; revê a identidade das linhas."
-                )
-            rows = (sheet.get("sheet_data") or {}).get("rows") or []
-            cross_rows = {
-                row.get("row_index"): row for row in cross.get("rows", [])
-            }
-            visible_no = 0
-            for row_index, row in enumerate(rows):
-                if row.get("_deleted") is True:
-                    continue
-                visible_no += 1
-                if not any(
-                    value is not None and str(value).strip()
-                    for key, value in row.items() if not str(key).startswith("_")
-                ):
-                    continue
-                row_cross = cross_rows.get(row_index) or {}
-                if cross.get("engine") == "cross-v3" and row_cross.get("row_kind") in {"empty", "activity"}:
-                    continue
-                if row.get("_identity_unresolved"):
-                    raise HTTPException(422, f"Linha {visible_no}: {row['_identity_unresolved']}")
-                if row_cross.get("binding_stale"):
-                    raise HTTPException(
-                        422,
-                        f"Linha {visible_no}: o planeamento mudou; "
-                        "reabre Referências.",
-                    )
-                if not row_cross.get("matched_plan_key"):
-                    raise HTTPException(
-                        422,
-                        f"Linha {visible_no}: não existe candidato no planeamento.",
-                    )
-                if is_marked(field_value(row, "perf_comp")):
-                    if not row_cross.get("plan_refs_valid") or (row_cross.get("quantity_basis") or {}).get("status") != "ready":
-                        raise HTTPException(
-                            422,
-                            f"Linha {visible_no}: "
-                            + (row_cross.get("plan_refs_error")
-                               or "as referências de perfil completo são inválidas."),
-                        )
-            # Última sonda imediatamente antes de materializar no Postgres.
-            # Se uma carga foi publicada depois do cross, esse snapshot já
-            # deixou de ser o atual e a seleção explícita tem de ser reaberta.
-            current_snapshot = _current_index_snapshot(template.index_loader)
-            if current_snapshot is None:
-                raise HTTPException(
-                    422, "Validação bloqueada: o planeamento está indisponível."
-                )
-            if str(current_snapshot) != str(cross.get("snapshot_id")):
-                raise HTTPException(
-                    409, "O planeamento mudou; reabre Referências e confirma novamente."
-                )
-        try:
-            store_started = time.monotonic()
-            n = pg_store.store_validated_sheet(
-                sheet, template, db.edit_count(conn, uid), actor)
-            timings["pg_store_ms"] = (
-                time.monotonic() - store_started
-            ) * 1000.0
-        except pg_store.InvalidSheetDate as exc:
-            raise HTTPException(
-                422, f"Data «{exc}» não é interpretável — escreve dd/mm/aaaa.")
-        except pg_store.SheetNumberConflict as exc:
-            raise HTTPException(
-                409,
-                f"O número público {exc.sheet_no} está associado a outra folha "
-                "no histórico. A validação não foi gravada; atualiza a lista "
-                "e tenta novamente.",
-            )
-        except Exception:
-            traceback.print_exc()
-            raise HTTPException(
-                503,
-                "Não foi possível gravar a validação no histórico. Nenhuma "
-                "linha parcial foi aceite; tenta novamente.",
-            )
-        if not db.mark_validated(
-            conn, uid, actor, expected_revision=sheet["revision"]
-        ):
-            raise HTTPException(
-                409, "A folha mudou durante a validação — tenta novamente."
-            )
-        outcome = "validated"
+        # Validada logo, grava depois: aqui só o SQLite. Com avisos, a ida
+        # para o histórico (só INSERT) espera uns minutos — janela para
+        # «Reabrir» se foi engano.
+        delay = (settings.sync_delay_with_warnings_s
+                 if warnings and VALIDATION_MODE == "background" else 0)
+        if not db.mark_validated_local(conn, uid, actor, expected_revision=sheet["revision"],
+                                       cross=cross, sync_delay_s=delay):
+            raise HTTPException(409, _CHANGED_ELSEWHERE)
+        provisional_no = sheet.get("sheet_no")
+        outcome = "validated_local"
     except HTTPException as exc:
-        # Os portões da validação (422/409) voltam à folha como banner: o
-        # form navega para o POST, e a resposta JSON crua lê-se como crash.
-        # Só 404 sobe: todos os restantes portões voltam à folha. Os 5xx de
-        # escrita já foram registados no log antes de serem convertidos.
+        # As recusas técnicas (409/422) voltam à folha como banner: o form
+        # navega para o POST, e a resposta JSON crua lê-se como crash. Só 404
+        # sobe.
         if exc.status_code == 404:
             raise
-        focus = (
-            "header.operador" if "operador" in str(exc.detail).lower()
-            else ("header.data" if "data" in str(exc.detail).lower() else "problem")
-        )
         return RedirectResponse(
-            _sheet_location(uid, back, erro=exc.detail, focus=focus), status_code=303,
+            _sheet_location(uid, back, erro=exc.detail, focus="problem"), status_code=303,
         )
     except Exception as exc:
         print(
@@ -2342,8 +2455,8 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         return RedirectResponse(
             _sheet_location(
                 uid, back,
-                erro=("Não foi possível concluir a validação. Nenhuma linha "
-                      "parcial foi aceite; tenta novamente."),
+                erro=("Não foi possível concluir a validação. A folha e as "
+                      "edições ficaram preservadas; tenta novamente."),
                 focus=focus,
             ),
             status_code=303,
@@ -2356,18 +2469,55 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
             "snapshot_id": validation_snapshot,
             "rows": row_count,
             "outcome": outcome,
+            "warnings": len(warnings),
             **{key: round(value, 2) for key, value in timings.items()},
         }, ensure_ascii=False), flush=True)
         _validation_timing.current = None
-    destination = _safe_history_back(back) or _safe_history_back(history_back) or "/"
+
+    avisos = len(warnings) or None
+    if VALIDATION_MODE == "sync":
+        result = sync_worker.sync_one(uid)
+        if result.state == "done":
+            return RedirectResponse(
+                _with_query(
+                    destination, validated=result.sheet_no, stored=result.row_count,
+                    avisos=avisos,
+                    renumbered_from=(result.previous_no
+                                     if result.previous_no not in (None, result.sheet_no)
+                                     else None)),
+                status_code=303)
+        return RedirectResponse(
+            _with_query(destination, validated=provisional_no, a_gravar=1,
+                        avisos=avisos, sync_erro=result.error),
+            status_code=303)
+    sync_worker.wake()
     return RedirectResponse(
-        _with_query(
-            destination,
-            validated=sheet.get("sheet_no") or uid[:8],
-            stored=n,
-        ),
-        status_code=303,
-    )
+        _with_query(destination, validated=provisional_no, a_gravar=1, avisos=avisos),
+        status_code=303)
+
+
+@app.post("/sheet/{uid}/reopen")
+def reopen_validated(uid: str, back: str = Form("")):
+    """Reabre uma validada que ainda não chegou ao histórico (erro ao gravar,
+    ou dentro da janela das folhas com avisos)."""
+    refused = sync_worker.reopen(uid, "operador")
+    return RedirectResponse(
+        _sheet_location(uid, back, erro=refused) if refused else _sheet_location(uid, back),
+        status_code=303)
+
+
+@app.post("/sheet/{uid}/sync-retry")
+def retry_sync(uid: str, back: str = Form("")):
+    conn = _conn()
+    try:
+        db.retry_sync_now(conn, uid)
+    finally:
+        conn.close()
+    if VALIDATION_MODE == "sync":
+        sync_worker.sync_one(uid)
+    else:
+        sync_worker.wake()
+    return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
 from . import plan_picker  # noqa: E402

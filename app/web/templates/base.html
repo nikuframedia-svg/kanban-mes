@@ -12,8 +12,8 @@
   {# Self-hosted (htmx 2.0.4, Alpine 3.13.10): a app é usada em chão de
      fábrica atrás de túnel — depender do unpkg.com no caminho crítico deixava
      os cliques mortos sempre que o CDN não estivesse alcançável. #}
-  <script src="/static/vendor/htmx.min.js" defer></script>
-  <script src="/static/vendor/alpine.min.js" defer></script>
+  <script src="/static/vendor/htmx.min.js?v={{ css_version }}" defer></script>
+  <script src="/static/vendor/alpine.min.js?v={{ css_version }}" defer></script>
 </head>
 <body data-history-key="kanban-mes:history">
 {% set path = request.url.path %}

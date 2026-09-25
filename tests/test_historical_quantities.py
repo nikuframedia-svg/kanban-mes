@@ -81,3 +81,48 @@ def test_x_in_quantity_is_a_full_profile_mark_not_zero():
     sheet['cross_check'] = cross
     fact = materialize_sheet(sheet, get_template('cantoneiras_kanban'))['parents'][0]
     assert fact['row']['qtd'] == 106 and fact['row']['perf_comp'] == 'X'
+
+
+def test_of_que_entra_no_plano_no_proprio_dia_usa_a_primeira_carga_com_a_of():
+    """Caso real OF263210: nenhuma carga anterior ao dia de produção tinha a OF."""
+    sheet, data, cross = example()
+    orders = {"before": [], "same_day": entries()}
+    h.apply(sheet, data, cross,
+            snapshot_loader=lambda day: {"snapshot_id": "before",
+                                         "loaded_at": "2026-09-15T12:18:00+00:00"},
+            later_loader=lambda day: [{"snapshot_id": "same_day",
+                                       "loaded_at": "2026-09-16T12:18:00+00:00"}],
+            order_loader=lambda snapshot_id, of: orders[snapshot_id])
+    row = cross["rows"][0]
+    assert row["quantity_basis"]["status"] == "ready"
+    assert row["quantity_basis"]["approximate"] is True
+    assert row["quantity_basis"]["snapshot_id"] == "same_day"
+    assert row["full_profile_quantity"] == 106
+
+
+def test_sem_nenhuma_carga_com_a_of_fica_por_confirmar_sem_inventar_zero():
+    sheet, data, cross = example()
+    def no_before(day):
+        raise ValueError("Não existe plano guardado antes do dia de produção.")
+    h.apply(sheet, data, cross, snapshot_loader=no_before, later_loader=lambda day: [],
+            order_loader=lambda *a: entries())
+    row = cross["rows"][0]
+    assert row["quantity_basis"]["status"] == "unavailable"
+    assert row["plan_refs"] == [] and row["full_profile_quantity"] is None
+
+
+def test_correspondencia_fraca_ja_nao_impede_o_saldo():
+    sheet, data, cross = example()
+    cross["rows"][0].update(mode="weak_guess", review_required=True)
+    h.apply(sheet, data, cross, snapshot_loader=lambda day: {"snapshot_id": "past"},
+            order_loader=lambda *a: entries())
+    assert cross["rows"][0]["quantity_basis"]["status"] == "ready"
+    assert cross["rows"][0]["quantity_basis"]["approximate"] is False
+
+
+def test_cargas_seguintes_por_ordem_a_partir_do_dia_de_producao():
+    snapshots = [{"snapshot_id": sid, "loaded_at": date} for sid, date in [
+        ("before", "2026-09-15T22:59:59+00:00"), ("later", "2026-09-17T12:00:00+00:00"),
+        ("midnight", "2026-09-15T23:00:00+00:00")]]
+    assert [s["snapshot_id"] for s in h.select_later_snapshots(snapshots, "16/09/2026")] == [
+        "midnight", "later"]

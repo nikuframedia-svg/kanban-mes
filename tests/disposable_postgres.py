@@ -85,7 +85,7 @@ def postgres16():
                 "CREATE SCHEMA core_mtg; CREATE SCHEMA analytics_mtg; "
                 "CREATE SCHEMA raw_mtg; CREATE SCHEMA audit_mtg"
             )
-        for number in range(10, 18):
+        for number in range(10, 19):
             path = next((ROOT / "sql").glob(f"{number:03d}_*.sql"))
             _run(
                 "docker",

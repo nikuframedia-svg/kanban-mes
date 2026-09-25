@@ -494,7 +494,7 @@ def _date_cell(header: dict, protected: set[str],
     if not written:
         return _cell(
             field_name, written, status="missing", reason="empty_date",
-            message="Data obrigatória por preencher.", protected=is_protected,
+            message="Data por preencher: ao validar usa-se o dia útil anterior à digitalização.", protected=is_protected,
         )
     canonical = canonical_date(written)
     if canonical is None:

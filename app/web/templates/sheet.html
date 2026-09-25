@@ -12,6 +12,7 @@
 {# Em modo cru a fonte é a transcrição original, imutável. Só-leitura: editar
    aqui gravaria o valor cru por cima do valor já corrigido. #}
 {% set readonly = validated or is_raw %}
+{% set validation_warnings = ((sheet.cross_check or {}).get('validation_warnings') or []) if validated else [] %}
 {% set data = (sheet.raw_extraction if is_raw else sheet.sheet_data) or {} %}
 {% set header = data.get('header') or {} %}
 {% set rows = data.get('rows') or [] %}
@@ -34,6 +35,7 @@
   <div>
     <div class="page-eyebrow">Revisão · {{ t.label }}</div>
     <h1 class="page-title">Folha {{ sheet.sheet_no or sheet.uid[:8] }}</h1>
+    {% if validated and sheet.sync_state in ('pending', 'retry', 'error') %}<div class="muted tiny">Número provisório; confirmado quando chegar ao histórico.</div>{% endif %}
     {% if has_ocr %}
     <div class="tabs" style="margin-top:10px; border-bottom:none;">
       <a class="tab {% if not is_raw %}active{% endif %}"
@@ -50,7 +52,7 @@
       <span class="pill info">OCR original · só leitura</span>
     {% elif validated %}
       {# «operador» é o registo interno por omissão, não uma entidade — não se exibe #}
-      <span class="pill ok">✓ validada{% if sheet.validated_by and sheet.validated_by != 'operador' %} · {{ sheet.validated_by }}{% endif %}</span>
+      <span class="pill {{ 'warn' if validation_warnings else 'ok' }}">✓ validada{% if validation_warnings %} · {{ validation_warnings|length }} aviso(s){% endif %}{% if sheet.validated_by and sheet.validated_by != 'operador' %} · {{ sheet.validated_by }}{% endif %}</span>
     {% else %}
       <span class="pill warn">em revisão</span>
     {% endif %}
@@ -65,6 +67,40 @@
 {% if stored %}
 <div class="alert ok" style="margin-bottom:14px;">
   <span><strong>Folha validada.</strong> {{ stored }} linha(s) gravadas no Postgres — a partir de agora é definitiva.</span>
+</div>
+{% endif %}
+
+{% if validated and sheet.sync_state in ('pending', 'retry', 'error') %}
+{# Validada logo, grava depois: enquanto não chega ao histórico pode ser reaberta. #}
+<div class="alert {{ 'crit' if sheet.sync_state == 'error' else 'info' }} sync-status" style="margin-bottom:14px; gap:10px; flex-wrap:wrap;">
+  <span>
+    {% if sheet.sync_state == 'error' %}<strong>Não foi possível gravar no histórico:</strong> {{ sheet.sync_error }}
+    {% elif sheet.sync_state == 'retry' %}<strong>A gravar no histórico…</strong> {{ sheet.sync_error }}
+    {% else %}<strong>Validada — a gravar no histórico.</strong>{% if validation_warnings %} Com avisos, a gravação espera uns minutos: até lá podes reabrir.{% endif %}{% endif %}
+  </span>
+  <span style="display:flex; gap:8px;">
+    {% if sheet.sync_state in ('retry', 'error') %}
+    <form method="post" action="/sheet/{{ sheet.uid }}/sync-retry" style="display:inline;">
+      <input type="hidden" name="back" value="{{ back_url or '' }}">
+      <button class="btn" type="submit">Tentar de novo</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/sheet/{{ sheet.uid }}/reopen" style="display:inline;"
+          onsubmit="return confirm('Reabrir a folha {{ sheet.sheet_no }} para corrigir? Terás de a validar outra vez.');">
+      <input type="hidden" name="back" value="{{ back_url or '' }}">
+      <button class="btn ghost" type="submit">Reabrir</button>
+    </form>
+  </span>
+</div>
+{% endif %}
+
+{% if validation_warnings %}
+{# Nada bloqueia a validação (25/09): o que antes a recusava fica aqui para rever. #}
+<div class="alert warn validation-warnings" style="margin-bottom:14px; flex-direction:column; align-items:flex-start;">
+  <strong>Validada com {{ validation_warnings|length }} aviso(s) — para rever:</strong>
+  <ul style="margin:6px 0 0 18px;">
+    {% for w in validation_warnings %}<li>{{ w.message }}</li>{% endfor %}
+  </ul>
 </div>
 {% endif %}
 
@@ -173,8 +209,8 @@
         </div>
         {% endif %}
         {% if sheet.image_path %}
-        <a href="/sheet/{{ sheet.uid }}/photo" target="_blank" title="Abrir em tamanho real">
-          <img class="review-photo" id="folha-img" src="/sheet/{{ sheet.uid }}/photo"
+        <a href="/sheet/{{ sheet.uid }}/photo?full=1&amp;v={{ photo_v }}" target="_blank" title="Abrir em tamanho real">
+          <img class="review-photo" id="folha-img" src="/sheet/{{ sheet.uid }}/photo?v={{ photo_v }}"
                alt="Foto da folha kanban" loading="lazy"
                onerror="this.style.display='none'; document.getElementById('photo-unavailable').style.display='block'"
                onload="this.style.display=''; document.getElementById('photo-unavailable').style.display='none'">

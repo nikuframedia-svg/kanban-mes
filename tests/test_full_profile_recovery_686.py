@@ -57,12 +57,9 @@ def test_full_recovery_cross_check_historical_children_and_export(client,monkeyp
             full=sheet['sheet_data']['rows'][6]
             assert full['_paper_position']==3 and full['of']=='264857'
             check=next(r for r in sheet['cross_check']['rows'] if r['row_index']==6)
-            if engine == 'v3' and check.get('mode') == 'weak_guess':
-                # Keep the existing engine's confidence guard: recovering the
-                # paper is not permission to approve an uncertain plan match.
-                assert check['full_profile_quantity'] is None
-                assert check['plan_refs_valid'] is False
-                continue
+            # A full profile covers every reference of OF + profile, so a weak
+            # single-reference match no longer suppresses its balance (25/09);
+            # the validation records a «correspondência fraca» warning instead.
             assert check['full_profile_quantity']==48,(
                 check.get('mode'), check.get('review_required'), check.get('p_correct'),
                 check.get('quantity_basis',{}).get('diagnostic'))

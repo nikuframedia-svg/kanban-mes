@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .. import pg_store
 from ..matching import carryover, loaders, similarity as sim
+from ..matching.plan_values import clean_entry
 from ..matching.angle_geometry import profile_key
 from ..templates_spec import field_value, is_marked
 
@@ -30,11 +31,11 @@ def order_codes(value: str, prefix: str = "OF") -> list[str]:
 def fetch_order(snapshot_id: str, of: str) -> list[dict]:
     if not snapshot_id or not of:
         return []
-    return loaders._fetch(
+    return [clean_entry(row) for row in loaders._fetch(
         _select() + " WHERE l.source_app=%s AND l.snapshot_id=%s "
         "AND l.production_order_no = ANY(%s) ORDER BY l.profile_type, l.component_ref, l.plan_key",
         (SOURCE_APP, snapshot_id, order_codes(of)),
-    )
+    )]
 
 
 def fetch_keys(keys: list[str], snapshot_id: str | None = None) -> list[dict]:
@@ -45,7 +46,8 @@ def fetch_keys(keys: list[str], snapshot_id: str | None = None) -> list[dict]:
     if snapshot_id:
         sql += " AND l.snapshot_id=%s"
         params.append(snapshot_id)
-    return loaders._fetch(sql, tuple(params))
+    # A escolha copia perfil/cliente/OV do plano para a folha: sem erros do Excel.
+    return [clean_entry(row) for row in loaders._fetch(sql, tuple(params))]
 
 
 def same_profile(left, right) -> bool:
@@ -183,8 +185,12 @@ def context(sheet: dict, row_index: int, template, back: str, scope: str = "prof
             ctx["production_values"] = True
         else:
             ctx["consultation_only"] = True
+            # Diz a que dia se refere: a tabela abaixo é o plano ATUAL, e um
+            # «sem referências» sem data parecia contradizê-la.
+            day = basis.get("date")
+            when = f"Saldo à data da folha ({day[8:10]}/{day[5:7]}/{day[:4]}): " if day and len(day) == 10 else ""
             ctx["erro"] = ("O saldo histórico está a ser verificado automaticamente." if running else
-                           check.get("plan_refs_error") or "Saldo histórico indisponível; a produção deste perfil ainda não pode ser validada.")
+                           when + (check.get("plan_refs_error") or "saldo histórico indisponível."))
             ctx["plano"] = {**loaders.plan_snapshot_info(), "consultation": True}
     elif ctx["readonly"]:
         identity = check.get("plan_identity") or {}
