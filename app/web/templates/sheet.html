@@ -12,6 +12,7 @@
 {# Em modo cru a fonte é a transcrição original, imutável. Só-leitura: editar
    aqui gravaria o valor cru por cima do valor já corrigido. #}
 {% set readonly = validated or is_raw %}
+{% set validation_warnings = ((sheet.cross_check or {}).get('validation_warnings') or []) if validated else [] %}
 {% set data = (sheet.raw_extraction if is_raw else sheet.sheet_data) or {} %}
 {% set header = data.get('header') or {} %}
 {% set rows = data.get('rows') or [] %}
@@ -50,7 +51,7 @@
       <span class="pill info">OCR original · só leitura</span>
     {% elif validated %}
       {# «operador» é o registo interno por omissão, não uma entidade — não se exibe #}
-      <span class="pill ok">✓ validada{% if sheet.validated_by and sheet.validated_by != 'operador' %} · {{ sheet.validated_by }}{% endif %}</span>
+      <span class="pill {{ 'warn' if validation_warnings else 'ok' }}">✓ validada{% if validation_warnings %} · {{ validation_warnings|length }} aviso(s){% endif %}{% if sheet.validated_by and sheet.validated_by != 'operador' %} · {{ sheet.validated_by }}{% endif %}</span>
     {% else %}
       <span class="pill warn">em revisão</span>
     {% endif %}
@@ -65,6 +66,16 @@
 {% if stored %}
 <div class="alert ok" style="margin-bottom:14px;">
   <span><strong>Folha validada.</strong> {{ stored }} linha(s) gravadas no Postgres — a partir de agora é definitiva.</span>
+</div>
+{% endif %}
+
+{% if validation_warnings %}
+{# Nada bloqueia a validação (25/09): o que antes a recusava fica aqui para rever. #}
+<div class="alert warn validation-warnings" style="margin-bottom:14px; flex-direction:column; align-items:flex-start;">
+  <strong>Validada com {{ validation_warnings|length }} aviso(s) — para rever:</strong>
+  <ul style="margin:6px 0 0 18px;">
+    {% for w in validation_warnings %}<li>{{ w.message }}</li>{% endfor %}
+  </ul>
 </div>
 {% endif %}
 

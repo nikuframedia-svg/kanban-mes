@@ -63,3 +63,24 @@ def test_removed_row_never_enters_production_and_manual_order_keeps_stable_ids(c
     sheet['status']='validated'
     pg_store.store_validated_sheet(sheet,template,0,'test')
     assert sheet['sheet_data']==before['sheet_data']
+
+
+def test_row_warnings_are_stored_with_the_production_record(clean_history):
+    template=get_template('tpl999_kanban' if pg_store.SOURCE_APP.endswith('mtg2') else 'cantoneiras_kanban')
+    uid=uuid.uuid4().hex[:12]
+    sheet={'uid':uid, 'sheet_no':3, 'template_name':template.name,
+           'image_sha256':'d'*64, 'raw_extraction':{}, 'status':'in_review',
+           'sheet_data':{'header':{'data':'16/09/2026','operador':''}, 'footer':{},
+                         'rows':[{'of':'264534','perfil':'L55X55X5','modelo':'EA8B78','qtd':'2'}]},
+           'cross_check':{'snapshot_id':'current','rows':[{'row_index':0,'cells':[]}],
+                          'validation_warnings':[
+                              {'code':'operador_vazio','message':'Operador por preencher.'},
+                              {'code':'sem_ligacao_ao_plano','message':'Linha 1: sem correspondência.',
+                               'row':1,'row_index':0}]}}
+    pg_store.store_validated_sheet(sheet,template,0,'test')
+    with psycopg.connect(clean_history) as conn:
+        record=conn.execute('SELECT extra, matched_plan_key, operator_name FROM mes_kanban.production_records WHERE sheet_uid=%s',(uid,)).fetchone()
+        stored=conn.execute("SELECT cross_check->'validation_warnings' FROM mes_kanban.validated_sheets WHERE sheet_uid=%s",(uid,)).fetchone()[0]
+    assert record[0]['warnings']==[{'code':'sem_ligacao_ao_plano','message':'Linha 1: sem correspondência.'}]
+    assert record[1] is None and record[2]=='(desconhecido)'
+    assert [w['code'] for w in stored]==['operador_vazio','sem_ligacao_ao_plano']

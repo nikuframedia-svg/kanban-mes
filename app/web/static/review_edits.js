@@ -207,15 +207,15 @@
       if (retry) save(retry.dataset.saveRetry);
       if (!event.target.closest('#validate-button') || validating || navigating) return;
       event.preventDefault();
-      if (!$('header-form').reportValidity()) return;
       validating = true; $('validate-button').disabled = true;
+      // Nada de negócio bloqueia a validação (o servidor regista avisos). Só
+      // uma gravação falhada trava: tenta-se outra vez aqui, porque validar
+      // sem a última correção do operador gravaria o valor antigo.
+      [...failures.keys()].forEach(key => { failures.delete(key); pending.add(key); });
       if (!await flush()) {
         validating = false; $('validate-button').disabled = false;
-        $('validation-status').textContent = 'Resolve a gravação pendente antes de validar.';
+        $('validation-status').textContent = 'A última alteração não ficou guardada (ligação?). Carrega em Validar outra vez.';
         return;
-      }
-      if (!$('header-form').reportValidity()) {
-        validating = false; $('validate-button').disabled = false; return;
       }
       // Use persisted fields and the last revision; implicit form submissions never reach this path.
       navigating = true;

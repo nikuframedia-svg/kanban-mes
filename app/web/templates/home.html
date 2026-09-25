@@ -26,13 +26,14 @@
   {% endif %}
   {% if validated %}
   <div class="alert ok" style="margin-bottom:14px;">
-    <span><strong>Folha {{ validated }} validada.</strong> {{ stored or 0 }} linha(s) gravadas.</span>
+    <span><strong>Folha {{ validated }} validada{% if avisos %} com {{ avisos }} aviso(s){% endif %}.</strong> {{ stored or 0 }} linha(s) gravadas.
+    {% if avisos %}Os avisos ficam na folha e no filtro «Com avisos».{% endif %}</span>
   </div>
   {% endif %}
 
   {# Os botões de estado levam consigo todos os outros filtros activos. #}
   <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; align-items:center;">
-    {% for value, label in [('', 'Todas'), ('pending', 'Pendentes'), ('validated', 'Validadas'), ('error', 'Erro')] %}
+    {% for value, label in [('', 'Todas'), ('pending', 'Pendentes'), ('validated', 'Validadas'), ('avisos', 'Com avisos'), ('error', 'Erro')] %}
       <a href="{{ status_urls[value] }}"
          class="btn {% if f.status == value %}primary{% endif %}">{{ label }}</a>
     {% endfor %}
@@ -121,7 +122,9 @@
               </span>
             </td>
             <td>
-              {% if s.status == 'validated' %}
+              {% if s.status == 'validated' and s.avisos %}
+                <span class="pill warn" title="Validada com avisos: abre para rever">validada · {{ s.avisos }} aviso(s)</span>
+              {% elif s.status == 'validated' %}
                 <span class="pill ok">validada</span>
               {% elif s.status == 'error' %}
                 <span class="pill crit">erro</span>
@@ -171,7 +174,7 @@
   </div>
   {% endif %}
 </div>
-{% if created or deleted or validated or stored %}
+{% if created or deleted or validated or stored or avisos %}
 <script>
   (function () {
     var url = new URL(window.location.href);
@@ -179,6 +182,7 @@
     url.searchParams.delete('deleted');
     url.searchParams.delete('validated');
     url.searchParams.delete('stored');
+    url.searchParams.delete('avisos');
     history.replaceState(null, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams : ''));
   })();
 </script>

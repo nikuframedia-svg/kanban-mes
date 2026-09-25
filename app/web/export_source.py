@@ -141,5 +141,9 @@ def prepare_sheets(sheets: list[dict]) -> list[dict]:
                 problems.append({"uid": sheet["uid"], "sheet_no": sheet.get("sheet_no"), "row": i + 1,
                                  "reason": f"Referência {ref.get('component_ref') or ref.get('plan_key')}: quantidade produzida desconhecida."})
     if problems:
-        raise IncompleteExport(problems)
+        # Nada bloqueia a exportação (25/09): as linhas sem saldo seguem sem
+        # quantidade e ficam listadas no log para quem quiser rever.
+        for problem in problems:
+            print(f"[export] folha {problem.get('sheet_no') or problem.get('uid')} "
+                  f"linha {problem.get('row')}: {problem.get('reason')}", flush=True)
     return prepared

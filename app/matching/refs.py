@@ -116,6 +116,25 @@ class PlanIndex:
             return sim.normalize_code(value)
         return sim.compact(value)
 
+    def same_identity(self, field_name: str, written: str | None,
+                      plan_value: str | None) -> bool:
+        """O escrito e o valor do plano são a mesma identidade, só com outro
+        formato («200 X 20» e «L200X200X20», «250001» e «OF250001»)."""
+        f = self._field_by_name.get(field_name)
+        if f is None:
+            return bool(sim.compact(plan_value)) and sim.compact(written) == sim.compact(plan_value)
+        norm_fn = (sim.normalize_code if f.kind == "code" else
+                   sim.normalize_profile if f.kind == "profile" else sim.compact)
+        plan_norm = norm_fn(plan_value)
+        if not plan_norm:
+            return False
+        candidates = {plan_norm}
+        if f.kind == "code" and f.code_prefix:
+            # a folha guarda a OF sem prefixo e o plano com ele
+            bare = sim.normalize_code(sim.strip_ref_prefix(plan_value))
+            candidates |= {bare, f.code_prefix + bare}
+        return bool(candidates & self.variants_for(field_name, written))
+
     def _value_set(self, field_name: str) -> frozenset[str]:
         cached = self._value_sets.get(field_name)
         if cached is None:

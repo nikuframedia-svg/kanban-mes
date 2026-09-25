@@ -53,8 +53,8 @@ def materialize_sheet(sheet: dict, template: KanbanTemplate) -> dict:
             template.name == "cantoneiras_kanban"
             and is_marked(field_value(source_row, "perf_comp"))
         )
-        if sheet.get("status") != "validated" and row_cross.get("quantity_basis") and (row_cross["quantity_basis"].get("status") != "ready"):
-            raise ValueError("Saldo histórico por verificar; exportação de produção indisponível.")
+        # Saldo histórico por confirmar já não bloqueia (25/09): a linha segue
+        # sem referências nem quantidade inventada, com o aviso na validação.
         refs = list(row_cross.get("plan_refs") or []) if full_profile else []
 
         if full_profile and refs:

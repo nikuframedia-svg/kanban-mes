@@ -83,10 +83,12 @@ def test_nine_rows_unknown_count_and_real_missing_reference(client, monkeypatch)
     page = client.get(f'/sheet/{uid}').text
     assert 'Corrigir contagem' not in page and 'name="count"' not in page
     result = client.post(f'/sheet/{uid}/validate', data={'revision': current(uid)['revision']})
-    from urllib.parse import unquote_plus
-    message = unquote_plus(result.headers['location'])
-    assert 'Linha 9' in message and 'contagem' not in message, message
-    assert current(uid)['status'] != 'validated' and not client.stored_calls
+    # Nada bloqueia (25/09): valida, e a linha sem referência fica como aviso.
+    assert 'erro=' not in result.headers['location'], result.headers
+    assert current(uid)['status'] == 'validated' and len(client.stored_calls) == 1
+    warnings = client.stored_calls[0]['sheet']['cross_check']['validation_warnings']
+    assert any(w['code'] == 'sem_ligacao_ao_plano' and w['row'] == 9 for w in warnings), warnings
+    assert not any('contagem' in w['message'] for w in warnings)
 
 
 @pytest.mark.parametrize('real_change', [False, True])
@@ -166,20 +168,26 @@ def test_cancelled_automatic_write_cannot_modify_validated_sheet(client, monkeyp
     assert current(uid) == frozen
 
 
-def test_required_header_and_storage_failure_stay_editable(client, monkeypatch):
+def test_empty_operator_validates_with_warning_and_storage_failure_stays_editable(client, monkeypatch):
     uid = create()
     with db.connect() as conn:
         sheet = db.get_sheet(conn, uid)
         data = sheet['sheet_data']; data['header']['operador'] = ''
         db.save_sheet_data_with_edits(conn, uid, data, sheet['revision'], [])
-    result = client.post(f'/sheet/{uid}/validate', data={'revision': current(uid)['revision']})
-    assert 'operador' in result.headers['location'] and not client.stored_calls
-    assert current(uid)['status'] != 'validated'
+    stored = main.pg_store.store_validated_sheet
     def offline(*args, **kwargs):
         raise RuntimeError('storage unavailable')
+    # O Postgres não confirmou: continua editável (é a única recusa que resta).
     monkeypatch.setattr(main.pg_store, 'store_validated_sheet', offline)
-    result = client.post(f'/sheet/{uid}/validate', data={'revision': current(uid)['revision'], 'header_operador': 'ANA'})
+    result = client.post(f'/sheet/{uid}/validate', data={'revision': current(uid)['revision']})
     assert 'erro=' in result.headers['location'] and current(uid)['status'] != 'validated'
+    monkeypatch.setattr(main.pg_store, 'store_validated_sheet', stored)
+    # Operador vazio já não recusa: valida com aviso.
+    result = client.post(f'/sheet/{uid}/validate', data={'revision': current(uid)['revision']})
+    assert 'erro=' not in result.headers['location'], result.headers
+    assert current(uid)['status'] == 'validated' and len(client.stored_calls) == 1
+    codes = {w['code'] for w in client.stored_calls[0]['sheet']['cross_check']['validation_warnings']}
+    assert 'operador_vazio' in codes
 
 
 def test_browser_single_validation(client, monkeypatch, tmp_path):

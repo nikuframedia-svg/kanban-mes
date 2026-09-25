@@ -36,10 +36,10 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.gzip import GZipMiddleware
 
-from .. import db, imaging, image_storage, pg_store, production_facts
+from .. import db, imaging, image_storage, pg_store, production_facts, validation_warnings
 from ..config import settings
 from ..health import STARTUP_HEALTH
-from ..matching import carryover, header_cross, loaders, operador
+from ..matching import bindings as plan_bindings, carryover, header_cross, loaders, operador
 from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
@@ -508,6 +508,26 @@ def resolve_operator(conn, uid: str, sheet: dict) -> dict | None:
 _HISTORY_AUTO = object()
 
 
+def _human_paths(evidence) -> set[str]:
+    return {path for path, source in evidence.provenance["field_sources"].items()
+            if source.get("source") == "human"}
+
+
+def _plan_may_replace(is_human: bool, scorer, field_name: str, current, proposal) -> bool:
+    """A substituição pelo plano nunca troca uma decisão humana por outro valor.
+
+    Só lhe aplica o formato canónico do plano quando é a mesma identidade
+    («200 X 20» → «L200X200X20»). Se o operador escreveu outra coisa, fica o
+    que escreveu e a célula mostra a diferença — decide ele. Um campo que a
+    pessoa esvaziou volta a poder ser preenchido (herança ou plano).
+    """
+    if not is_human or not str(current or "").strip():
+        return True
+    if scorer is None:
+        return False
+    return scorer.index.same_identity(field_name, current, proposal)
+
+
 def run_cross_check(conn, uid: str, *, force_plan: bool = False, scorer_override: Scorer | None = None,
                     engine_override: str | None = None,
                     historical_context_override=_HISTORY_AUTO) -> bool:
@@ -517,9 +537,14 @@ def run_cross_check(conn, uid: str, *, force_plan: bool = False, scorer_override
         return False
     if engine == "v3" and sheet["template_name"] == "cantoneiras_kanban":
         if force_plan and scorer_override is None:
-            scorer_override = make_scorer(
-                sheet["template_name"], require_current=True,
-            )
+            try:
+                scorer_override = make_scorer(
+                    sheet["template_name"], require_current=True,
+                )
+            except Exception:
+                # Plano indisponível: segue com o índice em cache (ou sem
+                # plano); a validação regista o aviso em vez de recusar.
+                scorer_override = None
 
         return _run_cross_check_v3(
             conn, uid, scorer_override=scorer_override,
@@ -541,6 +566,7 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
         return False
     template = get_template(base["template_name"])
     evidence = build_evidence(base, db.evidence_edits(conn, base))
+    human_paths = _human_paths(evidence)
     data = copy.deepcopy(base["sheet_data"])
     rows = data.get("rows") or []
     observed_header = evidence.data.get("header") or {}
@@ -568,7 +594,8 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
             history = historical_context_override
         cross = check_sheet_v3(
             evidence.data, scorer.params, index=scorer.index,
-            historical_context=history, explicit_bindings=evidence.explicit_bindings,
+            historical_context=history,
+            explicit_bindings=plan_bindings.reattach(evidence.explicit_bindings, scorer.index),
             provenance=evidence.provenance,
         )
     else:
@@ -619,6 +646,8 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
             path = f"rows[{i}].{key}"
             new = cell.get("proposal")
             before = (evidence.data.get("rows") or [])[i].get(key)
+            if not _plan_may_replace(path in human_paths, scorer, key, before, new):
+                continue
             apply_value(path, rows[i], key, new, "cross:v3")
             if before != new:
                 cell["applied"] = True
@@ -723,10 +752,18 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
                 "status": "no_reference",
                 "message": "Plano indisponível; linhas mantidas sem cruzamento.",
             }
+    human_rows = db.human_fields_by_row(conn, uid)
     if scorer is not None:
-        # Edições anteriores de identidade são evidência de auditoria, não um
-        # veto sobre campos que pertencem ao planeamento. Também não desligam
-        # a herança que o cross precisa de resolver.
+        # Escolhas feitas antes da última carga do Excel voltam a valer se a
+        # mesma linha existir na carga atual (app/matching/bindings.py).
+        chosen = {i: row["_plan_binding"] for i, row in enumerate(rows)
+                  if isinstance(row.get("_plan_binding"), dict)
+                  and row["_plan_binding"].get("selected_explicitly")}
+        for i, binding in plan_bindings.reattach(chosen, scorer.index).items():
+            rows[i]["_plan_binding"] = binding
+        # Edições anteriores de identidade não desligam a herança que o cross
+        # precisa de resolver; um valor escrito por pessoa só é trocado pelo
+        # mesmo valor noutro formato (ver _plan_may_replace).
         cross = check_sheet(rows, scorer, {}, footer=data.get("footer"))
         plan_reference["snapshot_id"] = scorer.index.snapshot_id
     else:
@@ -826,6 +863,9 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
                     proposal = cell["proposal"]
                     if str(rows[i].get(f) or "").strip() == str(proposal).strip():
                         continue
+                    if not _plan_may_replace(f in human_rows.get(i, ()), scorer, f,
+                                             rows[i].get(f), proposal):
+                        continue
                     key = (i, f)
                     original_values.setdefault(key, rows[i].get(f))
                     rows[i][f] = proposal if str(proposal).strip() else None
@@ -908,8 +948,8 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
 def home(request: Request, status: str = "", operador: str = "", setor: str = "",
          data: str = "", data_captura: str = "", of: str = "",
          created: str = "", deleted: str = "", validated: str = "",
-         stored: str = "", page: int = 1):
-    status = status if status in {"", "pending", "validated", "error"} else ""
+         stored: str = "", avisos: str = "", page: int = 1):
+    status = status if status in {"", "pending", "validated", "avisos", "error"} else ""
     page = max(1, page)
     conn = _conn()
     try:
@@ -937,7 +977,7 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
         "history_url": history_url,
         "status_urls": {
             value: _history_location(page=1, **(filters | {"status": value}))
-            for value in ("", "pending", "validated", "error")
+            for value in ("", "pending", "validated", "avisos", "error")
         },
         "clear_url": _history_location(status=status),
         "pagination": {
@@ -946,7 +986,7 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
             "next": _history_location(page=page + 1, **filters) if page < pages else None,
         },
         "created": created, "deleted": deleted,
-        "validated": validated, "stored": stored,
+        "validated": validated, "stored": stored, "avisos": avisos,
         "tunnel_url": tunnel_url(),
     })
 
@@ -1866,6 +1906,8 @@ def sheet_reference(
             "snapshot_id": str(current_snapshot),
             "plan_key": plan_key,
             "selected_explicitly": True,
+            # para religar a escolha à mesma linha depois de uma carga nova
+            "identity": plan_bindings.identity_of(entry),
         }
         row["modelo"] = model
         row["_plan_binding"] = binding
@@ -2209,6 +2251,11 @@ def recheck(uid: str, back: str = Form("")):
     return RedirectResponse(_sheet_location(uid, back), status_code=303)
 
 
+_CHANGED_ELSEWHERE = (
+    "A folha foi alterada noutra janela; confirma os valores atuais e valida de novo."
+)
+
+
 @app.post("/sheet/{uid}/validate")
 def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
              history_back: str = Form(""), revision: int | None = Form(None), review_token: str = Form(""),
@@ -2217,7 +2264,15 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
              header_setor_maquina: str | None = Form(None),
              header_data: str | None = Form(None),
              header_turno: str | None = Form(None)):
-    """Re-cross atual + reserva CAS + INSERT PG + imutabilidade local."""
+    """Re-cross atual + reserva CAS + INSERT PG + imutabilidade local.
+
+    Nada de negócio bloqueia (decisão de 25/09): operador ou data em falta,
+    linhas sem candidato, identidade por confirmar, saldo histórico, plano
+    que mudou, cruzamento instável… ficam como avisos gravados com a folha
+    (app/validation_warnings.py). Só se recusa o que impediria gravar a folha
+    que o operador está a ver — outra janela alterou-a nesse instante — ou
+    quando o Postgres não confirma.
+    """
     # «Quem valida» deixou de existir no form: valida-se sem entidade e o
     # registo interno fica «operador».
     actor = actor.strip() or "operador"
@@ -2230,6 +2285,8 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
     outcome = "failed"
     row_count = 0
     validation_snapshot = None
+    warnings: list[dict] = []
+    destination = _safe_history_back(back) or _safe_history_back(history_back) or "/"
     cancel_pending(uid)
     conn = _conn()
     focus: str | None = None
@@ -2239,11 +2296,13 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         if not before:
             raise HTTPException(404)
         if before["status"] == "validated":
-            raise HTTPException(409, "Folha já validada.")
+            # Um segundo clique ou um retry não é um erro: a folha já está.
+            outcome = "already_validated"
+            return RedirectResponse(
+                _with_query(destination, validated=before.get("sheet_no") or uid[:8]),
+                status_code=303)
         if revision is not None and revision != before["revision"]:
-            raise HTTPException(
-                409, "A folha foi alterada; confirma novamente os valores."
-            )
+            raise HTTPException(409, _CHANGED_ELSEWHERE)
         # O botão Validar também confirma o que estiver atualmente escrito no
         # formulário do cabeçalho. Assim o utilizador nunca é obrigado a
         # carregar primeiro em «Guardar cabeçalho», nem perde o rascunho que
@@ -2280,23 +2339,66 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                 if not db.save_sheet_data_with_edits(
                     conn, uid, data_doc, before["revision"], edits
                 ):
-                    raise HTTPException(
-                        409, "A folha foi alterada; confirma novamente os valores."
-                    )
+                    raise HTTPException(409, _CHANGED_ELSEWHERE)
                 before = db.get_sheet(conn, uid)
                 if not before:
                     raise HTTPException(404)
+
+        # Data: a gravação exige uma data interpretável. Se a folha não a tem
+        # (apagada ou ilegível), usa-se a regra da casa — dia útil anterior à
+        # digitalização — como edição do sistema, auditada, antes do cruzamento
+        # (o saldo histórico depende dela).
+        assumed_date = None
+        header = (before.get("sheet_data") or {}).get("header") or {}
+        try:
+            date_ok = bool(pg_store.normalize_sheet_date(header.get("data")))
+        except pg_store.InvalidSheetDate:
+            date_ok = False
+        if not date_ok:
+            assumed_date = _assumed_sheet_date(before)
+            if assumed_date:
+                data_doc = copy.deepcopy(before.get("sheet_data") or {
+                    "header": {}, "rows": [], "footer": {},
+                })
+                data_doc.setdefault("header", {})["data"] = assumed_date
+                if not db.save_sheet_data_with_edits(
+                    conn, uid, data_doc, before["revision"],
+                    [("header.data", header.get("data"), assumed_date,
+                      "system", "validacao:data_assumida")],
+                    cross_check=before.get("cross_check"), write_cross=True,
+                ):
+                    raise HTTPException(409, _CHANGED_ELSEWHERE)
+                before = db.get_sheet(conn, uid)
+                if not before:
+                    raise HTTPException(404)
+
         # A validação confirma o snapshot atual. Se for o mesmo, reutiliza o
         # índice já construído; se mudou, constrói exatamente o novo snapshot.
+        # Com o plano em baixo, vale o cruzamento que estava na folha (aviso).
+        # (plano indisponível fica no plan_reference do cross → aviso; um
+        # erro do próprio cruzamento é técnico e continua a travar)
         cross_started = time.monotonic()
         if not run_cross_check(conn, uid, force_plan=True):
-            raise HTTPException(
-                409, "A folha mudou durante o cross-check; tenta novamente."
-            )
+            raise HTTPException(409, _CHANGED_ELSEWHERE)
         timings["cross_ms"] = max(
             0.0,
             (time.monotonic() - cross_started) * 1000.0 - timings["index_ms"],
         )
+        sheet = db.get_sheet(conn, uid)
+        if not sheet:
+            raise HTTPException(404)
+        template = get_template(sheet["template_name"])
+        warnings = validation_warnings.collect(
+            sheet,
+            current_snapshot=(_current_index_snapshot(template.index_loader)
+                              if template.index_loader else None),
+            assumed_date=assumed_date)
+        cross = sheet.get("cross_check") or {}
+        cross["validation_warnings"] = warnings
+        if not db.save_cross_check(conn, uid, cross, expected_revision=sheet["revision"]):
+            raise HTTPException(409, _CHANGED_ELSEWHERE)
+        expected_revision = sheet["revision"]
+
         lock_started = time.monotonic()
         conn.execute("BEGIN IMMEDIATE")
         timings["sqlite_lock_wait_ms"] = (
@@ -2305,81 +2407,11 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
         sheet = db.get_sheet(conn, uid)
         if not sheet:
             raise HTTPException(404)
-        if sheet["status"] == "validated":
-            raise HTTPException(409, "Folha já validada.")
-        header = (sheet["sheet_data"] or {}).get("header") or {}
-        if not str(header.get("operador") or "").strip():
-            raise HTTPException(422, "Validação exige operador preenchido no cabeçalho.")
-        if not str(header.get("data") or "").strip():
-            raise HTTPException(422, "Validação exige data preenchida no cabeçalho.")
-        template = get_template(sheet["template_name"])
+        if sheet["status"] == "validated" or sheet["revision"] != expected_revision:
+            raise HTTPException(409, _CHANGED_ELSEWHERE)
         cross = sheet.get("cross_check") or {}
         validation_snapshot = cross.get("snapshot_id")
         row_count = len((sheet.get("sheet_data") or {}).get("rows") or [])
-        if template.index_loader:
-            plan_ref = cross.get("plan_reference") or {}
-            if plan_ref.get("status") != "available" or not cross.get("snapshot_id"):
-                raise HTTPException(
-                    422, "Validação bloqueada: o planeamento está indisponível."
-                )
-            if cross.get("data_revision") != sheet["revision"]:
-                raise HTTPException(
-                    409, "A folha mudou durante o cross-check; tenta novamente."
-                )
-            if cross.get("engine") != "cross-v3" and cross.get("fixed_point") is False:
-                raise HTTPException(
-                    422, "O cross-check não estabilizou; revê a identidade das linhas."
-                )
-            rows = (sheet.get("sheet_data") or {}).get("rows") or []
-            cross_rows = {
-                row.get("row_index"): row for row in cross.get("rows", [])
-            }
-            visible_no = 0
-            for row_index, row in enumerate(rows):
-                if row.get("_deleted") is True:
-                    continue
-                visible_no += 1
-                if not any(
-                    value is not None and str(value).strip()
-                    for key, value in row.items() if not str(key).startswith("_")
-                ):
-                    continue
-                row_cross = cross_rows.get(row_index) or {}
-                if cross.get("engine") == "cross-v3" and row_cross.get("row_kind") in {"empty", "activity"}:
-                    continue
-                if row.get("_identity_unresolved"):
-                    raise HTTPException(422, f"Linha {visible_no}: {row['_identity_unresolved']}")
-                if row_cross.get("binding_stale"):
-                    raise HTTPException(
-                        422,
-                        f"Linha {visible_no}: o planeamento mudou; "
-                        "reabre Referências.",
-                    )
-                if not row_cross.get("matched_plan_key"):
-                    raise HTTPException(
-                        422,
-                        f"Linha {visible_no}: não existe candidato no planeamento.",
-                    )
-                if is_marked(field_value(row, "perf_comp")):
-                    if not row_cross.get("plan_refs_valid") or (row_cross.get("quantity_basis") or {}).get("status") != "ready":
-                        raise HTTPException(
-                            422,
-                            f"Linha {visible_no}: "
-                            + (row_cross.get("plan_refs_error")
-                               or "as referências de perfil completo são inválidas."),
-                        )
-            # Última sonda imediatamente antes de materializar no Postgres.
-            # Se uma carga foi publicada depois do cross, esse snapshot já
-            # deixou de ser o atual e a seleção explícita tem de ser reaberta.
-            current_snapshot = _current_index_snapshot(template.index_loader)
-            if current_snapshot is None:
-                raise HTTPException(
-                    422, "Validação bloqueada: o planeamento está indisponível."
-                )
-            if str(current_snapshot) != str(cross.get("snapshot_id")):
-                raise HTTPException(
-                    409, "O planeamento mudou; reabre Referências e confirma novamente."
-                )
         try:
             store_started = time.monotonic()
             n = pg_store.store_validated_sheet(
@@ -2412,18 +2444,13 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
             )
         outcome = "validated"
     except HTTPException as exc:
-        # Os portões da validação (422/409) voltam à folha como banner: o
-        # form navega para o POST, e a resposta JSON crua lê-se como crash.
-        # Só 404 sobe: todos os restantes portões voltam à folha. Os 5xx de
-        # escrita já foram registados no log antes de serem convertidos.
+        # As recusas técnicas (409/422/503) voltam à folha como banner: o form
+        # navega para o POST, e a resposta JSON crua lê-se como crash. Só 404
+        # sobe. Os 5xx de escrita já foram registados no log.
         if exc.status_code == 404:
             raise
-        focus = (
-            "header.operador" if "operador" in str(exc.detail).lower()
-            else ("header.data" if "data" in str(exc.detail).lower() else "problem")
-        )
         return RedirectResponse(
-            _sheet_location(uid, back, erro=exc.detail, focus=focus), status_code=303,
+            _sheet_location(uid, back, erro=exc.detail, focus="problem"), status_code=303,
         )
     except Exception as exc:
         print(
@@ -2448,15 +2475,16 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
             "snapshot_id": validation_snapshot,
             "rows": row_count,
             "outcome": outcome,
+            "warnings": len(warnings),
             **{key: round(value, 2) for key, value in timings.items()},
         }, ensure_ascii=False), flush=True)
         _validation_timing.current = None
-    destination = _safe_history_back(back) or _safe_history_back(history_back) or "/"
     return RedirectResponse(
         _with_query(
             destination,
             validated=sheet.get("sheet_no") or uid[:8],
             stored=n,
+            avisos=len(warnings) or None,
         ),
         status_code=303,
     )

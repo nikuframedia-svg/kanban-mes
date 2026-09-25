@@ -174,7 +174,7 @@ def test_folha_671_full_profiles_reproduce_frozen_quantities_and_meters():
         assert plan_review.totals(shown)["metros"] == expected[profile][1]
 
 
-def test_legacy_recovery_uses_only_explicit_snapshot_and_never_replaces_zero(monkeypatch):
+def test_legacy_recovery_uses_only_explicit_snapshot_and_never_replaces_zero(monkeypatch, capsys):
     source = sheet()
     source["cross_check"]["rows"] = [{"row_index": 0}]
     seen = []
@@ -193,9 +193,11 @@ def test_legacy_recovery_uses_only_explicit_snapshot_and_never_replaces_zero(mon
     assert again["cross_check"]["rows"][0]["plan_refs"][0]["assumed_quantity"] == 0
     assert not seen
     source["cross_check"].pop("snapshot_id")
-    with pytest.raises(export_source.IncompleteExport) as error:
-        export_source.prepare_sheets([source])
-    assert error.value.problems[0]["row"] == 1
+    # Sem carga identificável a exportação segue (25/09) sem inventar
+    # quantidades: a linha fica sem referências e o problema vai para o log.
+    unresolved = export_source.prepare_sheets([source])[0]
+    assert not unresolved["cross_check"]["rows"][0].get("plan_refs")
+    assert "linha 1" in capsys.readouterr().out
 
 
 def test_legacy_children_are_preferred_to_plan_even_when_all_zero(monkeypatch):
@@ -343,7 +345,7 @@ def test_pg_archive_wins_over_local_draft_and_basedados_never_needs_sqlite(clien
     assert len(export_routes.export_sheets(lambda: pytest.fail("BaseDados must not read SQLite"))) == 1
 
 
-def test_historical_key_locates_snapshot_but_ambiguous_key_is_a_diagnostic(monkeypatch):
+def test_historical_key_locates_snapshot_but_ambiguous_key_is_a_diagnostic(monkeypatch, capsys):
     legacy = sheet()
     legacy["cross_check"] = {"rows": [{"row_index": 0, "matched_plan_key": "old:0"}]}
     monkeypatch.setattr(loaders, "_fetch", lambda *_: [])
@@ -357,8 +359,10 @@ def test_historical_key_locates_snapshot_but_ambiguous_key_is_a_diagnostic(monke
     assert called == [("old", "OF42")]
     assert len(prepared["cross_check"]["rows"][0]["plan_refs"]) == 3
     monkeypatch.setattr(plan_review, "fetch_keys", lambda *_: [entries()[0], {**entries()[0], "snapshot_id": "different"}])
-    with pytest.raises(export_source.IncompleteExport):
-        export_source.prepare_sheets([legacy])
+    legacy["cross_check"]["rows"][0].pop("plan_refs", None)
+    ambiguous = export_source.prepare_sheets([legacy])[0]
+    assert not ambiguous["cross_check"]["rows"][0].get("plan_refs")
+    assert "[export]" in capsys.readouterr().out
 
 
 def test_lookup_preserves_model_punctuation_source_scope_and_paginates_50(monkeypatch):

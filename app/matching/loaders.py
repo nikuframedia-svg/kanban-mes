@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import psycopg
 
 from .. import pg
+from .plan_values import clean_entry
 from .refs import FieldSpec, IndexSpec, PlanIndex
 
 
@@ -131,6 +132,9 @@ def load_cantoneiras_index(snapshot_id: str | None = None) -> PlanIndex:
         """,
         (snapshot_id,),
     )
+    # Erros de fórmula do Excel (ex.: perfil «#VALUE!» da OF265609) nunca
+    # chegam às células nem servem de proposta.
+    entries = [clean_entry(entry) for entry in entries]
     loaded = entries[0].get("snapshot_loaded_at") if entries else None
     age_days = (
         max(0.0, (datetime.now(timezone.utc) - loaded).total_seconds() / 86400.0)

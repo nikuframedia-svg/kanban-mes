@@ -16,6 +16,7 @@ import psycopg
 from . import pg
 from .matching import similarity as sim
 from .production_facts import materialize_sheet
+from .validation_warnings import for_row as warnings_for_row
 from .templates_spec import LEGACY_FIELD_ALIASES, KanbanTemplate, is_marked
 
 APP_VERSION = "kanban-mes 0.1.0"
@@ -342,6 +343,9 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 extra: dict[str, object] = {"plan_identity": cr["plan_identity"]} if cr.get("plan_identity") else {}
                 if cr.get("quantity_basis"):
                     extra["quantity_basis"] = cr["quantity_basis"]
+                row_warnings = warnings_for_row(cross.get("validation_warnings"), i)
+                if row_warnings:
+                    extra["warnings"] = row_warnings
                 for f, value in row.items():
                     if value is None or str(value).strip() == "":
                         continue

@@ -9,7 +9,7 @@
   {% elif plano.get('age_hours') is not none %} · plano de há {{ '%.0f' | format(plano.age_hours) }} h{% endif %}
 </p>
 {% if erro %}<div class="alert warn" role="alert">{{ erro }}</div>{% endif %}
-{% if consultation_only %}<p class="muted tiny">As quantidades do plano atual não são produção desta folha. A validação continua a exigir saldo histórico válido.</p>{% endif %}
+{% if consultation_only %}<p class="muted tiny">A tabela é o plano atual, só para consulta: as quantidades dele não são produção desta folha. Validar não fica bloqueado — a linha é gravada sem quantidade e com aviso, para rever.</p>{% endif %}
 <div class="plan-toolbar">
   <button type="button" class="btn ghost" onclick="abrirPlano('/sheet/{{ uid }}/plano/{{ row_index }}?scope={{ 'profile' if all_of else 'of' }}&amp;back={{ back_url|urlencode }}')">{{ 'Ver só este perfil' if all_of else 'Ver toda a OF' }}</button>
 </div>
