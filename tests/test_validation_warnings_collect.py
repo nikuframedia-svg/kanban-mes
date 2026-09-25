@@ -66,3 +66,11 @@ def test_avisos_de_uma_linha_para_o_registo_de_producao():
                 {"code": "c", "message": "m3", "row": 2, "row_index": 1}]
     assert vw.for_row(warnings, 1) == [{"code": "c", "message": "m3"}]
     assert vw.for_row(None, 0) == []
+
+
+def test_correspondencia_fraca_valida_com_aviso():
+    rows = [{"of": "263210", "perfil": "200 X 20"}]
+    checks = [{"row_index": 0, "matched_plan_key": "k", "mode": "weak_guess"}]
+    got = vw.collect(sheet(rows, checks))
+    assert [w["code"] for w in got] == ["correspondencia_fraca"]
+    assert got[0]["row"] == 1
