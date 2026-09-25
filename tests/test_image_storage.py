@@ -145,3 +145,25 @@ def test_failed_audit_does_not_leave_unaudited_restoration(api, storage):
     response = client.post(f'/sheet/{uid}/photo/restore', data={'revision':9}, files={'image':('scan.png',png(),'image/png')})
     assert response.status_code == 500
     assert not list((storage/'images').iterdir())
+
+
+def test_foto_de_ecra_e_jpeg_com_cache_e_304_sem_tocar_na_base(api, storage):
+    client, uid, connect, before = api
+    (storage/'images/scan.png').write_bytes(png())
+    shown = client.get(f'/sheet/{uid}/photo')
+    assert shown.status_code == 200 and shown.headers['content-type'] == 'image/jpeg'
+    assert shown.headers['cache-control'] == 'private, no-cache'
+    same = client.get(f'/sheet/{uid}/photo', headers={'If-None-Match': shown.headers['etag']})
+    assert same.status_code == 304 and not same.content
+    conn = connect()
+    sheet = db.get_sheet(conn, uid)
+    conn.close()
+    versioned = client.get(f'/sheet/{uid}/photo?v={main.photo_version(sheet)}')
+    assert 'immutable' in versioned.headers['cache-control']
+    stale = client.get(f'/sheet/{uid}/photo?v=versao-antiga')
+    assert stale.headers['cache-control'] == 'private, no-cache'
+    assert client.get(f'/sheet/{uid}/photo?full=1').headers['content-type'] == 'image/png'
+    assert client.get(f'/sheet/{uid}/photo?original=1').content == png()
+    conn = connect()
+    assert tuple(conn.execute('SELECT * FROM sheets WHERE uid=?', (uid,)).fetchone()) == before
+    conn.close()

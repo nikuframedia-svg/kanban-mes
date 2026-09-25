@@ -173,8 +173,8 @@
         </div>
         {% endif %}
         {% if sheet.image_path %}
-        <a href="/sheet/{{ sheet.uid }}/photo" target="_blank" title="Abrir em tamanho real">
-          <img class="review-photo" id="folha-img" src="/sheet/{{ sheet.uid }}/photo"
+        <a href="/sheet/{{ sheet.uid }}/photo?full=1&amp;v={{ photo_v }}" target="_blank" title="Abrir em tamanho real">
+          <img class="review-photo" id="folha-img" src="/sheet/{{ sheet.uid }}/photo?v={{ photo_v }}"
                alt="Foto da folha kanban" loading="lazy"
                onerror="this.style.display='none'; document.getElementById('photo-unavailable').style.display='block'"
                onload="this.style.display=''; document.getElementById('photo-unavailable').style.display='none'">

@@ -11,26 +11,31 @@ Só SELECTs. A escrita de validados vive em app/pg_store.py, não aqui.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 
 import psycopg
-from psycopg.rows import dict_row
 
-from ..config import settings
+from .. import pg
 from .refs import FieldSpec, IndexSpec, PlanIndex
 
 
 def _dsn() -> str:
-    return os.environ.get("MES_PG_DSN") or settings.pg_dsn
+    return pg.dsn()
 
 
 def _fetch(sql: str, params: tuple | None = None) -> list[dict]:
-    with psycopg.connect(_dsn(), row_factory=dict_row) as conn:
-        conn.read_only = True
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            return cur.fetchall()
+    # Ligação reaproveitada: pelo túnel da fábrica, abrir uma por consulta
+    # custava ~0,5 s antes de o SELECT começar (ver app/pg.py).
+    return pg.fetch(sql, params)
+
+
+def _latest_snapshot_id() -> str | None:
+    """Carga mais recente do plano de cantoneiras (uma linha de audit_mtg).
+
+    Perguntá-lo à vista kanban_plan_lines obrigava o Postgres a percorrer
+    todas as linhas de todas as cargas guardadas (~1,2 s medidos).
+    """
+    return (plan_snapshot_info() or {}).get("snapshot_id") or None
 
 
 def _plan_age_days(snapshot_like: str) -> float:
@@ -104,16 +109,11 @@ def load_cantoneiras_index(snapshot_id: str | None = None) -> PlanIndex:
     mesma fotografia que o índice, mesmo que uma nova carga seja publicada a
     meio do pedido.
     """
-    snapshot_filter = (
-        "snapshot_id = %s" if snapshot_id else
-        "snapshot_id = ("
-        "SELECT snapshot_id FROM analytics_mtg.kanban_plan_lines "
-        "WHERE source_app = 'kanban-mes' "
-        "ORDER BY snapshot_loaded_at DESC, snapshot_id DESC LIMIT 1)"
-    )
-    canonical_params = (snapshot_id,) if snapshot_id else None
+    snapshot_id = snapshot_id or _latest_snapshot_id()
+    if not snapshot_id:
+        return PlanIndex([], CANTONEIRAS_SPEC, plan_age_days=30.0, snapshot_id=None)
     entries = _fetch(
-        f"""
+        """
         SELECT snapshot_id, snapshot_loaded_at, plan_key,
                production_order_no AS of, sales_order_no AS ov,
                customer_name AS cliente, customer_name AS cliente_nome,
@@ -127,9 +127,9 @@ def load_cantoneiras_index(snapshot_id: str | None = None) -> PlanIndex:
                remaining_rule AS regra_calculo, closed_x
           FROM analytics_mtg.kanban_plan_lines
          WHERE source_app = 'kanban-mes'
-           AND {snapshot_filter}
+           AND snapshot_id = %s
         """,
-        canonical_params,
+        (snapshot_id,),
     )
     loaded = entries[0].get("snapshot_loaded_at") if entries else None
     age_days = (
@@ -303,17 +303,10 @@ def _fetch_canonical_lines(of: str, perfil: str | None,
     profile_sql = (
         "AND upper(btrim(profile_type)) = upper(btrim(%s))" if perfil else ""
     )
-    snapshot_sql = (
-        "snapshot_id = %s" if snapshot_id else
-        "snapshot_id = ("
-        "SELECT snapshot_id FROM analytics_mtg.kanban_plan_lines "
-        "WHERE source_app = 'kanban-mes' "
-        "ORDER BY snapshot_loaded_at DESC, snapshot_id DESC LIMIT 1)"
-    )
-    params: list[object] = []
-    if snapshot_id:
-        params.append(snapshot_id)
-    params.append(of)
+    snapshot_id = snapshot_id or _latest_snapshot_id()
+    if not snapshot_id:
+        return []
+    params: list[object] = [snapshot_id, of]
     if perfil:
         params.append(perfil)
     limit_sql = "LIMIT %s" if limit is not None else ""
@@ -329,7 +322,7 @@ def _fetch_canonical_lines(of: str, perfil: str | None,
                remaining_rule
           FROM analytics_mtg.kanban_plan_lines
          WHERE source_app = 'kanban-mes'
-           AND {snapshot_sql}
+           AND snapshot_id = %s
            AND production_order_no = %s
            {profile_sql}
          ORDER BY closed_x, remaining_quantity DESC NULLS LAST,
@@ -349,26 +342,21 @@ def fetch_profiles_in_of(of: str, *, snapshot_id: str | None = None) -> list[dic
     """
     if not of:
         return []
-    snapshot_sql = (
-        "snapshot_id = %s" if snapshot_id else
-        "snapshot_id = (SELECT snapshot_id "
-        "FROM analytics_mtg.kanban_plan_lines "
-        "WHERE source_app = 'kanban-mes' "
-        "ORDER BY snapshot_loaded_at DESC, snapshot_id DESC LIMIT 1)"
-    )
-    params = (snapshot_id, of) if snapshot_id else (of,)
+    snapshot_id = snapshot_id or _latest_snapshot_id()
+    if not snapshot_id:
+        return []
     return _fetch(
-        f"""
+        """
         SELECT btrim(profile_type) AS perfil, count(*) AS n_linhas
           FROM analytics_mtg.kanban_plan_lines
          WHERE source_app = 'kanban-mes'
-           AND {snapshot_sql}
+           AND snapshot_id = %s
            AND production_order_no = %s
            AND profile_type IS NOT NULL AND btrim(profile_type) <> ''
          GROUP BY 1 ORDER BY 2 DESC, 1
          LIMIT 40
         """,
-        params,
+        (snapshot_id, of),
     )
 
 

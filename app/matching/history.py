@@ -230,37 +230,35 @@ def load_history_context(current_index, sheet_date: object) -> HistoricalContext
     if _date(sheet_date) is None or not getattr(current_index, "entries", None):
         return None
     from . import loaders
+    from .. import pg
     import psycopg
-    from psycopg.rows import dict_row
     try:
-        with psycopg.connect(loaders._dsn(), row_factory=dict_row, connect_timeout=3) as conn:
-            conn.read_only = True
-            with conn.cursor() as cur:
-                cur.execute("SET LOCAL statement_timeout = '3000ms'")
+        with pg.read_connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout = '3000ms'")
+            cur.execute(
+                "SELECT snapshot_id, loaded_at FROM audit_mtg.snapshots "
+                "WHERE snapshot_id LIKE %s", (loaders._CANTONEIRAS_LIKE,),
+            )
+            choice = select_snapshot(cur.fetchall(), sheet_date, current_index.snapshot_id)
+            if choice is None:
+                return None
+            cache = dict(getattr(current_index, "_cross_history_contexts", {}))
+            if choice.snapshot_id in cache:
+                return replace(cache[choice.snapshot_id], choice=choice)
+            if choice.snapshot_id == current_index.snapshot_id:
+                historical = current_index.entries
+            else:
                 cur.execute(
-                    "SELECT snapshot_id, loaded_at FROM audit_mtg.snapshots "
-                    "WHERE snapshot_id LIKE %s", (loaders._CANTONEIRAS_LIKE,),
+                    "SELECT plan_key, snapshot_id, production_order_no AS of, "
+                    "component_ref AS modelo, profile_type AS perfil, "
+                    "length_mm AS comp_mm, cutting_machine AS maquina, "
+                    "remaining_quantity AS qtd_restante, remaining_valid AS falta_valida, "
+                    "remaining_rule AS regra_calculo "
+                    "FROM analytics_mtg.kanban_plan_lines "
+                    "WHERE source_app = %s AND snapshot_id = %s",
+                    ("kanban-mes", choice.snapshot_id),
                 )
-                choice = select_snapshot(cur.fetchall(), sheet_date, current_index.snapshot_id)
-                if choice is None:
-                    return None
-                cache = dict(getattr(current_index, "_cross_history_contexts", {}))
-                if choice.snapshot_id in cache:
-                    return replace(cache[choice.snapshot_id], choice=choice)
-                if choice.snapshot_id == current_index.snapshot_id:
-                    historical = current_index.entries
-                else:
-                    cur.execute(
-                        "SELECT plan_key, snapshot_id, production_order_no AS of, "
-                        "component_ref AS modelo, profile_type AS perfil, "
-                        "length_mm AS comp_mm, cutting_machine AS maquina, "
-                        "remaining_quantity AS qtd_restante, remaining_valid AS falta_valida, "
-                        "remaining_rule AS regra_calculo "
-                        "FROM analytics_mtg.kanban_plan_lines "
-                        "WHERE source_app = %s AND snapshot_id = %s",
-                        ("kanban-mes", choice.snapshot_id),
-                    )
-                    historical = cur.fetchall()
+                historical = cur.fetchall()
         result = build_history_context(current_index.entries, historical, choice, provenance="postgres_read_only")
         # Bound memory by two reference snapshots. The temporal choice is a
         # per-document value; cached business identities contain no sheet data.

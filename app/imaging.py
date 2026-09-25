@@ -15,6 +15,7 @@ ficheiro).
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 _PORTRAIT_AUTO_TURN = 90  # graus no sentido anti-horário
@@ -83,6 +84,40 @@ def render_oriented(image_path: Path, rotation_override: int = 0) -> Path:
     os.utime(tmp, (src_mtime, src_mtime))
     os.replace(tmp, cache)
     return cache
+
+
+# Qualidade do JPEG do ecrã de revisão. Medido em 69 digitalizações reais
+# (1191×1685): PNG 791 KB → JPEG 185 KB de mediana, à mesma resolução.
+DISPLAY_QUALITY = 85
+
+
+def render_display(oriented_path: Path) -> Path:
+    """JPEG para o ecrã de revisão, ao lado da imagem orientada.
+
+    O PNG continua a ser a imagem do OCR e do «tamanho real»; no ecrã basta um
+    JPEG da mesma resolução, ~4× mais leve. A foto faz PC → servidor → browser
+    em cada folha aberta, pela mesma ligação que leva as consultas à BD.
+    """
+    from PIL import Image
+
+    if not oriented_path.is_file():
+        return oriented_path
+    display = oriented_path.with_name(f"{oriented_path.stem}.display.jpg")
+    src_mtime = oriented_path.stat().st_mtime
+    if display.exists() and display.stat().st_mtime >= src_mtime:
+        return display
+    # nome temporário único: dois pedidos à mesma foto não escrevem no mesmo
+    tmp = display.with_name(f"{display.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        with Image.open(oriented_path) as im:
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            im.save(tmp, "JPEG", quality=DISPLAY_QUALITY, optimize=True, progressive=True)
+        os.utime(tmp, (src_mtime, src_mtime))
+        os.replace(tmp, display)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return display
 
 
 def ink_fraction(image_path: Path) -> float:

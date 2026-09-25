@@ -56,7 +56,7 @@ def test_estado_isola_factos_validados_desta_aplicacao(monkeypatch):
     monkeypatch.setattr(estado, "_fetch", capture)
     estado.fetch_validated_rows()
     estado.fetch_mes_kpis()
-    estado.fetch_of_detail("OF1")
+    estado.fetch_of_detail("OF1", "snapshot-teste")
 
     validated_sql, kpi_sql, _plan_sql, detail_sql = [sql for sql, _ in queries]
     assert "s.source_app = 'kanban-mes'" in validated_sql

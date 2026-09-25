@@ -20,7 +20,7 @@ import traceback
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from urllib.parse import unquote_plus, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -33,6 +33,8 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 
 from .. import db, imaging, image_storage, pg_store, production_facts
 from ..config import settings
@@ -49,13 +51,19 @@ from . import pdf as pdf_gen
 from . import review_writes
 from ..review_guard import cancel_pending
 
-class NoCacheStaticFiles(StaticFiles):
-    """Estáticos com revalidação obrigatória — o link leva ?v=<hash>, e isto
-    impede o browser/edge da Cloudflare de servir CSS velho a quem tem o URL antigo."""
+class VersionedStaticFiles(StaticFiles):
+    """Estáticos pedidos com ?v=<hash do conteúdo> ficam em cache para sempre:
+    o hash muda quando o ficheiro muda, portanto o URL antigo nunca serve CSS
+    velho. Sem ?v= revalida-se sempre (resposta 304 se não mudou).
+
+    Antes revalidava-se tudo, sempre: cada página aberta repetia meia dúzia de
+    pedidos pelo túnel só para ouvir «não mudou»."""
 
     async def get_response(self, path: str, scope):
         response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "no-cache"
+        versioned = "v" in dict(parse_qsl(scope.get("query_string", b"").decode()))
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable" if versioned else "no-cache")
         return response
 
 
@@ -82,16 +90,27 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Kanban MES", lifespan=_lifespan)
-app.mount("/static", NoCacheStaticFiles(directory=str(_STATIC_DIR)), name="static")
+# HTML e JSON comprimidos (uma página de revisão ~100 KB → ~15 KB). Imagens e
+# PDFs já comprimidos ficam de fora (lista por omissão do Starlette).
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.mount("/static", VersionedStaticFiles(directory=str(_STATIC_DIR)), name="static")
 @app.get("/health")
 def health():
     return dict(STARTUP_HEALTH)
 
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-templates.env.globals["css_version"] = hashlib.sha1(
-    b"".join((_STATIC_DIR / name).read_bytes() for name in ("design.css", "review.js", "automatic-review.js", "row-actions.js", "review_edits.js"))
-).hexdigest()[:10]
+def _static_version() -> str:
+    """Hash de TODOS os estáticos: com cache «para sempre», um ficheiro fora
+    do hash chegaria velho aos browsers depois de uma atualização."""
+    digest = hashlib.sha1()
+    for path in sorted(p for p in _STATIC_DIR.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(_STATIC_DIR).as_posix().encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:10]
+
+
+templates.env.globals["css_version"] = _static_version()
 # a folha decide o que é uma marca; o template não repete a regra
 templates.env.globals["is_marked"] = is_marked
 templates.env.globals["review_token"] = review_writes.token
@@ -136,6 +155,18 @@ async def _html_post_validation_errors(request: Request,
     return JSONResponse({"detail": exc.errors()}, status_code=422)
 
 
+def _sheet_watermark() -> int:
+    try:
+        conn = _conn()
+        try:
+            row = conn.execute("SELECT MAX(rowid) AS m FROM sheets").fetchone()
+            return int(row["m"] or 0)
+        finally:
+            conn.close()
+    except Exception:
+        return 0
+
+
 @app.middleware("http")
 async def _attach_watermark(request: Request, call_next):
     """Marca de água = folha mais recente no momento do pedido.
@@ -152,15 +183,9 @@ async def _attach_watermark(request: Request, call_next):
         return await call_next(request)
     watermark = 0
     if request.method == "GET" and path in {"/", "/estado"}:
-        try:
-            conn = _conn()
-            try:
-                row = conn.execute("SELECT MAX(rowid) AS m FROM sheets").fetchone()
-                watermark = int(row["m"] or 0)
-            finally:
-                conn.close()
-        except Exception:
-            watermark = 0
+        # SQLite fora do event loop: um middleware async que bloqueia atrasa
+        # todos os pedidos em curso, não só este.
+        watermark = await run_in_threadpool(_sheet_watermark)
     request.state.watermark = watermark
     response = await call_next(request)
     response.headers["X-Sheet-Watermark"] = str(watermark)
@@ -182,6 +207,11 @@ _index_cache: dict[str, tuple[float, object, str | None]] = {}
 _index_lock = threading.Lock()
 _index_build_locks: dict[str, threading.Lock] = {}
 _validation_timing = threading.local()
+# Índices pesados: quando chega um plano novo, reconstroem-se por trás e a
+# revisão continua a usar o anterior até o novo estar pronto (o plano de
+# cantoneiras são ~76 mil linhas, 18 MB pelo túnel). A validação, que exige o
+# plano atual, espera pela construção em vez de a repetir.
+_BACKGROUND_REBUILD = {"load_cantoneiras_index"}
 
 
 def _conn():
@@ -228,39 +258,78 @@ def get_index(loader_name: str, *, require_current: bool = False):
                         time.monotonic(), index, snapshot,
                     )
                 return index
-
-        # Só uma thread constrói cada índice. O lock global protege apenas os
-        # dicionários; SQL e construção do PlanIndex decorrem fora dele.
-        with _index_build_lock(loader_name):
-            with _index_lock:
-                latest = _index_cache.get(loader_name)
-            if latest and current is not None and latest[2] == current:
+            if not require_current and loader_name in _BACKGROUND_REBUILD:
+                # Plano novo: a revisão continua com o anterior (e só volta a
+                # sondar daqui a _FRESHNESS_PROBE_SECONDS) enquanto o novo se
+                # constrói por trás.
                 with _index_lock:
                     _index_cache[loader_name] = (
-                        time.monotonic(), latest[1], latest[2],
+                        time.monotonic(), index, snapshot,
                     )
-                return latest[1]
-
-            loader = getattr(loaders, loader_name)
-            if loader_name == "load_cantoneiras_index" and current:
-                index = loader(snapshot_id=current)
-            else:
-                index = loader()
-            loaded_snapshot = getattr(index, "snapshot_id", None)
-            snapshot = (
-                str(loaded_snapshot) if loaded_snapshot is not None else current
-            )
-            if require_current and snapshot != current:
-                raise RuntimeError(
-                    "O índice carregado não corresponde ao snapshot atual."
-                )
-            with _index_lock:
-                _index_cache[loader_name] = (
-                    time.monotonic(), index, snapshot,
-                )
-            return index
+                _rebuild_in_background(loader_name, current)
+                return index
+        return _build_index(loader_name, current, require_current=require_current)
     finally:
         _record_index_time(started)
+
+
+def _build_index(loader_name: str, current: str | None, *,
+                 require_current: bool = False):
+    """Só uma thread constrói cada índice. O lock global protege apenas os
+    dicionários; SQL e construção do PlanIndex decorrem fora dele."""
+    with _index_build_lock(loader_name):
+        with _index_lock:
+            latest = _index_cache.get(loader_name)
+        if latest and current is not None and latest[2] == current:
+            with _index_lock:
+                _index_cache[loader_name] = (
+                    time.monotonic(), latest[1], latest[2],
+                )
+            return latest[1]
+
+        loader = getattr(loaders, loader_name)
+        if loader_name == "load_cantoneiras_index" and current:
+            index = loader(snapshot_id=current)
+        else:
+            index = loader()
+        loaded_snapshot = getattr(index, "snapshot_id", None)
+        snapshot = (
+            str(loaded_snapshot) if loaded_snapshot is not None else current
+        )
+        if require_current and snapshot != current:
+            raise RuntimeError(
+                "O índice carregado não corresponde ao snapshot atual."
+            )
+        with _index_lock:
+            _index_cache[loader_name] = (
+                time.monotonic(), index, snapshot,
+            )
+        return index
+
+
+def _rebuild_in_background(loader_name: str, current: str) -> None:
+    if _index_build_lock(loader_name).locked():
+        return  # já há uma construção em curso
+
+    def run() -> None:
+        try:
+            _build_index(loader_name, current)
+        except Exception as exc:
+            # O índice anterior continua em uso; a sonda seguinte volta a tentar.
+            print(f"[index] reconstrução de {loader_name} falhou: "
+                  f"{type(exc).__name__}: {exc}", flush=True)
+
+    threading.Thread(target=run, name=f"rebuild-{loader_name}", daemon=True).start()
+
+
+def _current_plan_index(loader_name: str, current_id: str | None):
+    """Índice da carga ``current_id``: o da cache se for essa, senão o novo
+    (esperando pela reconstrução que já estiver em curso, se houver)."""
+    cached = get_index(loader_name)
+    if current_id and str(getattr(cached, "snapshot_id", None) or "") == str(current_id):
+        return cached
+    return _build_index(loader_name, str(current_id) if current_id else None,
+                        require_current=bool(current_id))
 
 
 def _current_snapshot_id(*, strict: bool = False) -> str | None:
@@ -315,8 +384,10 @@ def make_scorer(template_name: str, *, require_current: bool = False) -> Scorer:
             index = get_index(template.index_loader, require_current=True)
     else:
         index = get_index(template.index_loader)
-    active = loaders.load_active_ofs() if template.family == "cantoneiras" else set()
-    return Scorer(index, CrossParams.load(), active_primary=active)
+    # O bónus de «OF com atividade recente» ficou desligado: o plano guarda a
+    # OF como «OF265171» e os registos validados como «265171», portanto nunca
+    # coincidiam — cada verificação pagava uma consulta por um bónus nulo.
+    return Scorer(index, CrossParams.load())
 
 
 def make_fresh_scorer(template_name: str) -> Scorer:
@@ -1572,6 +1643,7 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     recovery_date_pending = header_recovery.date_needs_confirmation(sheet, protected_header)
     return templates.TemplateResponse(request, "sheet.html", {
         "sheet": sheet, "t": template, "cross_rows": cross_rows,
+        "photo_v": photo_version(sheet),
         "summary": cross.get("summary"),
         "review_order": cross.get("review_order", []),
         "plan_reference": cross.get("plan_reference") or {},
@@ -1597,8 +1669,17 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     }, status_code=status_code)
 
 
+def photo_version(sheet: dict) -> str:
+    """Versão do URL da foto: muda se mudar a imagem, a rotação ou o render."""
+    sha = str(sheet.get("image_sha256") or "")[:12]
+    return f"d{imaging.DISPLAY_QUALITY}-{sha}-{int(sheet.get('image_rotation') or 0)}"
+
+
 @app.get("/sheet/{uid}/photo")
-def sheet_photo(uid: str, original: int = 0):
+def sheet_photo(uid: str, original: int = 0, full: int = 0, v: str = "",
+                request: Request = None):
+    """Foto da folha: JPEG de ecrã por omissão, PNG com ``full=1``, ficheiro
+    tal como chegou com ``original=1``."""
     conn = _conn()
     try:
         sheet = db.get_sheet(conn, uid)
@@ -1611,7 +1692,17 @@ def sheet_photo(uid: str, original: int = 0):
         raise HTTPException(404, "Imagem original indisponível; os dados da folha estão preservados.")
     if not original:
         path = imaging.render_oriented(path, int(sheet.get("image_rotation") or 0))
-    return FileResponse(path)
+        if not full:
+            path = imaging.render_display(path)
+    # O URL com a versão atual pode ficar em cache para sempre; os outros
+    # revalidam com ETag e recebem 304 sem voltar a transferir a imagem.
+    cache = ("private, max-age=31536000, immutable" if v and v == photo_version(sheet)
+             else "private, no-cache")
+    stat = path.stat()
+    etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    if request is not None and request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": cache})
+    return FileResponse(path, headers={"ETag": etag, "Cache-Control": cache})
 
 
 @app.post("/sheet/{uid}/rotate")
@@ -1717,9 +1808,10 @@ def sheet_reference(
         try:
             current_info = loaders.plan_snapshot_info() or {}
             current_snapshot = current_info.get("snapshot_id")
-            with _index_lock:
-                _index_cache.pop("load_cantoneiras_index", None)
-            index = get_index("load_cantoneiras_index")
+            # Reaproveita o índice em memória se for desta carga; antes
+            # deitava-se fora a cache e cada escolha descarregava o plano
+            # inteiro (~18 MB) pelo túnel.
+            index = _current_plan_index("load_cantoneiras_index", current_snapshot)
         except Exception as exc:
             raise HTTPException(
                 422, "Planeamento indisponível; tenta novamente mais tarde."

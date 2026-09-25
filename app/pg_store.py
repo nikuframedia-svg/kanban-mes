@@ -7,14 +7,13 @@ suas linhas em mes_kanban (append-only). Tudo o resto da app só lê do Postgres
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import date
 from pathlib import PurePath
 
 import psycopg
 
-from .config import settings
+from . import pg
 from .matching import similarity as sim
 from .production_facts import materialize_sheet
 from .templates_spec import LEGACY_FIELD_ALIASES, KanbanTemplate, is_marked
@@ -54,7 +53,7 @@ SOURCE_APP = "kanban-mes"
 
 
 def _dsn() -> str:
-    return os.environ.get("MES_PG_DSN") or settings.pg_dsn
+    return pg.dsn()
 
 
 # dd/mm/aaaa, dd-mm-aa, aaaa-mm-dd… — o que os operadores escrevem de facto
@@ -100,13 +99,38 @@ def normalize_sheet_date(raw: object) -> str:
         raise InvalidSheetDate(text) from exc
 
 
-def _columns_present(cur, table: str = "production_records") -> set[str]:
+_SCHEMA_TABLES = ("validated_sheets", "production_records",
+                  "production_record_plan_refs", "stoppage_records")
+
+
+def _schema(cur) -> dict[str, set[str]]:
+    """Colunas das tabelas de escrita numa só ida.
+
+    Continua a ser sondado em cada gravação (a ordem entre o deploy do código e
+    o SQL não pode importar), mas numa consulta e não numa por tabela: pelo
+    túnel da fábrica cada ida custa ~70 ms.
+    """
     cur.execute(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = 'mes_kanban' AND table_name = %s",
-        (table,),
+        "SELECT table_name::text, column_name::text FROM information_schema.columns "
+        "WHERE table_schema = 'mes_kanban' AND table_name = ANY(%s)",
+        (list(_SCHEMA_TABLES),),
     )
-    return {r[0] for r in cur.fetchall()}
+    schema: dict[str, set[str]] = {name: set() for name in _SCHEMA_TABLES}
+    for table, column in cur.fetchall():
+        schema.setdefault(table, set()).add(column)
+    return schema
+
+
+def _insert_returning_ids(cur, sql: str, params_seq: list[tuple]) -> list[int]:
+    """INSERT … RETURNING id de várias linhas numa só ida (pipeline)."""
+    if not params_seq:
+        return []
+    cur.executemany(sql, params_seq, returning=True)
+    ids = []
+    while True:
+        ids.append(cur.fetchone()[0])
+        if not cur.nextset():
+            return ids
 
 
 # Como o upload/ingest gravam as páginas de PDF: {sha16}_{stem-do-pdf}_pNN.png
@@ -137,9 +161,22 @@ def _store_stoppages(cur, sheet: dict, header: dict, filled: list,
                      operator_pernr: str | None = None) -> int:
     """Linhas do verso da folha (paragens) → mes_kanban.stoppage_records."""
     machine = str(header.get("setor_maquina") or "").strip() or None
-    n = 0
-    for i, row in filled:
-        cur.execute(
+    params = [
+        (
+            sheet["uid"], i, sheet_date, machine,
+            operator or "(desconhecido)",
+            str(row.get("motivo") or "").strip() or None,
+            str(row.get("inicio") or "").strip() or None,
+            str(row.get("fim") or "").strip() or None,
+            sim.parse_number(row.get("duracao")),
+            str(row.get("resolvido") or "").strip() or None,
+            operator_pernr,
+        )
+        for i, row in filled
+    ]
+    if params:
+        # executemany envia as linhas em pipeline: uma ida para todas
+        cur.executemany(
             """
             INSERT INTO mes_kanban.stoppage_records
                 (sheet_uid, row_index, sheet_date, machine, operator_name,
@@ -147,19 +184,9 @@ def _store_stoppages(cur, sheet: dict, header: dict, filled: list,
                  operator_pernr, validated_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
             """,
-            (
-                sheet["uid"], i, sheet_date, machine,
-                operator or "(desconhecido)",
-                str(row.get("motivo") or "").strip() or None,
-                str(row.get("inicio") or "").strip() or None,
-                str(row.get("fim") or "").strip() or None,
-                sim.parse_number(row.get("duracao")),
-                str(row.get("resolvido") or "").strip() or None,
-                operator_pernr,
-            ),
+            params,
         )
-        n += 1
-    return n
+    return len(params)
 
 
 def store_validated_sheet(sheet: dict, template: KanbanTemplate,
@@ -195,7 +222,7 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 for k, v in row.items())
     ]
 
-    with psycopg.connect(_dsn(), connect_timeout=10) as conn:
+    with pg.write_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT 1 FROM mes_kanban.validated_sheets WHERE sheet_uid = %s",
@@ -220,7 +247,8 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                 return cur.fetchone()[0]
             # Proveniência sondada como as outras colunas opcionais: a ordem
             # entre deploy do código e aplicação do sql/016 não pode importar.
-            validated_present = _columns_present(cur, "validated_sheets")
+            schema = _schema(cur)
+            validated_present = schema["validated_sheets"]
             source_columns = [
                 name for name in (
                     "source_filename", "source_page", "source_app",
@@ -282,7 +310,7 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                                      operator_pernr)
                 conn.commit()
                 return n
-            present = _columns_present(cur)
+            present = schema["production_records"]
             optional = [c for c in _OPTIONAL_COLUMNS if c in present]
             sql = (
                 "INSERT INTO mes_kanban.production_records "
@@ -301,11 +329,12 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
             refs_by_row: dict[int, list[dict]] = {}
             for ref in materialized["plan_refs"]:
                 refs_by_row.setdefault(ref["row_index"], []).append(ref)
-            if refs_by_row and not _columns_present(cur, "production_record_plan_refs"):
+            if refs_by_row and not schema["production_record_plan_refs"]:
                 raise RuntimeError(
                     "Migração production_record_plan_refs ainda não foi aplicada."
                 )
-            n = 0
+            record_params: list[tuple] = []
+            record_rows: list[int] = []
             for fact in materialized["parents"]:
                 i, row, cr = fact["row_index"], fact["row"], fact["cross"]
                 cells = {c["field"]: c for c in cr.get("cells", [])}
@@ -349,51 +378,56 @@ def store_validated_sheet(sheet: dict, template: KanbanTemplate,
                         cols[ref_col] = sim.strip_ref_prefix(cols[ref_col])
 
                 machine = row.get("maquina") or header.get("setor_maquina")
-                cur.execute(
-                    sql,
-                    (
-                        sheet["uid"], i, sheet_date, template.family,
-                        operator or "(desconhecido)",
-                        str(machine).strip() if machine else None,
-                        cols.get("production_order"), cols.get("sales_order"),
-                        cols.get("customer_name"), cols.get("model_ref"),
-                        cr.get("matched_plan_key"), cr.get("p_correct"),
-                        cols.get("quantity"), cols.get("length_mm"),
-                        cols.get("width_mm"), cols.get("thickness_mm"),
-                        cols.get("lot_ref"), cols.get("scrap"),
-                        hours_worked,
-                        json.dumps(extra, ensure_ascii=False, default=str) if extra else None,
-                        operator_pernr,
-                        *[cols.get(c) for c in optional],
-                    ),
+                record_params.append((
+                    sheet["uid"], i, sheet_date, template.family,
+                    operator or "(desconhecido)",
+                    str(machine).strip() if machine else None,
+                    cols.get("production_order"), cols.get("sales_order"),
+                    cols.get("customer_name"), cols.get("model_ref"),
+                    cr.get("matched_plan_key"), cr.get("p_correct"),
+                    cols.get("quantity"), cols.get("length_mm"),
+                    cols.get("width_mm"), cols.get("thickness_mm"),
+                    cols.get("lot_ref"), cols.get("scrap"),
+                    hours_worked,
+                    json.dumps(extra, ensure_ascii=False, default=str) if extra else None,
+                    operator_pernr,
+                    *[cols.get(c) for c in optional],
+                ))
+                record_rows.append(i)
+            # Todas as linhas numa ida (pipeline) em vez de uma ida por linha;
+            # os ids voltam pela mesma ordem para ligar as referências.
+            record_ids = _insert_returning_ids(cur, sql, record_params)
+            ref_params = [
+                (
+                    production_record_id, sheet["uid"], i,
+                    ref.get("plan_snapshot_id"), ref.get("plan_key"),
+                    ref.get("component_ref"), ref.get("profile_type"),
+                    ref.get("length_mm"), ref.get("quantity_planned"),
+                    ref.get("quantity_made_before"),
+                    ref.get("remaining_before"),
+                    ref.get("overproduction_before"),
+                    ref.get("assumed_quantity"),
+                    ref.get("remaining_rule"),
+                    json.dumps({"source_app": SOURCE_APP, "plan_identity": ref}, ensure_ascii=False, default=str),
                 )
-                production_record_id = cur.fetchone()[0]
-                for ref in refs_by_row.get(i, ()):
-                    cur.execute(
-                        """
-                        INSERT INTO mes_kanban.production_record_plan_refs
-                            (production_record_id, sheet_uid, row_index,
-                             plan_snapshot_id, plan_key, component_ref,
-                             profile_type, length_mm, quantity_planned,
-                             quantity_made_before, remaining_before,
-                             overproduction_before, assumed_quantity,
-                             remaining_rule, extra)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            production_record_id, sheet["uid"], i,
-                            ref.get("plan_snapshot_id"), ref.get("plan_key"),
-                            ref.get("component_ref"), ref.get("profile_type"),
-                            ref.get("length_mm"), ref.get("quantity_planned"),
-                            ref.get("quantity_made_before"),
-                            ref.get("remaining_before"),
-                            ref.get("overproduction_before"),
-                            ref.get("assumed_quantity"),
-                            ref.get("remaining_rule"),
-                            json.dumps({"source_app": SOURCE_APP, "plan_identity": ref}, ensure_ascii=False, default=str),
-                        ),
-                    )
-                n += 1
+                for production_record_id, i in zip(record_ids, record_rows)
+                for ref in refs_by_row.get(i, ())
+            ]
+            if ref_params:
+                cur.executemany(
+                    """
+                    INSERT INTO mes_kanban.production_record_plan_refs
+                        (production_record_id, sheet_uid, row_index,
+                         plan_snapshot_id, plan_key, component_ref,
+                         profile_type, length_mm, quantity_planned,
+                         quantity_made_before, remaining_before,
+                         overproduction_before, assumed_quantity,
+                         remaining_rule, extra)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s)
+                    """,
+                    ref_params,
+                )
+            n = len(record_params)
         conn.commit()
     return n
