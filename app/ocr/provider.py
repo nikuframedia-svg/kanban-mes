@@ -77,6 +77,35 @@ _FALLBACK_MODELS = ("gemini-3.1-flash-lite-preview", "gemini-flash-latest")
 
 # ---- prompts e limpeza, partilhados pelos motores ----
 
+def _json_shape(templates: dict[str, KanbanTemplate], with_kind: bool = False) -> str:
+    """A estrutura JSON exata da resposta, como no OCR original
+    (nikuframedia-svg/ocr, «Return this exact JSON structure»).
+
+    O Gemini e o Claude recebem um schema no pedido; o Qwen só recebe este
+    texto. Sem a estrutura escrita, o Qwen inventava chaves a partir do rótulo
+    impresso («Modelo/Referência» → `modelo_referencia`) e a coluna inteira
+    perdia-se (folha real, 26/09: 14 linhas, 0 modelos).
+    """
+    def obj(fields: tuple[str, ...]) -> str:
+        return "{" + ", ".join(f'"{f}": null' for f in fields) + "}"
+    header = obj(_union_fields(templates, lambda t: t.header_fields))
+    footer = obj(_union_fields(templates, lambda t: t.footer_fields))
+    kind = ('"kind": "' + '" ou "'.join(templates) + '",\n  ') if with_kind else ""
+    if len(templates) == 1:
+        rows = obj(next(iter(templates.values())).row_fields)
+        per_face = ""
+    else:
+        rows = "…uma entrada por linha…"
+        per_face = "\nCada entrada de `rows` usa as chaves da face identificada:\n" + "\n".join(
+            f"- {k}: {obj(t.row_fields)}" for k, t in templates.items())
+    return (
+        "Devolve EXATAMENTE esta estrutura JSON, com estes nomes de chaves "
+        "(não os rótulos impressos na folha):\n"
+        f'{{\n  {kind}"header": {header},\n  "rows": [{rows}],\n  "footer": {footer}\n}}'
+        f"{per_face}"
+    )
+
+
 def _extraction_prompt(template: KanbanTemplate) -> str:
     labels = template.field_labels or {}
     row_desc = "; ".join(f"{f} = «{labels.get(f, f)}»" for f in template.row_fields)
@@ -87,7 +116,8 @@ def _extraction_prompt(template: KanbanTemplate) -> str:
         "1. Transcreve EXATAMENTE o que está escrito, mesmo que pareça errado. "
         "NÃO corrijas, NÃO completes, NÃO normalizes códigos nem datas.\n"
         "2. Célula vazia ou ilegível → null. Nunca inventes valores.\n"
-        "3. Uma entrada em `rows` por cada linha da tabela COM ALGO escrito; "
+        "3. Uma entrada em `rows` por cada linha da tabela COM ALGO escrito, até "
+        "à última — não saltes nenhuma linha nem juntes duas linhas numa só; "
         "ignora linhas totalmente vazias. Uma linha com apenas perfil e X em "
         "«Perf. Comp.» é uma linha independente: mantém modelo e quantidade "
         "a null. Nunca juntes esse perfil ou X à referência da linha anterior.\n"
@@ -105,7 +135,7 @@ def _extraction_prompt(template: KanbanTemplate) -> str:
         "vai para `perf_comp`. Se uma delas estiver vazia na folha, deixa-a a null "
         "— não desloques valores de uma coluna para a outra.\n"
         f"Colunas da tabela, pela ordem da folha: {row_desc}.\n"
-        "Devolve apenas o JSON pedido."
+        + _json_shape({template.name: template})
     )
 
 
@@ -129,7 +159,8 @@ def _auto_extraction_prompt(templates: dict[str, KanbanTemplate]) -> str:
         "1. Transcreve EXATAMENTE o que está escrito, mesmo que pareça errado. "
         "NÃO corrijas, NÃO completes, NÃO normalizes códigos nem datas.\n"
         "2. Célula vazia ou ilegível → null. Nunca inventes valores.\n"
-        "3. Uma entrada em `rows` por cada linha da tabela COM ALGO escrito; "
+        "3. Uma entrada em `rows` por cada linha da tabela COM ALGO escrito, até "
+        "à última — não saltes nenhuma linha nem juntes duas linhas numa só; "
         "ignora linhas totalmente vazias. Página sem nada manuscrito → `rows` vazio. "
         "Uma linha com apenas perfil e X em «Perf. Comp.» é independente: "
         "não juntes esse perfil ou X à referência da linha anterior.\n"
@@ -147,7 +178,7 @@ def _auto_extraction_prompt(templates: dict[str, KanbanTemplate]) -> str:
         "facilmente: o que estiver na coluna «QTD» vai para `qtd` e o que estiver na "
         "última coluna vai para `perf_comp`. Se uma delas estiver vazia na folha, "
         "deixa-a a null — não desloques valores de uma coluna para a outra.\n"
-        "Devolve apenas o JSON pedido."
+        + _json_shape(templates, with_kind=True)
     )
 
 
@@ -443,7 +474,8 @@ class QwenOcrProvider:
             "images": [image_b64],
             "stream": False,
             "keep_alive": -1,      # modelo residente na GPU entre folhas
-            "options": {"temperature": 0, "num_predict": _QWEN_NUM_PREDICT},
+            "options": {"temperature": 0, "num_predict": _QWEN_NUM_PREDICT,
+                        "num_ctx": settings.qwen_num_ctx},
         }
         if self.no_think:
             payload["think"] = False
