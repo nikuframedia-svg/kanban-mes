@@ -141,6 +141,13 @@
 </div>
 {% endif %}
 
+{% if ocr_check %}
+{# Verificação da leitura (app/ocr/reading_check.py): nunca bloqueia, avisa. #}
+<div class="alert warn ocr-suspect" style="margin-bottom:14px;">
+  <span><strong>Leitura suspeita.</strong> {{ ocr_check_message }}</span>
+</div>
+{% endif %}
+
 {% if data.get('_ocr_error') and not readonly %}
 <div class="alert crit" style="margin-bottom:14px; flex-wrap:wrap; align-items:center;">
   <div style="flex:1; min-width:240px;">

@@ -141,6 +141,8 @@
                 <span class="pill ok">validada</span>
               {% elif s.status == 'error' %}
                 <span class="pill crit">erro</span>
+              {% elif s.leitura_suspeita %}
+                <span class="pill warn" title="A leitura do OCR levantou suspeitas: confere linha a linha">pendente · leitura suspeita</span>
               {% elif s.status == 'pending' %}
                 <span class="pill neutral">por extrair</span>
               {% elif s.blank_page %}

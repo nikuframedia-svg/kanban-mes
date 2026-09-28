@@ -298,6 +298,7 @@ def list_sheets(conn: sqlite3.Connection, status: str | None = None,
         "  json_extract(sheet_data, '$.header.data')          AS data_folha, "
         "  json_extract(sheet_data, '$.header.setor_maquina') AS setor, "
         "  json_extract(raw_extraction, '$._blank_page')      AS blank_page, "
+        "  json_extract(raw_extraction, '$._ocr_check.suspect') AS leitura_suspeita, "
         "  COALESCE(json_array_length(cross_check, '$.validation_warnings'), 0) AS avisos "
         "FROM sheets WHERE 1=1"
     )

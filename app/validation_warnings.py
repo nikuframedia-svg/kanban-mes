@@ -37,6 +37,11 @@ def collect(sheet: dict, *, current_snapshot: str | None = None,
 
     if not str(header.get("operador") or "").strip():
         add("operador_vazio", "Operador por preencher: gravado como «(desconhecido)».")
+    check = (sheet.get("raw_extraction") or {}).get("_ocr_check") or {}
+    if check.get("suspect"):
+        add("leitura_suspeita",
+            "Leitura do OCR suspeita (" + "; ".join(
+                p.get("message", "") for p in check.get("first_problems") or []) + ").")
     if assumed_date:
         add("data_assumida",
             f"Data da folha assumida: {assumed_date} (dia útil anterior à digitalização).")

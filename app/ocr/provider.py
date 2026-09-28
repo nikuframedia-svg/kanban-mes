@@ -23,7 +23,9 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import re
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -77,6 +79,28 @@ _FALLBACK_MODELS = ("gemini-3.1-flash-lite-preview", "gemini-flash-latest")
 
 # ---- prompts e limpeza, partilhados pelos motores ----
 
+def _json_shape(templates: dict[str, KanbanTemplate], with_kind: bool = False) -> str:
+    """O formato exato da resposta, com as chaves que o código lê.
+
+    O Gemini e o Claude recebem um schema no transporte; o Qwen (Ollama) não
+    — só o texto. Sem o formato escrito, o Qwen inventava chaves a partir do
+    rótulo impresso («Modelo/Referência» → `modelo_referencia`) e a coluna
+    inteira caía em silêncio (folha real 872, 26/09: 14 linhas, 0 modelos).
+    """
+    def obj(fields: tuple[str, ...]) -> str:
+        return "{" + ", ".join(f'"{f}": null' for f in fields) + "}"
+    header = obj(_union_fields(templates, lambda t: t.header_fields))
+    row = obj(_union_fields(templates, lambda t: t.row_fields))
+    footer = obj(_union_fields(templates, lambda t: t.footer_fields))
+    kind = ('"kind": ' + " | ".join(f'"{k}"' for k in templates) + ", ") if with_kind else ""
+    return (
+        "Responde APENAS com um objeto JSON com EXATAMENTE estas chaves (os "
+        "nomes das chaves são estes, não os rótulos impressos na folha; "
+        "`header` e `footer` são objetos próprios, fora de `rows`):\n"
+        f'{{{kind}"header": {header}, "rows": [{row}, ...], "footer": {footer}}}'
+    )
+
+
 def _extraction_prompt(template: KanbanTemplate) -> str:
     labels = template.field_labels or {}
     row_desc = "; ".join(f"{f} = «{labels.get(f, f)}»" for f in template.row_fields)
@@ -105,7 +129,7 @@ def _extraction_prompt(template: KanbanTemplate) -> str:
         "vai para `perf_comp`. Se uma delas estiver vazia na folha, deixa-a a null "
         "— não desloques valores de uma coluna para a outra.\n"
         f"Colunas da tabela, pela ordem da folha: {row_desc}.\n"
-        "Devolve apenas o JSON pedido."
+        + _json_shape({"": template})
     )
 
 
@@ -147,7 +171,7 @@ def _auto_extraction_prompt(templates: dict[str, KanbanTemplate]) -> str:
         "facilmente: o que estiver na coluna «QTD» vai para `qtd` e o que estiver na "
         "última coluna vai para `perf_comp`. Se uma delas estiver vazia na folha, "
         "deixa-a a null — não desloques valores de uma coluna para a outra.\n"
-        "Devolve apenas o JSON pedido."
+        + _json_shape(templates, with_kind=True)
     )
 
 
@@ -259,26 +283,77 @@ def rescue_header(provider: "OcrProvider", image_path: Path | None,
     return extraction
 
 
+def _key(name: object) -> str:
+    """«Modelo/Referência», «modelo_referencia» e «MODELO» → forma comparável."""
+    text = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
+def _aliases(template: KanbanTemplate, fields: tuple[str, ...]) -> dict[str, str]:
+    """Chave recebida → campo do template: o nome, o rótulo impresso inteiro e
+    cada parte do rótulo («Modelo/Referência» → modelo, referencia)."""
+    labels = template.field_labels or {}
+    out: dict[str, str] = {}
+    for f in fields:
+        out.setdefault(_key(f), f)
+        label = labels.get(f)
+        if label:
+            out.setdefault(_key(label), f)
+            for part in re.split(r"[/(),]", label):
+                if _key(part):
+                    out.setdefault(_key(part), f)
+    for f in fields:            # o nome exato de um campo ganha sempre
+        out[_key(f)] = f
+    return out
+
+
 def _clean_extraction(data: dict, template: KanbanTemplate) -> dict:
-    """Do JSON do modelo para a extração canónica do template."""
-    def clean(section: object, fields: tuple[str, ...]) -> dict:
-        src = section if isinstance(section, dict) else {}
-        out = {}
-        for f in fields:
-            v = src.get(f)
-            out[f] = str(v).strip() or None if v is not None else None
-        return out
+    """Do JSON do modelo para a extração canónica do template.
+
+    Aceita chaves com outro nome para o mesmo campo (o rótulo impresso, com ou
+    sem acentos) e campos do cabeçalho/rodapé soltos no topo do JSON: sem
+    isso uma coluna inteira bem lida desaparecia sem aviso. Chaves que não
+    correspondem a nenhum campo continuam a cair.
+    """
+    def clean(section: object, fields: tuple[str, ...], loose: object = None) -> dict:
+        aliases = _aliases(template, fields)
+        found: dict[str, object] = {}
+        for source in (loose, section):          # a secção própria ganha
+            if not isinstance(source, dict):
+                continue
+            # nomes exatos por último: ganham a um sinónimo na mesma secção
+            for k, v in sorted(source.items(), key=lambda kv: kv[0] in fields):
+                f = aliases.get(_key(k))
+                if f is not None and (v is not None or f not in found):
+                    found[f] = v
+        return {f: (str(found[f]).strip() or None) if found.get(f) is not None else None
+                for f in fields}
 
     rows_raw = data.get("rows") if isinstance(data.get("rows"), list) else []
     rows = [clean(r, template.row_fields) for r in rows_raw]
     rows = [r for r in rows if any(v is not None for v in r.values())]
     if not rows:
         rows = [{f: None for f in template.row_fields}]
-    return {
-        "header": clean(data.get("header"), template.header_fields),
+    out = {
+        "header": clean(data.get("header"), template.header_fields, data),
         "rows": rows,
-        "footer": clean(data.get("footer"), template.footer_fields),
+        "footer": clean(data.get("footer"), template.footer_fields, data),
     }
+    meta = data.get(_OCR_META)
+    if isinstance(meta, dict):
+        out[_OCR_META] = meta
+    return out
+
+
+# Metadados da leitura (motor, resposta cortada…) viajam com a extração.
+_OCR_META = "_ocr"
+
+
+def _tag(data: dict, engine: str, **meta) -> dict:
+    """Marca o JSON do modelo com quem o leu, antes da limpeza."""
+    current = data.get(_OCR_META) if isinstance(data.get(_OCR_META), dict) else {}
+    data[_OCR_META] = {**current, "engine": engine, **meta}
+    return data
 
 
 def _resolve_kind(data: dict, templates: dict[str, KanbanTemplate]) -> str:
@@ -400,7 +475,10 @@ def _qwen_json(raw: str) -> dict:
         return json.loads(text[s:e])
     except json.JSONDecodeError:
         salvaged = _salvage_truncated_json(text[s:])
-        if salvaged is not None:
+        if salvaged is not None and isinstance(salvaged, dict):
+            # Resposta cortada: as últimas linhas perderam-se. Fica marcado
+            # para a verificação da leitura (reading_check) a reler.
+            salvaged[_OCR_META] = {"truncated": True}
             return salvaged
         raise ValueError("JSON irrecuperável na resposta") from None
 
@@ -443,7 +521,8 @@ class QwenOcrProvider:
             "images": [image_b64],
             "stream": False,
             "keep_alive": -1,      # modelo residente na GPU entre folhas
-            "options": {"temperature": 0, "num_predict": _QWEN_NUM_PREDICT},
+            "options": {"temperature": 0, "num_predict": _QWEN_NUM_PREDICT,
+                        "num_ctx": settings.qwen_num_ctx},
         }
         if self.no_think:
             payload["think"] = False
@@ -478,7 +557,8 @@ class QwenOcrProvider:
             image_b64 = _qwen_image_b64(image_path, edge)
             for _attempt in (1, 2):
                 try:
-                    return _qwen_json(self._call(image_b64, prompt))
+                    return _tag(_qwen_json(self._call(image_b64, prompt)),
+                                f"qwen:{self.model}", image_edge=edge)
                 except OcrError as exc:
                     last_error = exc
                 except ValueError as exc:
@@ -642,7 +722,7 @@ class GeminiOcrProvider:
             raise OcrError(f"Resposta {engine} sem JSON válido: {exc}") from exc
 
     def _parse(self, response: dict, template: KanbanTemplate) -> dict:
-        return _clean_extraction(self._response_json(response), template)
+        return _clean_extraction(_tag(self._response_json(response), "gemini"), template)
 
     def extract(self, image_path: Path, template: KanbanTemplate) -> dict:
         return self._with_fallback("extract", self._extract, image_path, template)
@@ -708,7 +788,7 @@ class GeminiOcrProvider:
                 "response_schema": self._auto_schema(templates),
             },
         }
-        data = self._response_json(self._call(body))
+        data = _tag(self._response_json(self._call(body)), "gemini")
         kind = _resolve_kind(data, templates)
         return kind, _clean_extraction(data, templates[kind])
 
@@ -848,14 +928,14 @@ class ClaudeOcrProvider:
             raise OcrError(f"Resposta Claude sem JSON válido: {exc}") from exc
 
     def extract(self, image_path: Path, template: KanbanTemplate) -> dict:
-        data = self._call(image_path, _extraction_prompt(template),
-                          self._schema(template))
+        data = _tag(self._call(image_path, _extraction_prompt(template),
+                               self._schema(template)), f"claude:{self.model}")
         return _clean_extraction(data, template)
 
     def extract_auto(self, image_path: Path,
                      templates: dict[str, KanbanTemplate]) -> tuple[str, dict]:
-        data = self._call(image_path, _auto_extraction_prompt(templates),
-                          self._auto_schema(templates))
+        data = _tag(self._call(image_path, _auto_extraction_prompt(templates),
+                               self._auto_schema(templates)), f"claude:{self.model}")
         kind = _resolve_kind(data, templates)
         return kind, _clean_extraction(data, templates[kind])
 

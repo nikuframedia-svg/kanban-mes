@@ -38,6 +38,13 @@ class Settings:
     # provider mantém-no residente a partir da primeira folha.
     qwen_timeout_s: float = field(
         default_factory=lambda: float(_env("MES_QWEN_TIMEOUT_S", "600")))
+    # Memória de trabalho do Qwen (imagem + instruções + resposta, em tokens).
+    # Sem isto vale o valor por omissão do Ollama (2048 nas versões antigas,
+    # 4096 nas recentes): uma folha de 15-20 linhas enche-o e a resposta sai
+    # cortada ou baralhada — medido: 2011 de entrada + 1635 de saída numa
+    # folha real de 14 linhas.
+    qwen_num_ctx: int = field(
+        default_factory=lambda: int(_env("MES_QWEN_NUM_CTX", "8192")))
     qwen_no_think: bool = field(
         default_factory=lambda: _env("MES_QWEN_NO_THINK", "1").lower() in ("1", "true", "yes"))
 

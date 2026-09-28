@@ -44,6 +44,7 @@ from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
 from ..ocr.provider import OcrError, empty_extraction, get_provider, rescue_header
+from ..ocr import reading_check
 from ..templates_spec import TEMPLATES, field_value, get_template, is_marked
 from . import estado as estado_data
 from . import export as cpis_export
@@ -1150,17 +1151,19 @@ def _process_sheet(uid: str, force_ocr: bool = False) -> None:
         # classifica E transcreve na MESMA chamada — eram duas por página, e a
         # classificação sozinha gastava metade da quota do free tier.
         try:
-            if template.family == "cantoneiras" and hasattr(provider, "extract_auto"):
-                kinds = {"producao": get_template("cantoneiras_kanban"),
-                         "paragens": get_template("cantoneiras_paragens")}
-                kind, extraction = provider.extract_auto(image_path, kinds)
-                if kinds[kind].name != template_name:
-                    # a reclassificação grava-se junto com a transcrição, na
-                    # mesma escrita atómica (ver db.set_extraction)
-                    template_name = kinds[kind].name
-                    template = kinds[kind]
-            else:
-                extraction = provider.extract(image_path, template)
+            kinds = ({"producao": get_template("cantoneiras_kanban"),
+                      "paragens": get_template("cantoneiras_paragens")}
+                     if template.family == "cantoneiras" and hasattr(provider, "extract_auto")
+                     else None)
+            # Lê, confere a leitura (linhas coladas, coluna Modelo vazia,
+            # resposta cortada…) e relê com o motor seguinte se vier estragada.
+            read_template, extraction = reading_check.read_page(
+                provider, image_path, template, kinds)
+            if read_template.name != template_name:
+                # a reclassificação grava-se junto com a transcrição, na
+                # mesma escrita atómica (ver db.set_extraction)
+                template_name = read_template.name
+                template = read_template
             # Ponto comum da cadeia (Qwen/Gemini/Claude): se a leitura veio
             # sem identificação no cabeçalho, uma segunda chamada focada na
             # faixa superior tenta recuperá-la. Nunca pisa o que foi lido.
@@ -1711,8 +1714,11 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
         automatic_review_needed = False
     recovery_info = header_recovery.current_recovery(sheet)
     recovery_date_pending = header_recovery.date_needs_confirmation(sheet, protected_header)
+    ocr_check = reading_check.summary(sheet.get("raw_extraction"))
     return templates.TemplateResponse(request, "sheet.html", {
         "sheet": sheet, "t": template, "cross_rows": cross_rows,
+        "ocr_check": ocr_check,
+        "ocr_check_message": reading_check.message(ocr_check) if ocr_check else None,
         "photo_v": photo_version(sheet),
         "summary": cross.get("summary"),
         "review_order": cross.get("review_order", []),
