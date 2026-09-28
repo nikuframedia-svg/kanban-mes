@@ -102,9 +102,9 @@ def test_leitura_estragada_e_relida_pelo_motor_seguinte():
     template, out = rc.read_page(qwen, Path("x.png"), TPL, KINDS)
     assert template is TPL and out["rows"] == GOOD
     check = out[rc.META]
-    assert check["suspect"] and check["engine"] == "gemini" and check["problems"] == []
-    assert check["first_engine"] == "qwen:qwen3.5:9b" and claude.calls == 0
-    assert "relida pelo gemini" in rc.message(check)
+    assert check["suspect"] and check["reread"] and check["problems"] == []
+    assert claude.calls == 0 and "relida por outro motor" in rc.message(check)
+    assert "_ocr" not in out and "gemini" not in str(check), "quem leu não fica gravado"
 
 
 def test_sem_motor_melhor_fica_a_primeira_marcada():
@@ -113,14 +113,14 @@ def test_sem_motor_melhor_fica_a_primeira_marcada():
     _, out = rc.read_page(qwen, Path("x.png"), TPL, KINDS)
     assert out["rows"] == BAD["rows"]
     assert out[rc.META]["problems"][0]["code"] == "modelos_em_falta"
-    assert "gemini: erro" in out[rc.META]["engines_tried"][1]
+    assert out[rc.META]["reread"] is False
 
 
 def test_leitura_boa_nao_gasta_outro_motor():
     gemini = Engine("gemini", extraction(GOOD, engine="gemini"))
     qwen = Engine("qwen", extraction(GOOD), fallback=gemini)
     _, out = rc.read_page(qwen, Path("x.png"), TPL, KINDS)
-    assert rc.META not in out and gemini.calls == 0
+    assert rc.META not in out and "_ocr" not in out and gemini.calls == 0
 
 
 def test_motor_que_ja_leu_por_fallback_nao_e_repetido():
@@ -129,7 +129,7 @@ def test_motor_que_ja_leu_por_fallback_nao_e_repetido():
     gemini = Engine("gemini", extraction(GOOD, engine="gemini"), fallback=claude)
     qwen = Engine("qwen", extraction(BAD["rows"], engine="gemini"), fallback=gemini)
     _, out = rc.read_page(qwen, Path("x.png"), TPL, KINDS)
-    assert gemini.calls == 0 and claude.calls == 1 and out[rc.META]["engine"] == "claude:x"
+    assert gemini.calls == 0 and claude.calls == 1 and out["rows"] == GOOD
 
 
 def test_qwen_pede_memoria_de_trabalho_suficiente(monkeypatch):

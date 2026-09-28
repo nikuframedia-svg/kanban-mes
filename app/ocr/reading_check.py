@@ -119,14 +119,16 @@ def read_page(provider, image_path: Path, template: KanbanTemplate,
                 chosen_template, extraction, problems = alt_template, alt, alt_problems
             if not problems:
                 break
+    # Quem leu serve só para não repetir o mesmo motor; não fica gravado
+    # (decisão do Luís, 28/09).
+    reread = extraction is not None and _engine(extraction) != tried[0]
+    extraction.pop("_ocr", None)
     if first_problems:
         extraction[META] = {
             "suspect": True,
-            "first_engine": tried[0],
             "first_problems": first_problems,
-            "engine": _engine(extraction),
+            "reread": reread,
             "problems": problems,
-            "engines_tried": tried,
         }
     return chosen_template, extraction
 
@@ -140,10 +142,10 @@ def summary(raw_extraction: dict | None) -> dict | None:
 def message(meta: dict) -> str:
     first = "; ".join(p["message"] for p in meta.get("first_problems") or [])
     left = meta.get("problems") or []
-    if meta.get("engine") != meta.get("first_engine") and not left:
-        return (f"Leitura suspeita pelo {_family(meta.get('first_engine', '?'))} ({first}); "
-                f"relida pelo {_family(meta.get('engine', '?'))} sem esses problemas. Confere na mesma.")
-    if meta.get("engine") != meta.get("first_engine"):
-        return (f"Leitura suspeita ({first}); relida pelo {_family(meta.get('engine', '?'))}, "
-                f"ainda com: {'; '.join(p['message'] for p in left)}. Confere linha a linha.")
+    if meta.get("reread") and not left:
+        return (f"A primeira leitura veio estragada ({first}); a folha foi relida por "
+                "outro motor, sem esses problemas. Confere na mesma.")
+    if meta.get("reread"):
+        return (f"Leitura suspeita ({first}); relida por outro motor, ainda com: "
+                f"{'; '.join(p['message'] for p in left)}. Confere linha a linha.")
     return f"Leitura suspeita ({first}); não houve outro motor que lesse melhor. Confere linha a linha."
