@@ -4,26 +4,46 @@ from fastapi.responses import RedirectResponse
 from .. import db, header_recovery, image_storage
 
 automatic = None
+_deps: dict = {}
 
 
 def job_status(uid):
     return automatic.jobs.get(uid, {}) if automatic else {}
 
 
+def header_eligible(conn, sheet):
+    if image_storage.for_processing(sheet) is None:
+        return False
+    if header_recovery.current_recovery(sheet):
+        return False  # One automatic attempt per image/generation; failures offer retry.
+    protected = db.human_header_fields(conn, sheet['uid'])
+    header = (sheet.get('sheet_data') or {}).get('header') or {}
+    return any(not str(header.get(field) or '').strip() and field not in protected
+               for field in ('operador', 'n_operador', 'setor_maquina', 'data'))
+
+
+def recover_at_ingest(conn, uid):
+    """Recuperação do cabeçalho na leitura, em segundo plano — uma vez.
+
+    Corria quando o operador abria a folha (com o cabeçalho incompleto, ex.:
+    «N.º» em branco), numa fila única e com ele à espera do OCR. Feita aqui,
+    a folha abre já com a tentativa registada e a revisão automática não a
+    repete. Nunca falha a leitura: o resultado fica para a revisão."""
+    sheet = db.get_sheet(conn, uid)
+    if not _deps or not sheet or not header_eligible(conn, sheet):
+        return None
+    return header_recovery.recover(
+        conn, uid, sheet['revision'], _deps['provider'](),
+        _safe(_deps['employees'], {}), _safe(_deps['machines'], []),
+        _deps['assumed_date'](sheet))
+
+
 def register(app, connect, provider, employees, machines, assumed_date, location, recheck):
     from .automatic_review import AutomaticReview
     from .. import coverage_recovery, historical_quantities
     global automatic
-
-    def header_eligible(conn, sheet):
-        if image_storage.for_processing(sheet) is None:
-            return False
-        if header_recovery.current_recovery(sheet):
-            return False  # One automatic attempt per image/generation; failures offer retry.
-        protected = db.human_header_fields(conn, sheet['uid'])
-        header = (sheet.get('sheet_data') or {}).get('header') or {}
-        return any(not str(header.get(field) or '').strip() and field not in protected
-                   for field in ('operador', 'n_operador', 'setor_maquina', 'data'))
+    _deps.update(provider=provider, employees=employees, machines=machines,
+                 assumed_date=assumed_date)
 
     def process(conn, uid, revision):
         from .automatic_review import run_stages

@@ -9,6 +9,9 @@ import copy
 import hashlib
 import json
 import math
+import threading
+import time as _clock
+from collections import OrderedDict
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 
@@ -19,6 +22,23 @@ from .matching.full_profile import expand_entries
 from .templates_spec import field_value, is_marked
 
 VERSION = 1
+
+# Cada edição de uma folha com Perf. Comp. voltava ao Postgres: a lista de
+# cargas e as linhas da OF em cada carga (2-4 idas pelo túnel por edição). Uma
+# carga guardada nunca muda, por isso as linhas de (carga, OF) ficam em memória
+# para sempre (até ao limite); a lista de cargas, que cresce, só 60 s.
+_SNAPSHOTS_TTL_S = 60.0
+_ORDERS_MAX = 512
+_cache_lock = threading.Lock()
+_snapshots_cache: tuple[float, list] | None = None
+_orders_cache: "OrderedDict[tuple[str, str], list]" = OrderedDict()
+
+
+def clear_caches() -> None:
+    global _snapshots_cache
+    with _cache_lock:
+        _snapshots_cache = None
+        _orders_cache.clear()
 
 
 def production_cutoff(value):
@@ -45,11 +65,19 @@ def select_snapshot(snapshots, value):
 
 
 def _plan_snapshots():
+    global _snapshots_cache
+    with _cache_lock:
+        hit = _snapshots_cache
+    if hit is not None and _clock.monotonic() - hit[0] < _SNAPSHOTS_TTL_S:
+        return hit[1]
     from .pg_store import SOURCE_APP
     condition, params = (("dataset_id = %s", ("ds-met2-perfis",))
                          if SOURCE_APP == "kanban-mes-mtg2" else
                          ("snapshot_id LIKE %s", (loaders._CANTONEIRAS_LIKE,)))
-    return loaders._fetch("SELECT snapshot_id, loaded_at FROM audit_mtg.snapshots WHERE " + condition, params)
+    rows = loaders._fetch("SELECT snapshot_id, loaded_at FROM audit_mtg.snapshots WHERE " + condition, params)
+    with _cache_lock:
+        _snapshots_cache = (_clock.monotonic(), rows)
+    return rows
 
 
 def load_snapshot(value):
@@ -76,6 +104,21 @@ def load_later_snapshots(value):
 
 
 def load_order(snapshot_id, order):
+    key = (str(snapshot_id), str(order))
+    with _cache_lock:
+        hit = _orders_cache.get(key)
+        if hit is not None:
+            _orders_cache.move_to_end(key)
+            return hit
+    rows = _load_order(snapshot_id, order)
+    with _cache_lock:
+        _orders_cache[key] = rows
+        while len(_orders_cache) > _ORDERS_MAX:
+            _orders_cache.popitem(last=False)
+    return rows
+
+
+def _load_order(snapshot_id, order):
     from .pg_store import SOURCE_APP
     extra, join = "", ""
     if SOURCE_APP == "kanban-mes-mtg2":
@@ -125,16 +168,27 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
     orders = {}
 
     def candidates(day):
-        """(carga, aproximado) por ordem de preferência; cada lista uma vez."""
-        if "before" not in loaded_snapshots:
-            try:
-                loaded_snapshots["before"] = snapshot_loader(day)
-            except ValueError:
-                loaded_snapshots["before"] = None
-        if loaded_snapshots["before"] is not None:
-            yield loaded_snapshots["before"], False
-        if "later" not in loaded_snapshots:
-            loaded_snapshots["later"] = later_loader(day)
+        """(carga, aproximado) por ordem de preferência; cada lista uma vez.
+
+        Uma falha de ligação fica lembrada: as linhas seguintes da mesma folha
+        falham logo, em vez de esperarem cada uma pelo mesmo timeout."""
+        if "error" in loaded_snapshots:
+            raise loaded_snapshots["error"]
+        try:
+            if "before" not in loaded_snapshots:
+                try:
+                    loaded_snapshots["before"] = snapshot_loader(day)
+                except ValueError:
+                    loaded_snapshots["before"] = None
+            if loaded_snapshots["before"] is not None:
+                yield loaded_snapshots["before"], False
+            if "later" not in loaded_snapshots:
+                loaded_snapshots["later"] = later_loader(day)
+        except ValueError:
+            raise
+        except Exception as exc:
+            loaded_snapshots["error"] = exc
+            raise
         for later in loaded_snapshots["later"]:
             yield later, True
     for rc in cross.get("rows", []):
@@ -167,7 +221,13 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
             for snapshot, approximate in candidates(ctx["date"]):
                 key = (snapshot["snapshot_id"], ctx["of"])
                 if key not in orders:
-                    orders[key] = order_loader(*key)
+                    try:
+                        orders[key] = order_loader(*key)
+                    except ValueError:
+                        raise
+                    except Exception as exc:
+                        loaded_snapshots["error"] = exc
+                        raise
                 found = [e for e in orders[key] if profile_key(e.get("profile_type")) == ctx["profile"]]
                 if found:
                     chosen = (snapshot, approximate, found)

@@ -144,6 +144,11 @@ def _migrate(conn: sqlite3.Connection, key: str) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS sheets_sync_idx ON sheets(sync_state, sync_next_at)"
         )
+        # Histórico paginado no SQL (list_sheets com limit): ordem por data.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS sheets_created_idx "
+            "ON sheets(created_at DESC, sheet_no DESC, uid DESC)"
+        )
         if version < _SCHEMA_VERSION:
             version = _SCHEMA_VERSION
         conn.execute(f"PRAGMA user_version = {version}")
@@ -273,6 +278,15 @@ def set_extraction(conn: sqlite3.Connection, uid: str, extraction: dict,
     return cur.rowcount == 1
 
 
+def get_sheet_image(conn: sqlite3.Connection, uid: str) -> dict | None:
+    """Só o que a rota da foto precisa — sem ler nem analisar o JSON da folha."""
+    row = conn.execute(
+        "SELECT uid, image_path, image_sha256, image_rotation, status FROM sheets WHERE uid = ?",
+        (uid,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def get_sheet(conn: sqlite3.Connection, uid: str) -> dict | None:
     row = conn.execute("SELECT * FROM sheets WHERE uid = ?", (uid,)).fetchone()
     if not row:
@@ -283,24 +297,11 @@ def get_sheet(conn: sqlite3.Connection, uid: str) -> dict | None:
     return sheet
 
 
-def list_sheets(conn: sqlite3.Connection, status: str | None = None,
-                operador: str | None = None, setor: str | None = None,
-                data_folha: str | None = None, data_captura: str | None = None,
-                of: str | None = None) -> list[dict]:
-    """Lista de folhas com campos do cabeçalho extraídos do JSON + filtros do Histórico.
-
-    `status` aceita também o pseudo-estado 'pending' = tudo o que não está
-    validado nem em erro (o que o Histórico chama «Pendentes»)."""
-    sql = (
-        "SELECT uid, sheet_no, template_name, status, image_path, created_at, validated_at, revision, "
-        "  sync_state, sync_error, "
-        "  json_extract(sheet_data, '$.header.operador')      AS operador, "
-        "  json_extract(sheet_data, '$.header.data')          AS data_folha, "
-        "  json_extract(sheet_data, '$.header.setor_maquina') AS setor, "
-        "  json_extract(raw_extraction, '$._blank_page')      AS blank_page, "
-        "  COALESCE(json_array_length(cross_check, '$.validation_warnings'), 0) AS avisos "
-        "FROM sheets WHERE 1=1"
-    )
+def _sheet_filters(status: str | None, operador: str | None, setor: str | None,
+                   data_folha: str | None, data_captura: str | None,
+                   of: str | None) -> tuple[str, list]:
+    """WHERE dos filtros do Histórico (partilhado pela lista e pela contagem)."""
+    sql = " WHERE 1=1"
     args: list = []
     if status == "pending":
         sql += " AND status NOT IN ('validated', 'error')"
@@ -330,19 +331,84 @@ def list_sheets(conn: sqlite3.Connection, status: str | None = None,
         # pesquisa simples no JSON das linhas — chega para encontrar uma OF
         sql += " AND sheet_data LIKE ?"
         args.append(f"%{of.strip()}%")
-    sql += " ORDER BY created_at DESC, sheet_no DESC, uid DESC"
+    return sql, args
+
+
+def list_sheets(conn: sqlite3.Connection, status: str | None = None,
+                operador: str | None = None, setor: str | None = None,
+                data_folha: str | None = None, data_captura: str | None = None,
+                of: str | None = None, *, limit: int | None = None,
+                offset: int = 0) -> list[dict]:
+    """Lista de folhas com campos do cabeçalho extraídos do JSON + filtros do Histórico.
+
+    `status` aceita também o pseudo-estado 'pending' = tudo o que não está
+    validado nem em erro (o que o Histórico chama «Pendentes»).
+
+    Com ``limit`` só se leem as folhas dessa página: sem filtros o SQLite
+    percorre o índice por data e só extrai o JSON das linhas devolvidas
+    (antes lia e analisava todas as folhas de sempre em cada visita)."""
+    where, args = _sheet_filters(status, operador, setor, data_folha, data_captura, of)
+    sql = (
+        "SELECT uid, sheet_no, template_name, status, image_path, created_at, validated_at, revision, "
+        "  sync_state, sync_error, "
+        "  json_extract(sheet_data, '$.header.operador')      AS operador, "
+        "  json_extract(sheet_data, '$.header.data')          AS data_folha, "
+        "  json_extract(sheet_data, '$.header.setor_maquina') AS setor, "
+        "  json_extract(raw_extraction, '$._blank_page')      AS blank_page, "
+        "  COALESCE(json_array_length(cross_check, '$.validation_warnings'), 0) AS avisos "
+        "FROM sheets" + where + " ORDER BY created_at DESC, sheet_no DESC, uid DESC"
+    )
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        args = [*args, int(limit), max(0, int(offset))]
     return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
 
+def count_sheets(conn: sqlite3.Connection, status: str | None = None,
+                 operador: str | None = None, setor: str | None = None,
+                 data_folha: str | None = None, data_captura: str | None = None,
+                 of: str | None = None) -> int:
+    where, args = _sheet_filters(status, operador, setor, data_folha, data_captura, of)
+    return int(conn.execute("SELECT count(*) FROM sheets" + where, args).fetchone()[0])
+
+
+def status_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Folhas por estado, sem ler o JSON de nenhuma."""
+    return {r[0]: int(r[1]) for r in conn.execute(
+        "SELECT status, count(*) FROM sheets GROUP BY status")}
+
+
+_FILTER_OPTIONS_TTL_S = 60.0
+_filter_options_cache: dict[str, tuple[float, dict]] = {}
+_filter_options_lock = threading.Lock()
+
+
 def filter_options(conn: sqlite3.Connection) -> dict[str, list[str]]:
-    """Valores distintos de operador e setor para os selects do Histórico."""
+    """Valores distintos de operador e setor para os selects do Histórico.
+
+    Percorre o JSON de todas as folhas; guarda-se 60 s (a lista muda pouco e
+    a página do Histórico atualiza-se sozinha a cada 30 s)."""
+    import time
+    key = str(conn.execute("PRAGMA database_list").fetchone()[2])
+    with _filter_options_lock:
+        hit = _filter_options_cache.get(key)
+    if hit is not None and time.monotonic() - hit[0] < _FILTER_OPTIONS_TTL_S:
+        return hit[1]
     ops = [r[0] for r in conn.execute(
         "SELECT DISTINCT json_extract(sheet_data, '$.header.operador') FROM sheets "
         "WHERE json_extract(sheet_data, '$.header.operador') IS NOT NULL ORDER BY 1").fetchall()]
     sets = [r[0] for r in conn.execute(
         "SELECT DISTINCT json_extract(sheet_data, '$.header.setor_maquina') FROM sheets "
         "WHERE json_extract(sheet_data, '$.header.setor_maquina') IS NOT NULL ORDER BY 1").fetchall()]
-    return {"operadores": ops, "setores": sets}
+    result = {"operadores": ops, "setores": sets}
+    with _filter_options_lock:
+        _filter_options_cache[key] = (time.monotonic(), result)
+    return result
+
+
+def clear_caches() -> None:
+    with _filter_options_lock:
+        _filter_options_cache.clear()
 
 
 def delete_sheet(conn: sqlite3.Connection, uid: str) -> str | None:

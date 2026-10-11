@@ -43,7 +43,7 @@ from ..matching import bindings as plan_bindings, carryover, header_cross, loade
 from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
-from ..ocr.provider import OcrError, empty_extraction, get_provider, rescue_header
+from ..ocr.provider import OcrError, empty_extraction, get_provider
 from ..templates_spec import TEMPLATES, field_value, get_template, is_marked
 from . import estado as estado_data
 from . import export as cpis_export
@@ -957,7 +957,9 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
     from ..historical_quantities import apply as apply_historical_quantities
     apply_historical_quantities(base, data, cross, decisions=db.evidence_edits(conn, base))
 
-    cross["data_revision"] = expected + (1 if edits else 0)
+    # A revisão que este cruzamento descreve. O Validar só o refaz se a folha
+    # mudou depois disto (antes, no legacy, refazia sempre: o campo faltava).
+    cross["data_revision"] = cross["materialized_revision"] = expected + (1 if edits else 0)
 
     if edits:
         # Se o humano editou entre o cálculo e a gravação, o CAS recusa e
@@ -978,21 +980,21 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
          a_gravar: str = "", sync_erro: str = "", page: int = 1):
     status = status if status in {"", "pending", "validated", "avisos", "a_gravar", "error"} else ""
     page = max(1, page)
+    page_size = 100
+    filters_db = dict(status=status or None, operador=operador or None,
+                      setor=setor or None, data_folha=data or None,
+                      data_captura=data_captura or None, of=of or None)
     conn = _conn()
     try:
-        all_sheets = db.list_sheets(
-            conn, status=status or None, operador=operador or None,
-            setor=setor or None, data_folha=data or None,
-            data_captura=data_captura or None, of=of or None,
-        )
+        total = db.count_sheets(conn, **filters_db)
+        pages = max(1, (total + page_size - 1) // page_size)
+        page = min(page, pages)
+        # Só a página pedida sai da base (antes: todas as folhas de sempre).
+        sheets = db.list_sheets(conn, **filters_db, limit=page_size,
+                                offset=(page - 1) * page_size)
         options = db.filter_options(conn)
     finally:
         conn.close()
-    page_size = 100
-    total = len(all_sheets)
-    pages = max(1, (total + page_size - 1) // page_size)
-    page = min(page, pages)
-    sheets = all_sheets[(page - 1) * page_size:page * page_size]
     filters = {
         "status": status, "operador": operador, "setor": setor,
         "data": data, "data_captura": data_captura, "of": of,
@@ -1038,12 +1040,9 @@ def estado_page(request: Request, q: str = "", familia: str = "", of: str = "",
                 validated: str = "", stored: str = "", page: int = 1):
     conn = _conn()
     try:
-        sheets = db.list_sheets(conn)
+        by_status = db.status_counts(conn)   # sem ler o JSON de cada folha
     finally:
         conn.close()
-    by_status: dict[str, int] = {}
-    for s in sheets:
-        by_status[s["status"]] = by_status.get(s["status"], 0) + 1
     data_estado = estado_data.load_estado(q, familia, of)
     page_size = 100
     page = max(1, page)
@@ -1056,7 +1055,7 @@ def estado_page(request: Request, q: str = "", familia: str = "", of: str = "",
         "estado": data_estado,
         "q": q, "familia": familia, "of": of,
         "validated": validated, "stored": stored,
-        "by_status": by_status, "n_sheets": len(sheets),
+        "by_status": by_status, "n_sheets": sum(by_status.values()),
         "estado_back": estado_back,
         "estado_close_url": _estado_location(q=q, familia=familia, page=page),
         "estado_pdf_url": _query_location("/estado/pdf", q=q, familia=familia),
@@ -1161,10 +1160,6 @@ def _process_sheet(uid: str, force_ocr: bool = False) -> None:
                     template = kinds[kind]
             else:
                 extraction = provider.extract(image_path, template)
-            # Ponto comum da cadeia (Qwen/Gemini/Claude): se a leitura veio
-            # sem identificação no cabeçalho, uma segunda chamada focada na
-            # faixa superior tenta recuperá-la. Nunca pisa o que foi lido.
-            extraction = rescue_header(provider, image_path, template, extraction)
         except OcrError as exc:
             # OCR falhou (rede, quota, chave): a folha abre vazia para
             # preenchimento manual; o erro fica no trilho de auditoria
@@ -1173,7 +1168,14 @@ def _process_sheet(uid: str, force_ocr: bool = False) -> None:
         if not db.set_extraction(conn, uid, extraction, template_name=template_name):
             return  # o revisor começou a editar entretanto: o trabalho dele manda
         if template.name == "cantoneiras_kanban":
+            # Cabeçalho incompleto e linhas em falta tratam-se aqui, na
+            # leitura em segundo plano — não quando o operador abre a folha.
             from .. import coverage_recovery
+            from . import header_recovery_routes
+            try:
+                header_recovery_routes.recover_at_ingest(conn, uid)
+            except Exception as exc:
+                print(f"[worker] folha {uid}: cabeçalho por recuperar: {exc}", flush=True)
             current = db.get_sheet(conn, uid)
             coverage_recovery.automatic(conn, uid, current["revision"], lambda: provider)
         run_cross_check(conn, uid)
@@ -1752,7 +1754,7 @@ def sheet_photo(uid: str, original: int = 0, full: int = 0, v: str = "",
     tal como chegou com ``original=1``."""
     conn = _conn()
     try:
-        sheet = db.get_sheet(conn, uid)
+        sheet = db.get_sheet_image(conn, uid)
     finally:
         conn.close()
     if not sheet or not sheet.get("image_path"):
@@ -1895,10 +1897,7 @@ def sheet_reference(
             raise HTTPException(
                 409, "O planeamento mudou; reabre Referências e confirma novamente."
             )
-        matches = [
-            entry for entry in index.entries
-            if str(entry.get(index.spec.key_field)) == plan_key
-        ]
+        matches = [index.entries[i] for i in index.indices_of(plan_key)]
         if len(matches) != 1:
             raise HTTPException(422, "Referência inexistente ou adulterada.")
         entry = matches[0]

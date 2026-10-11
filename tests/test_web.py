@@ -906,7 +906,9 @@ def test_validate_excecao_do_cross_nunca_devolve_erro_500(
             RuntimeError("falha sintética do cross")
         ),
     )
-    response = client.post(f"/sheet/{uid}/validate", data={"actor": "luis"})
+    # O cabeçalho confirmado no Validar muda a folha: o cruzamento refaz-se.
+    response = client.post(f"/sheet/{uid}/validate",
+                           data={"actor": "luis", "header_operador": "Maria"})
     assert response.status_code == 303
     assert "erro=" in response.headers["location"]
     page = client.get(response.headers["location"])

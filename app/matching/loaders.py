@@ -11,6 +11,9 @@ Só SELECTs. A escrita de validados vive em app/pg_store.py, não aqui.
 
 from __future__ import annotations
 
+import threading
+import time
+
 from datetime import datetime, timezone
 
 import psycopg
@@ -258,13 +261,34 @@ _CANTONEIRAS_SNAPSHOT = (
 )
 
 
+# Várias rotas perguntam a carga atual no mesmo clique (escolher uma
+# referência chegava a perguntá-la 3-4 vezes, cada uma uma ida pelo túnel).
+_SNAPSHOT_INFO_TTL_S = 15.0
+_snapshot_info_lock = threading.Lock()
+_snapshot_info_cache: tuple[float, list] | None = None
+
+
+def clear_caches() -> None:
+    global _snapshot_info_cache
+    with _snapshot_info_lock:
+        _snapshot_info_cache = None
+
+
 def plan_snapshot_info() -> dict:
-    """Identidade e idade do plano de cantoneiras em uso."""
-    rows = _fetch(
-        "SELECT snapshot_id, loaded_at, source_filename FROM audit_mtg.snapshots "
-        "WHERE snapshot_id LIKE %s ORDER BY loaded_at DESC, snapshot_id DESC LIMIT 1",
-        (_CANTONEIRAS_LIKE,),
-    )
+    """Identidade e idade do plano de cantoneiras em uso (15 s em memória)."""
+    global _snapshot_info_cache
+    with _snapshot_info_lock:
+        hit = _snapshot_info_cache
+    if hit is not None and time.monotonic() - hit[0] < _SNAPSHOT_INFO_TTL_S:
+        rows = hit[1]
+    else:
+        rows = _fetch(
+            "SELECT snapshot_id, loaded_at, source_filename FROM audit_mtg.snapshots "
+            "WHERE snapshot_id LIKE %s ORDER BY loaded_at DESC, snapshot_id DESC LIMIT 1",
+            (_CANTONEIRAS_LIKE,),
+        )
+        with _snapshot_info_lock:
+            _snapshot_info_cache = (time.monotonic(), rows)
     if not rows:
         return {}
     info = dict(rows[0])
