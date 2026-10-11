@@ -492,17 +492,14 @@ def _plan_header_machines(cross: dict, scorer: Scorer | None) -> list[str]:
     """Máquinas não vazias das linhas que ligaram fortemente ao plano."""
     if scorer is None:
         return []
-    key_name = scorer.index.spec.key_field
-    by_key = {
-        str(entry.get(key_name)): entry
-        for entry in scorer.index.entries
-        if entry.get(key_name) is not None
-    }
+    index = scorer.index
     out: list[str] = []
     for row in cross.get("rows", []):
         if row.get("mode") != "strong" or not row.get("matched_plan_key"):
             continue
-        entry = by_key.get(str(row["matched_plan_key"])) or {}
+        # procura direta pela chave (antes: um dicionário de todo o plano por passagem)
+        hits = index.indices_of(row["matched_plan_key"])
+        entry = index.entries[hits[0]] if hits else {}
         value = str(entry.get("maquina") or "").strip()
         if value and value not in out:
             out.append(value)
