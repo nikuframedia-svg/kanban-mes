@@ -1223,11 +1223,23 @@ def _transient_failures(uids: list[str]) -> list[str]:
     return out
 
 
-def _process_batch(uids: list[str]) -> None:
+def _run_sheets(uids: list[str]) -> None:
+    """Lê as folhas: uma de cada vez com pausa (quota grátis do Gemini) ou,
+    com MES_OCR_PARALLEL > 1 (API paga), várias ao mesmo tempo e sem pausa."""
+    if settings.ocr_parallel > 1 and len(uids) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=settings.ocr_parallel,
+                                thread_name_prefix="ocr") as pool:
+            list(pool.map(_process_sheet, uids))
+        return
     for i, uid in enumerate(uids):
         _process_sheet(uid)
         if i < len(uids) - 1:
             time.sleep(_BATCH_SLEEP_S)
+
+
+def _process_batch(uids: list[str]) -> None:
+    _run_sheets(uids)
     # Segunda passagem única pelas falhas passageiras: um pico de 503 a meio de
     # um lote de 26 páginas não deve deixar folhas mortas à espera de cliques.
     retry = _transient_failures(uids)
@@ -1240,10 +1252,7 @@ def _process_batch(uids: list[str]) -> None:
             db.mark_pending(conn, uid)
     finally:
         conn.close()
-    for i, uid in enumerate(retry):
-        _process_sheet(uid)
-        if i < len(retry) - 1:
-            time.sleep(_BATCH_SLEEP_S)
+    _run_sheets(retry)
 
 
 @app.post("/upload")

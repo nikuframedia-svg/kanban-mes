@@ -320,6 +320,8 @@ def test_get_provider_encadeia_pelas_chaves(monkeypatch):
     from app.ocr import provider as mod
 
     class S:
+        ocr_provider = ""
+        bedrock_api_key = ""
         qwen_url = ""
         qwen_model = "qwen3.5:9b"
         qwen_timeout_s = 600.0

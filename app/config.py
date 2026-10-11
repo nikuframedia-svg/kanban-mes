@@ -51,6 +51,20 @@ class Settings:
     gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY"))
     ocr_model: str = field(default_factory=lambda: _env("MES_OCR_MODEL", "gemini-3-flash-preview"))
 
+    # OCR pela API do AWS Bedrock (Grok 4.6 no Mantle) — decisão de 12/10:
+    # apps no servidor, OCR por API. A chave fica fora do código (ficheiro de
+    # segredos chmod 600). MES_OCR_PROVIDER=grok força-o; vazio = Grok se
+    # houver chave e não houver Qwen local.
+    ocr_provider: str = field(default_factory=lambda: _env("MES_OCR_PROVIDER").lower())
+    bedrock_api_key: str = field(default_factory=lambda: _env("MES_BEDROCK_API_KEY"))
+    bedrock_endpoint: str = field(default_factory=lambda: _env(
+        "MES_BEDROCK_ENDPOINT", "https://bedrock-mantle.us-west-2.api.aws/openai/v1"))
+    grok_model: str = field(default_factory=lambda: _env("MES_GROK_MODEL", "xai.grok-4.6"))
+    grok_timeout_s: float = field(default_factory=lambda: float(_env("MES_GROK_TIMEOUT_S", "300")))
+    # Folhas lidas em paralelo num lote (a pausa de 6 s entre folhas vinha da
+    # quota grátis do Gemini; com uma API paga lê-se várias de cada vez).
+    ocr_parallel: int = field(default_factory=lambda: max(1, int(_env("MES_OCR_PARALLEL", "1"))))
+
     # Último recurso pago: API Claude quando TODA a cadeia Gemini falha.
     # Sem chave, não existe — o comportamento fica exatamente o de hoje.
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))

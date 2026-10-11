@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..config import settings
+from . import sector_rules
 from ..templates_spec import KanbanTemplate
 
 
@@ -106,7 +107,38 @@ def _json_shape(templates: dict[str, KanbanTemplate], with_kind: bool = False) -
     )
 
 
-def _extraction_prompt(template: KanbanTemplate) -> str:
+def _compact_shape(templates: dict[str, KanbanTemplate], with_kind: bool = False) -> str:
+    """Resposta curta: cada linha é uma lista pela ordem das colunas.
+
+    O Grok escreve devagar (~7 tokens/s): sem repetir os nomes das chaves em
+    cada linha a resposta cai para menos de metade (medido: 724 → 326 tokens,
+    155 s → 72 s por folha) sem perder acerto."""
+    def keys(fields):
+        return "{" + ", ".join(f'"{f}": ...' for f in fields) + "}"
+    header = keys(_union_fields(templates, lambda t: t.header_fields))
+    footer = keys(_union_fields(templates, lambda t: t.footer_fields))
+    kind = ('"kind": "' + '" ou "'.join(templates) + '", ') if with_kind else ""
+    faces = "\n".join(f"- {k}: [" + ", ".join(t.row_fields) + "]" for k, t in templates.items())
+    return (
+        "Responde APENAS com JSON compacto, numa só linha, sem espaços nem indentação:\n"
+        f'{{{kind}"header": {header}, "rows": [[...], [...]], "footer": {footer}}}\n'
+        "Cada linha de `rows` é uma LISTA com um valor por coluna, nesta ordem fixa "
+        "(null na posição de uma célula vazia; nunca saltes posições):\n" + faces
+    )
+
+
+def _expand_compact(data: dict, templates: dict[str, KanbanTemplate]) -> dict:
+    """Linhas em lista (resposta curta) → dicionários pelas colunas da face."""
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list) or not any(isinstance(r, list) for r in rows):
+        return data
+    kind = data.get("kind") if data.get("kind") in templates else next(iter(templates))
+    order = templates[kind].row_fields
+    data["rows"] = [dict(zip(order, r)) if isinstance(r, list) else r for r in rows]
+    return data
+
+
+def _extraction_prompt(template: KanbanTemplate, compact: bool = False) -> str:
     labels = template.field_labels or {}
     row_desc = "; ".join(f"{f} = «{labels.get(f, f)}»" for f in template.row_fields)
     return (
@@ -135,11 +167,13 @@ def _extraction_prompt(template: KanbanTemplate) -> str:
         "vai para `perf_comp`. Se uma delas estiver vazia na folha, deixa-a a null "
         "— não desloques valores de uma coluna para a outra.\n"
         f"Colunas da tabela, pela ordem da folha: {row_desc}.\n"
-        + _json_shape({template.name: template})
+        + sector_rules.for_templates([template.name])
+        + (_compact_shape({template.name: template}) if compact
+           else _json_shape({template.name: template}))
     )
 
 
-def _auto_extraction_prompt(templates: dict[str, KanbanTemplate]) -> str:
+def _auto_extraction_prompt(templates: dict[str, KanbanTemplate], compact: bool = False) -> str:
     faces = []
     for kind, t in templates.items():
         labels = t.field_labels or {}
@@ -178,7 +212,9 @@ def _auto_extraction_prompt(templates: dict[str, KanbanTemplate]) -> str:
         "facilmente: o que estiver na coluna «QTD» vai para `qtd` e o que estiver na "
         "última coluna vai para `perf_comp`. Se uma delas estiver vazia na folha, "
         "deixa-a a null — não desloques valores de uma coluna para a outra.\n"
-        + _json_shape(templates, with_kind=True)
+        + sector_rules.for_templates(t.name for t in templates.values())
+        + (_compact_shape(templates, with_kind=True) if compact
+           else _json_shape(templates, with_kind=True))
     )
 
 
@@ -904,6 +940,124 @@ class ClaudeOcrProvider:
             self._call(image_path, _header_rescue_prompt(template), schema))
 
 
+class GrokOcrProvider:
+    """OCR pela API do AWS Bedrock (Mantle, compatível com a OpenAI): xai.grok-4.6.
+
+    Decisão do Luís (12/10): as apps passam para o servidor e o OCR para uma
+    API de modelo. Testado em folhas validadas (12/10): com as regras do setor
+    e a resposta curta, 81% dos modelos certos (Qwen no PC: 52%), ~72 s por
+    folha, ~1 cêntimo. O Mantle devolve 500 de vez em quando (2 em ~60
+    pedidos): repete-se com espera antes de desistir para o motor seguinte.
+    """
+
+    name = "grok"
+    _RETRY_STATUS = {429, 500, 502, 503, 504}
+
+    def __init__(self, api_key: str, endpoint: str, model: str,
+                 timeout_s: float = 300.0, fallback: "OcrProvider | None" = None,
+                 max_edge: int = 1700, attempts: int = 3):
+        self.api_key = api_key
+        self.endpoint = endpoint.rstrip("/")
+        self.model = model
+        self.timeout_s = timeout_s
+        self.fallback = fallback
+        self.max_edge = max_edge
+        self.attempts = attempts
+
+    def _with_fallback(self, method: str, fn, *args):
+        try:
+            return fn(*args)
+        except OcrError as exc:
+            if self.fallback is None:
+                raise
+            try:
+                return getattr(self.fallback, method)(*args)
+            except OcrError as exc2:
+                raise OcrError(f"{exc}; fallback: {exc2}") from exc2
+
+    def _image_url(self, image_path: Path) -> str:
+        import io
+
+        from PIL import Image
+        if not image_path or not image_path.is_file():
+            raise OcrError(f"Imagem não encontrada: {image_path}")
+        with Image.open(image_path) as raw:
+            im = raw.convert("RGB")
+        scale = min(1.0, self.max_edge / max(im.size))
+        if scale < 1:
+            im = im.resize((round(im.size[0] * scale), round(im.size[1] * scale)),
+                           Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=90)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    def _call(self, image_path: Path, prompt: str) -> dict:
+        body = json.dumps({
+            "model": self.model,
+            "reasoning": {"effort": "low"},
+            "max_output_tokens": 8000,
+            "input": [{"role": "user", "content": [
+                {"type": "input_text", "text": prompt},
+                {"type": "input_image", "image_url": self._image_url(image_path)},
+            ]}],
+        }).encode("utf-8")
+        last: Exception | None = None
+        for attempt in range(self.attempts):
+            req = urllib.request.Request(
+                f"{self.endpoint}/responses", data=body, method="POST",
+                headers={"Authorization": f"Bearer {self.api_key}",
+                         "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", "ignore")[:300]
+                last = OcrError(f"Grok [{self.model}] HTTP {exc.code}: {detail}")
+                if exc.code not in self._RETRY_STATUS:
+                    raise last from exc
+            except (urllib.error.URLError, OSError, http.client.HTTPException,
+                    TimeoutError, json.JSONDecodeError) as exc:
+                last = OcrError(f"Grok [{self.model}] indisponível: {exc}")
+            if attempt + 1 < self.attempts:
+                time.sleep(5 * (attempt + 1))
+        else:
+            raise last or OcrError("Grok: erro desconhecido")
+        if data.get("status") != "completed":
+            raise OcrError(f"Grok [{self.model}]: resposta {data.get('status')} "
+                           f"({(data.get('incomplete_details') or {}).get('reason')})")
+        text = "".join(c.get("text", "") for o in data.get("output", [])
+                       for c in (o.get("content") or []) if c.get("type") == "output_text")
+        try:
+            return _qwen_json(text)
+        except ValueError as exc:
+            raise OcrError(f"Grok [{self.model}]: {exc}") from exc
+
+    def extract(self, image_path: Path, template: KanbanTemplate) -> dict:
+        return self._with_fallback("extract", self._extract, image_path, template)
+
+    def _extract(self, image_path: Path, template: KanbanTemplate) -> dict:
+        data = self._call(image_path, _extraction_prompt(template, compact=True))
+        return _clean_extraction(_expand_compact(data, {template.name: template}), template)
+
+    def extract_auto(self, image_path: Path,
+                     templates: dict[str, KanbanTemplate]) -> tuple[str, dict]:
+        return self._with_fallback("extract_auto", self._extract_auto, image_path, templates)
+
+    def _extract_auto(self, image_path: Path,
+                      templates: dict[str, KanbanTemplate]) -> tuple[str, dict]:
+        data = self._call(image_path, _auto_extraction_prompt(templates, compact=True))
+        data = _expand_compact(data, templates)
+        kind = _resolve_kind(data, templates)
+        return kind, _clean_extraction(data, templates[kind])
+
+    def extract_header(self, image_path: Path, template: KanbanTemplate) -> dict:
+        return self._with_fallback("extract_header", self._extract_header, image_path, template)
+
+    def _extract_header(self, image_path: Path, template: KanbanTemplate) -> dict:
+        return _clean_header_fields(self._call(image_path, _header_rescue_prompt(template)))
+
+
 def extract_checked(provider, image_path, template, validate):
     """Bounded fallback when a strip contradicts independently observed rows.
 
@@ -932,6 +1086,13 @@ def get_provider() -> OcrProvider:
     gemini = (GeminiOcrProvider(settings.gemini_api_key, settings.ocr_model,
                                 fallback=claude)
               if settings.gemini_api_key else None)
+    if settings.ocr_provider == "grok" or (
+            not settings.ocr_provider and settings.bedrock_api_key and not settings.qwen_url):
+        if not settings.bedrock_api_key:
+            raise RuntimeError("MES_OCR_PROVIDER=grok sem MES_BEDROCK_API_KEY")
+        return GrokOcrProvider(settings.bedrock_api_key, settings.bedrock_endpoint,
+                               settings.grok_model, settings.grok_timeout_s,
+                               fallback=gemini or claude)
     if settings.qwen_url:
         # motor local primário; se o PC/GPU estiver em baixo, a cadeia cloud
         # (Gemini→Claude) apanha o trabalho e as folhas nunca ficam por ler
