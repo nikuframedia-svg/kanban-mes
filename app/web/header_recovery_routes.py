@@ -40,22 +40,20 @@ def recover_at_ingest(conn, uid):
             return None
         return header_recovery.recover(
             conn, uid, sheet['revision'], _deps['provider'](),
-            _safe(_deps['employees'], {}), _safe(_deps['machines'], []),
-            _deps['assumed_date'](sheet))
+            _safe(_deps['employees'], {}), _safe(_deps['machines'], []))
 
 
-def register(app, connect, provider, employees, machines, assumed_date, location, recheck):
+def register(app, connect, provider, employees, machines, location, recheck):
     from .automatic_review import AutomaticReview
     from .. import coverage_recovery, historical_quantities
     global automatic
-    _deps.update(provider=provider, employees=employees, machines=machines,
-                 assumed_date=assumed_date)
+    _deps.update(provider=provider, employees=employees, machines=machines)
 
     def process(conn, uid, revision):
         from .automatic_review import run_stages
         return run_stages(conn, uid, [
             ('header', lambda sheet: header_recovery.recover(conn, uid, sheet['revision'], provider(),
-                _safe(employees, {}), _safe(machines, []), assumed_date(sheet))
+                _safe(employees, {}), _safe(machines, []))
                 if header_eligible(conn, sheet) or header_recovery.current_recovery(sheet).get('status') == 'failed' else None),
             ('coverage', lambda sheet: coverage_recovery.automatic(conn, uid, sheet['revision'], provider)
                 if coverage_recovery.needs_automatic(conn, sheet) else None),
@@ -73,18 +71,6 @@ def register(app, connect, provider, employees, machines, assumed_date, location
     @app.post('/sheet/{uid}/header-recovery')
     def recover(uid: str, revision: int = Form(...), back: str = Form('')):
         automatic.enqueue(uid, revision, force=True)
-        return RedirectResponse(location(uid, back), status_code=303)
-
-    @app.post('/sheet/{uid}/header-recovery/confirm-date')
-    def confirm_date(uid: str, revision: int = Form(...), back: str = Form('')):
-        conn = connect()
-        try:
-            try:
-                header_recovery.confirm_rule(conn, uid, revision)
-            except ValueError as exc:
-                return RedirectResponse(location(uid, back, erro=str(exc), erro_context='edit'), status_code=303)
-        finally:
-            conn.close()
         return RedirectResponse(location(uid, back), status_code=303)
 
 

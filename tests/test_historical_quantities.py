@@ -151,3 +151,14 @@ def test_saldo_pronto_nao_volta_a_ser_calculado_com_carga_nova():
     sheet["cross_check"] = cross
     assert cross["rows"][0]["quantity_basis"]["status"] == "ready"
     assert not h.needs_refresh(sheet, latest_loader=lambda: pytest.fail("não precisa da carga"))
+
+
+def test_sem_data_o_saldo_pede_a_data_da_folha():
+    """12/10: já não há data assumida; sem data o saldo diz o que falta."""
+    sheet, data, cross = example()
+    data["header"]["data"] = None
+    h.apply(sheet, data, cross, snapshot_loader=lambda day: pytest.fail("sem data não procura carga"),
+            order_loader=lambda *a: entries())
+    basis = cross["rows"][0]["quantity_basis"]
+    assert basis["status"] == "unavailable" and "Falta a data da folha" in basis["diagnostic"]
+    assert not basis.get("transient")

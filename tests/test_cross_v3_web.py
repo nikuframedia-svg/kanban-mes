@@ -75,6 +75,7 @@ def test_reference_selection_uses_exact_fresh_index_and_human_audit(v3_client):
 
 def test_profile_complete_refuses_invalid_and_preserves_zero_audit(v3_client):
     uid=create_sheet(v3_client)
+    edit(v3_client,uid,'header.data','06/10/2026')   # o saldo usa a data do papel
     edit(v3_client,uid,'rows[0].perf_comp','X')
     current=sheet(uid)
     rc=current['cross_check']['rows'][0]

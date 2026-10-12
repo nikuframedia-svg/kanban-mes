@@ -22,19 +22,9 @@ def current_recovery(sheet):
     return recovery if recovery.get('context') == identity(sheet) else {}
 
 
-def date_needs_confirmation(sheet, protected=()):
-    recovery = current_recovery(sheet)
-    conflict = recovery.get('date_conflict')
-    if not conflict or 'data' in protected:
-        return False
-    confirmed = recovery.get('date_confirmation') or {}
-    return not (confirmed.get('written') == conflict['written']
-                and confirmed.get('assumed') == conflict['assumed'])
-
-
 def evidence_observations(sheet):
-    # Only accepted, independently verified readings become matching evidence.
-    # The handwritten date is evidence even while the existing date rule applies.
+    # Only accepted, independently verified readings become matching evidence;
+    # the handwritten date re-read is evidence too (it is the sheet's date).
     recovery = current_recovery(sheet)
     values = dict(recovery.get('accepted') or {})
     written = (recovery.get('observations') or {}).get('data')
@@ -43,7 +33,7 @@ def evidence_observations(sheet):
     return {key: value for key, value in values.items() if key in FIELDS}
 
 
-def prepare(sheet, protected, provider, employees, machines, assumed_date):
+def prepare(sheet, protected, provider, employees, machines):
     if sheet['status'] not in {'extracted', 'in_review'}:
         raise ValueError('A folha não admite recuperação neste estado.')
     if image_storage.for_processing(sheet) is None:
@@ -71,7 +61,7 @@ def prepare(sheet, protected, provider, employees, machines, assumed_date):
     else:
         recovery['observations'] = observations
         check = header_cross.check_header(observations, get_template(sheet['template_name']),
-            employees=employees, machines=machines, assumed_date=assumed_date)
+            employees=employees, machines=machines)
         for field in FIELDS:
             observed = observations.get(field)
             if str(header.get(field) or '').strip() or field in protected:
@@ -83,21 +73,18 @@ def prepare(sheet, protected, provider, employees, machines, assumed_date):
                 safe = cell['status'] in {'confirmed', 'corrected'}
             elif field == 'turno':
                 safe = cell['status'] in {'confirmed', 'corrected'} and bool(observed)
-            else:
-                safe = bool(assumed_date)
-            value = assumed_date if field == 'data' else (cell.get('proposal') or observed)
+            else:   # data: a que está no papel, se for uma data válida
+                safe = header_cross.canonical_date(observed) is not None
+            value = (header_cross.canonical_date(observed) if field == 'data'
+                     else (cell.get('proposal') or observed))
             if safe and value:
                 header[field] = value
-                if field != 'data':
-                    recovery['accepted'][field] = observed
+                recovery['accepted'][field] = observed
             elif observed:
                 recovery['proposals'][field] = observed
-        written_date = header_cross.canonical_date(observations.get('data'))
-        if written_date and assumed_date and written_date != assumed_date:
-            recovery['date_conflict'] = {'written': written_date, 'assumed': assumed_date}
         missing = [f for f in FIELDS if not str(header.get(f) or '').strip()]
         recovery['missing'] = missing
-        recovery['status'] = 'review' if (recovery['proposals'] or recovery.get('date_conflict')) else ('partial' if missing else 'recovered')
+        recovery['status'] = 'review' if recovery['proposals'] else ('partial' if missing else 'recovered')
     finally:
         if band is not None:
             band.unlink(missing_ok=True)
@@ -105,18 +92,18 @@ def prepare(sheet, protected, provider, employees, machines, assumed_date):
     return data
 
 
-def recover(conn, uid, revision, provider, employees, machines, assumed_date):
+def recover(conn, uid, revision, provider, employees, machines):
     from .recovery_lock import single_worker
     with single_worker(conn):
-        return _recover(conn, uid, revision, provider, employees, machines, assumed_date)
+        return _recover(conn, uid, revision, provider, employees, machines)
 
 
-def _recover(conn, uid, revision, provider, employees, machines, assumed_date):
+def _recover(conn, uid, revision, provider, employees, machines):
     sheet = db.get_sheet(conn, uid)
     if not sheet or sheet['revision'] != revision:
         raise ValueError('A folha mudou; recarrega antes de recuperar.')
     protected = db.human_header_fields(conn, uid)
-    data = prepare(sheet, protected, provider, employees, machines, assumed_date)
+    data = prepare(sheet, protected, provider, employees, machines)
     if data is None:
         return {'uid': uid, 'status': 'already_recovered'}
     old = sheet['sheet_data']
@@ -131,7 +118,7 @@ def _recover(conn, uid, revision, provider, employees, machines, assumed_date):
     cross = copy.deepcopy(sheet.get('cross_check'))
     if cross:
         checked = header_cross.check_header(data['header'], get_template(sheet['template_name']),
-            human_fields=protected, employees=employees, machines=machines, assumed_date=assumed_date)
+            human_fields=protected, employees=employees, machines=machines)
         cross['header'] = {'cells': checked['cells'], 'source_document': (cross.get('header') or {}).get('source_document', {})}
         cross['operator'] = checked['operator']
         cross['data_revision'] = cross['materialized_revision'] = revision+1
@@ -141,21 +128,3 @@ def _recover(conn, uid, revision, provider, employees, machines, assumed_date):
     return {'uid': uid, 'sheet_no': sheet.get('sheet_no'), 'status': data['_header_recovery']['status'],
             'missing': data['_header_recovery'].get('missing', [])}
 
-
-def confirm_rule(conn, uid, revision):
-    sheet = db.get_sheet(conn, uid)
-    if not sheet or sheet['revision'] != revision or sheet['status'] not in {'extracted','in_review'}:
-        raise ValueError('A folha mudou ou já não admite confirmação.')
-    recovery = current_recovery(sheet)
-    conflict = recovery.get('date_conflict')
-    if not conflict:
-        raise ValueError('Não existe divergência de data para confirmar.')
-    data = copy.deepcopy(sheet['sheet_data'])
-    old_date = data['header'].get('data')
-    data['header']['data'] = conflict['assumed']
-    confirmation = {**conflict, 'at': db.now_iso(), 'actor': 'revisor'}
-    data['_header_recovery']['date_confirmation'] = confirmation
-    if not db.save_sheet_data_with_edits(conn, uid, data, revision, [
-            ('header_recovery.date_confirmation', recovery.get('date_confirmation'), confirmation, 'human', 'revisor'),
-            ('header.data', old_date, conflict['assumed'], 'human', 'revisor')]):
-        raise ValueError('A folha mudou; confirma novamente a data.')

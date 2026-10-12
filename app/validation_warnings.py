@@ -20,7 +20,6 @@ def _meaningful(row: dict) -> bool:
 
 
 def collect(sheet: dict, *, current_snapshot: str | None = None,
-            assumed_date: str | None = None,
             extra: list[dict] | tuple = ()) -> list[dict]:
     """Avisos da folha tal como vai ser gravada. Nunca lança nem bloqueia."""
     data = sheet.get("sheet_data") or {}
@@ -37,9 +36,6 @@ def collect(sheet: dict, *, current_snapshot: str | None = None,
 
     if not str(header.get("operador") or "").strip():
         add("operador_vazio", "Operador por preencher: gravado como «(desconhecido)».")
-    if assumed_date:
-        add("data_assumida",
-            f"Data da folha assumida: {assumed_date} (dia útil anterior à digitalização).")
     for item in data.get("_canonical_warnings") or []:
         code = str(item.get("code") or "") if isinstance(item, dict) else ""
         if code.startswith("ultima_coluna_"):

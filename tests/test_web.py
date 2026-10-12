@@ -324,7 +324,7 @@ def test_header_cross_auto_substitui_propostas_unicas_e_fica_verde(
     assert sheet["sheet_data"]["header"] == {
         "operador": "GURPINDER SINGH", "n_operador": "3480",
         "setor_maquina": "Ficep Rapid 20T -2",
-        "data": "17/08/2026", "turno": "M",
+        "data": "15/08/2026", "turno": "M",
     }
     header_cross = sheet["cross_check"]["header"]
     assert header_cross["source_document"]["filename"] == "18-08-2026.pdf"
@@ -333,7 +333,8 @@ def test_header_cross_auto_substitui_propostas_unicas_e_fica_verde(
     assert header_cross["cells"]["operador"]["applied"] is True
     assert header_cross["cells"]["data"]["applied"] is True
     assert header_cross["cells"]["data"]["proposal"] is None
-    assert header_cross["cells"]["data"]["reason"] == "assumed_prev_business_day"
+    # 12/10: a data escrita (15-08-26) só é normalizada; o scan de 18/08 não a muda
+    assert header_cross["cells"]["data"]["reason"] == "valid_date"
     assert header_cross["cells"]["setor_maquina"]["applied"] is True
     assert header_cross["cells"]["setor_maquina"]["proposal"] is None
     # Depois da canonicalização, a identidade final volta a cruzar como exata.
@@ -342,7 +343,7 @@ def test_header_cross_auto_substitui_propostas_unicas_e_fica_verde(
 
     r = client.get(f"/sheet/{uid}")
     assert "header-field-data cc-match" in r.text
-    assert "17/08/2026" in r.text
+    assert "15/08/2026" in r.text
     assert "substituído automaticamente" in r.text
     assert "18-08-2026.pdf" in r.text
     assert "não define a data da folha" in r.text
@@ -371,11 +372,8 @@ def test_plan_failure_does_not_block_header_cross(client, monkeypatch):
     cross = sheet["cross_check"]
     assert cross["plan_reference"]["status"] == "no_reference"
     assert cross["rows"] == []
-    # folha sem PDF de origem: a data assumida parte do created_at (UTC)
-    import datetime as dt
-    esperado = main.header_cross.previous_business_day(
-        dt.datetime.now(dt.timezone.utc).date()).strftime("%d/%m/%Y")
-    assert sheet["sheet_data"]["header"]["data"] == esperado
+    # 12/10: a data escrita (15-08-26) só é normalizada, nunca trocada
+    assert sheet["sheet_data"]["header"]["data"] == "15/08/2026"
     assert sheet["sheet_data"]["header"]["turno"] == "M"
     assert cross["header"]["cells"]["data"]["applied"] is True
     assert cross["header"]["cells"]["turno"]["applied"] is True
@@ -831,8 +829,18 @@ def test_validate_sem_cabecalho_grava_com_avisos_e_fica_imutavel(client):
     uid = create_sheet(client)
     edit(client, uid, "rows[0].of", "OF250001")
 
-    # Sem operador já não recusa (25/09): valida, com aviso, e a data fica a
-    # assumida pela regra da casa (a coluna sheet_date é obrigatória).
+    # 12/10: sem data o sistema já não inventa o dia útil anterior — volta à
+    # folha a pedir a data do papel, sem gravar nada (sheet_date é obrigatória).
+    r = client.post(f"/sheet/{uid}/validate", data={"actor": "luis"})
+    assert r.status_code == 303
+    assert "erro=" in r.headers["location"]
+    assert "Falta+a+data+da+folha" in r.headers["location"] or "Falta%20a%20data" in r.headers["location"]
+    assert client.stored_calls == []
+    page = client.get(r.headers["location"]).text
+    assert "Falta a data da folha" in page and "validada" not in page.split("Falta a data")[0][-200:]
+
+    # Sem operador já não recusa (25/09): com a data escrita, valida com aviso.
+    edit(client, uid, "header.data", "06/08/2026")
     r = client.post(f"/sheet/{uid}/validate", data={"actor": "luis"})
     assert r.status_code == 303
     assert "erro=" not in r.headers["location"]
@@ -843,7 +851,7 @@ def test_validate_sem_cabecalho_grava_com_avisos_e_fica_imutavel(client):
     stored = client.stored_calls[0]["sheet"]
     codes = {w["code"] for w in stored["cross_check"]["validation_warnings"]}
     assert "operador_vazio" in codes
-    assert pg_store.normalize_sheet_date(stored["sheet_data"]["header"]["data"])
+    assert stored["sheet_data"]["header"]["data"] == "06/08/2026"
 
     # um segundo clique não é erro nem grava outra vez
     r = client.post(f"/sheet/{uid}/validate", data={"actor": "luis"})

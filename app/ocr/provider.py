@@ -222,7 +222,7 @@ def _auto_extraction_prompt(templates: dict[str, KanbanTemplate], compact: bool 
 
 # ---- resgate do cabeçalho (segunda chamada focada) ----
 
-# A data manuscrita é evidência; a data final mantém a regra do dia útil anterior.
+# A data manuscrita é a data da folha (sem a regra do dia útil anterior desde 12/10).
 # O gatilho automático continua a considerar apenas os quatro campos de identificação.
 HEADER_RESCUE_FIELDS = ("operador", "n_operador", "setor_maquina", "data", "turno")
 

@@ -131,8 +131,12 @@ def _load_order(snapshot_id, order):
 
 
 def context(data, row, decision_ids=()):
-    from .pg_store import normalize_sheet_date
-    return {"date": normalize_sheet_date((data.get("header") or {}).get("data")),
+    from .pg_store import InvalidSheetDate, normalize_sheet_date
+    try:
+        day = normalize_sheet_date((data.get("header") or {}).get("data"))
+    except InvalidSheetDate:
+        day = None          # sem data válida: o apply diz o que falta
+    return {"date": day,
             "of": canonical_code(row.get("of"), prefix="OF"),
             "profile": profile_key(row.get("perfil")),
             "full": is_marked(field_value(row, "perf_comp")),
@@ -222,6 +226,10 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
                 continue
             if not ctx["of"] or not ctx["profile"] or ctx["unresolved"]:
                 raise ValueError("OF e perfil físico precisam de identificação inequívoca.")
+            if not ctx["date"]:
+                # Sem data assumida desde 12/10: o saldo espera pela data do papel.
+                raise ValueError("Falta a data da folha (ou não é válida): o saldo usa a "
+                                 "carga do plano desse dia.")
             # O saldo é da OF + perfil escritos na linha, não da ligação ao
             # plano: uma correspondência fraca já não o impede (aviso à parte).
             chosen = None
