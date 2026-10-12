@@ -143,7 +143,7 @@ def test_gemini_esgotado_cai_para_o_claude(tmp_path, monkeypatch):
     claude = ClaudeOcrProvider(api_key="t", model="m")
     seen = {}
 
-    def fake_claude_call(image_path, prompt, schema):
+    def fake_claude_call(image_path, prompt):
         seen["prompt"] = prompt
         return {"header": {}, "rows": [{"of": "263323"}], "footer": {}}
 
@@ -187,22 +187,6 @@ def test_sem_fallback_o_erro_gemini_propaga(tmp_path, monkeypatch):
     with pytest.raises(OcrError) as e:
         p.extract(img, CANTONEIRAS_KANBAN)
     assert "último recurso" not in str(e.value)
-
-
-def test_claude_schema_e_json_schema_valido():
-    """O dialecto do Claude é JSON Schema: nullable via ["string","null"],
-    additionalProperties fechado, required completo."""
-    from app.ocr.provider import ClaudeOcrProvider
-    from app.templates_spec import CANTONEIRAS_PARAGENS
-
-    c = ClaudeOcrProvider(api_key="t", model="m")
-    schema = c._auto_schema({"producao": CANTONEIRAS_KANBAN,
-                             "paragens": CANTONEIRAS_PARAGENS})
-    rows = schema["properties"]["rows"]["items"]
-    assert rows["additionalProperties"] is False
-    assert set(rows["required"]) == set(rows["properties"])
-    assert rows["properties"]["of"]["type"] == ["string", "null"]
-    assert schema["properties"]["kind"]["enum"] == ["producao", "paragens"]
 
 
 # ---- resgate do cabeçalho ----
@@ -320,6 +304,8 @@ def test_get_provider_encadeia_pelas_chaves(monkeypatch):
     from app.ocr import provider as mod
 
     class S:
+        ocr_provider = ""
+        bedrock_api_key = ""
         qwen_url = ""
         qwen_model = "qwen3.5:9b"
         qwen_timeout_s = 600.0

@@ -264,11 +264,7 @@ def check_row(row: dict, row_index: int, scorer: Scorer,
     )
     selected_explicitly = False
     if bound_key and not binding_stale:
-        bound_idx = next(
-            (idx for idx, entry in enumerate(index.entries)
-             if str(entry.get(index.spec.key_field)) == bound_key),
-            None,
-        )
+        bound_idx = next(iter(index.indices_of(bound_key)), None)
         if bound_idx is not None:
             selected_explicitly = True
             bound_score = scorer.score_entry(scored_row, bound_idx)

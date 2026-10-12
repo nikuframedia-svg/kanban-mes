@@ -32,11 +32,11 @@ def test_cada_antigo_portao_vira_um_aviso_com_a_linha_visivel():
         {"row_index": 3, "matched_plan_key": "k2", "binding_status": "stale"},
     ]
     got = vw.collect(sheet(rows, checks, header={"operador": "", "data": ""}, fixed_point=False),
-                     current_snapshot="s2", assumed_date="15/09/2026",
+                     current_snapshot="s2",
                      extra=[{"code": "ultima_coluna", "message": "Última coluna por confirmar."}])
     by_code = {w["code"]: w for w in got}
     assert set(by_code) == {
-        "operador_vazio", "data_assumida", "ultima_coluna", "plano_mudou",
+        "operador_vazio", "ultima_coluna", "plano_mudou",
         "cruzamento_instavel", "sem_ligacao_ao_plano", "saldo_por_confirmar",
         "identidade_por_confirmar", "escolha_de_outra_carga",
     }

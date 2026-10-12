@@ -46,7 +46,6 @@ def test_explicit_full_profile_never_snaps_to_different_geometry():
 def test_555_recovery_only_full_profiles_and_preserves_latest_human_decision(client, monkeypatch):
     monkeypatch.setattr(main, 'get_employees', lambda: {})
     monkeypatch.setattr(main, '_load_header_machines', lambda: [])
-    monkeypatch.setattr(main, '_assumed_sheet_date', lambda sheet: None)
     monkeypatch.setattr(loaders, '_fetch', lambda *_: [])
     with db.connect() as conn:
         uid = fixture(conn)

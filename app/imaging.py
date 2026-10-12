@@ -57,9 +57,13 @@ def render_oriented(image_path: Path, rotation_override: int = 0) -> Path:
     if not image_path.is_file():
         return image_path
 
+    # Só o cabeçalho do ficheiro: tamanho e orientação EXIF. O exif_transpose
+    # descodificava e copiava a imagem inteira em cada foto pedida.
     with Image.open(image_path) as probe:
-        probe = ImageOps.exif_transpose(probe) or probe
-        auto = auto_turn_for(probe.width, probe.height)
+        width, height = probe.size
+        if probe.getexif().get(0x0112, 1) in (5, 6, 7, 8):  # EXIF a 90°/270°
+            width, height = height, width
+        auto = auto_turn_for(width, height)
 
     # O pedido do humano é em quartos de volta CW; internamente contamos CCW.
     total = (auto - int(rotation_override or 0)) % 360

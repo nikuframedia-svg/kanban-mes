@@ -7,7 +7,7 @@
 {% endif %}
 {% set pending_proposals = [] %}
 {% if header_recovery %}{% for field in (header_recovery.proposals or {}) %}{% if not header.get(field) %}{% set _ = pending_proposals.append(field) %}{% endif %}{% endfor %}{% endif %}
-{% if header_recovery and ((header_recovery.error and missing_header) or pending_proposals or recovery_date_pending) %}
+{% if header_recovery and ((header_recovery.error and missing_header) or pending_proposals) %}
 <details class="header-audit" data-detail-key="header-reading">
   <summary>Detalhes da leitura do cabeçalho</summary>
   {% if header_recovery.error %}<div>Não foi possível ler o cabeçalho. Os dados anteriores foram preservados. Podes tentar novamente ou preencher os campos.</div>{% endif %}
@@ -22,10 +22,6 @@
       <a href="#" data-header-field="{{ field }}" data-proposal="{{ value }}" onclick="return acceptHeaderProposal(this)">{{ value }}</a>
     </div>
   {% endfor %}
-  {% if recovery_date_pending %}
-    <div>Data no papel: <strong>{{ header_recovery.date_conflict.written }}</strong> · Pela regra do dia útil anterior: <strong>{{ header_recovery.date_conflict.assumed }}</strong>.</div>
-    <div>O campo Data acima é o valor que será guardado ao validar a folha.</div>
-  {% endif %}
 </details>
 {% endif %}
 {% endif %}

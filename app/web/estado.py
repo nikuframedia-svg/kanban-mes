@@ -6,6 +6,8 @@ Todas as funções degradam graciosamente: Postgres em baixo → {"available": F
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime, timezone
 
 from .. import pg
@@ -34,6 +36,32 @@ def _fetch(sql: str, params: tuple = ()) -> list[dict]:
     return pg.fetch(sql, params if params else None)
 
 
+# O Estado fazia 7 consultas seguidas pelo túnel em cada visita (~2,7 s). O
+# plano de uma carga não muda: o agregado guarda-se por carga; o resto, que só
+# muda quando se valida ou entra um lote novo, por pouco tempo.
+_cache_lock = threading.Lock()
+_cache: dict[object, tuple[float, object]] = {}
+
+
+def _cached(key: object, ttl_s: float | None, fn):
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(key)
+    if hit is not None and (ttl_s is None or now - hit[0] < ttl_s):
+        return hit[1]
+    value = fn()
+    with _cache_lock:
+        if len(_cache) > 32:
+            _cache.clear()
+        _cache[key] = (now, value)
+    return value
+
+
+def clear_caches() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
 def _current_snapshot_id() -> str | None:
     """O mesmo snapshot do índice do plano (uma linha de audit_mtg.snapshots).
 
@@ -46,7 +74,7 @@ def _current_snapshot_id() -> str | None:
 def fetch_plan_rows(snapshot_id: str | None = None) -> list[dict]:
     """Plano agregado por OF, ambas as famílias, snapshot mais recente."""
     snapshot_id = snapshot_id or _current_snapshot_id()
-    cantoneiras = _fetch("""
+    cantoneiras = _cached(("cantoneiras", snapshot_id), None, lambda: _fetch("""
         SELECT max(customer_name) AS cliente, max(sales_order_no) AS ov,
                production_order_no AS of, 'cantoneiras' AS familia,
                CASE WHEN bool_and(quantity_planned IS NOT NULL)
@@ -60,8 +88,8 @@ def fetch_plan_rows(snapshot_id: str | None = None) -> list[dict]:
         WHERE source_app = 'kanban-mes'
           AND snapshot_id = %s
         GROUP BY production_order_no
-    """, (snapshot_id,)) if snapshot_id else []
-    chapa = _fetch(f"""
+    """, (snapshot_id,))) if snapshot_id else []
+    chapa = _cached("chapa", 300.0, lambda: _fetch(f"""
         SELECT max(customer_name) AS cliente, max(sales_order_no) AS ov,
                production_order_no AS of, 'chapa' AS familia,
                sum(quantity_plan)           AS qtd_planeada,
@@ -71,7 +99,7 @@ def fetch_plan_rows(snapshot_id: str | None = None) -> list[dict]:
         FROM core_mtg.chapa_components
         WHERE batch_id = {_LATEST_CHAPA_BATCH}
         GROUP BY production_order_no
-    """)
+    """))
     return cantoneiras + chapa
 
 
@@ -275,8 +303,8 @@ def fetch_fontes() -> list[dict]:
 def load_estado(q: str = "", familia: str = "", of: str = "") -> dict:
     """Ponto de entrada da página. Nunca lança — devolve available/error."""
     try:
-        merged = merge_by_of(fetch_plan_rows(), fetch_validated_rows())
-        kpis = fetch_mes_kpis()
+        merged = merge_by_of(fetch_plan_rows(), _cached("validadas", 30.0, fetch_validated_rows))
+        kpis = _cached("kpis", 30.0, fetch_mes_kpis)
         detail = fetch_of_detail(of) if of else None
         return {
             "available": True, "error": None,
@@ -284,7 +312,7 @@ def load_estado(q: str = "", familia: str = "", of: str = "") -> dict:
             "total": len(merged),
             "kpis": kpis,
             "detail": detail,
-            "fontes": fetch_fontes(),
+            "fontes": _cached("fontes", 60.0, fetch_fontes),
         }
     except Exception as exc:  # Postgres em baixo, schema ausente — mostrar, não rebentar
         msg = str(exc).strip().splitlines()[0] if str(exc).strip() else exc.__class__.__name__

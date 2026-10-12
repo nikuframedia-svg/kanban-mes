@@ -143,7 +143,7 @@ def prepare_report(database: Path, *, uids: list[str] | None = None, history_fix
     from app.matching.params import CrossParams
     from app.matching.scorer import Scorer
     from app.templates_spec import get_template
-    from app.web.main import _source_document, _assumed_sheet_date, run_cross_check
+    from app.web.main import _source_document, run_cross_check
 
     # Uniquement a ligação configurada; nunca usar um XLSM silenciosamente
     # como se fosse o snapshot ativo do serviço.
@@ -220,7 +220,7 @@ def prepare_report(database: Path, *, uids: list[str] | None = None, history_fix
                 if frozen is not None:
                     snapshots = frozen["snapshots"]
                     observed_date = (evidence.data.get("header") or {}).get("data")
-                    sheet_date = observed_date or _assumed_sheet_date(before)
+                    sheet_date = observed_date
                     choice = select_snapshot(snapshots, sheet_date, index.snapshot_id)
                     context = None
                     if choice:

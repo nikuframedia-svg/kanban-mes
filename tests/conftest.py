@@ -7,6 +7,15 @@ from app import pg, sync_worker
 
 def _limpar_estado_partilhado() -> None:
     pg.reset()
+    from app import historical_quantities
+    from app.matching import loaders
+    historical_quantities.clear_caches()
+    loaders.clear_caches()
+    from app import db
+    db.clear_caches()
+    estado = sys.modules.get("app.web.estado")
+    if estado is not None:
+        estado.clear_caches()
     main = sys.modules.get("app.web.main")
     if main is not None:
         main._index_cache.clear()

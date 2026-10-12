@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import copy
 import csv
-import datetime
 import hashlib
 import html
 import io
@@ -43,7 +42,7 @@ from ..matching import bindings as plan_bindings, carryover, header_cross, loade
 from ..matching.cross_check import check_sheet
 from ..matching.params import CrossParams
 from ..matching.scorer import Scorer
-from ..ocr.provider import OcrError, empty_extraction, get_provider, rescue_header
+from ..ocr.provider import OcrError, empty_extraction, get_provider
 from ..templates_spec import TEMPLATES, field_value, get_template, is_marked
 from . import estado as estado_data
 from . import export as cpis_export
@@ -457,52 +456,18 @@ def _source_document(sheet: dict) -> dict:
     }
 
 
-# Prefixo dd-mm-aaaa que o scanner da fábrica põe no nome dos PDFs
-# («06-08-2026 - Rapid20T 2.pdf»).
-_SOURCE_DATE_RE = re.compile(r"^(\d{2})-(\d{2})-(\d{4})")
-
-
-def _assumed_sheet_date(sheet: dict) -> str | None:
-    """Data assumida da folha (dd/mm/aaaa): dia útil anterior à data-base.
-
-    Regra da fábrica (26/08): as folhas entregues à digitalização são sempre
-    do dia útil anterior. A data-base é o prefixo dd-mm-aaaa do nome do PDF de
-    origem; sem PDF (foto, folha manual), vale o `created_at` da folha.
-    """
-    filename, _page = pg_store.source_from_image_path(sheet.get("image_path"))
-    base: datetime.date | None = None
-    if filename:
-        m = _SOURCE_DATE_RE.match(filename)
-        if m:
-            try:
-                base = datetime.date(int(m.group(3)), int(m.group(2)),
-                                     int(m.group(1)))
-            except ValueError:
-                base = None
-    if base is None:
-        try:
-            base = datetime.datetime.fromisoformat(
-                str(sheet.get("created_at") or "")).date()
-        except ValueError:
-            return None
-    return header_cross.previous_business_day(base).strftime("%d/%m/%Y")
-
-
 def _plan_header_machines(cross: dict, scorer: Scorer | None) -> list[str]:
     """Máquinas não vazias das linhas que ligaram fortemente ao plano."""
     if scorer is None:
         return []
-    key_name = scorer.index.spec.key_field
-    by_key = {
-        str(entry.get(key_name)): entry
-        for entry in scorer.index.entries
-        if entry.get(key_name) is not None
-    }
+    index = scorer.index
     out: list[str] = []
     for row in cross.get("rows", []):
         if row.get("mode") != "strong" or not row.get("matched_plan_key"):
             continue
-        entry = by_key.get(str(row["matched_plan_key"])) or {}
+        # procura direta pela chave (antes: um dicionário de todo o plano por passagem)
+        hits = index.indices_of(row["matched_plan_key"])
+        entry = index.entries[hits[0]] if hits else {}
         value = str(entry.get("maquina") or "").strip()
         if value and value not in out:
             out.append(value)
@@ -597,7 +562,6 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
     rows = data.get("rows") or []
     observed_header = evidence.data.get("header") or {}
     source_document = _source_document(base)
-    assumed_date = _assumed_sheet_date(base)
     scorer = None
     plan_reference = {"status": "not_applicable"}
     if template.index_loader:
@@ -614,7 +578,7 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
     history = None
     if scorer is not None:
         if historical_context_override is _HISTORY_AUTO:
-            sheet_date = observed_header.get("data") or assumed_date
+            sheet_date = observed_header.get("data")
             history = load_history_context(scorer.index, sheet_date)
         else:
             history = historical_context_override
@@ -702,7 +666,6 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
     header_result = header_cross.check_header(
         observed_header, template, human_fields=human_header, employees=employees,
         machines=machines, plan_machines=plan_machines, source_document=source_document,
-        assumed_date=assumed_date,
     )
     header = data.setdefault("header", {})
     for key, cell in header_result["cells"].items():
@@ -715,7 +678,6 @@ def _run_cross_check_v3(conn, uid: str, *, scorer_override=None,
     final_header = header_cross.check_header(
         header, template, human_fields=human_header, employees=employees,
         machines=machines, plan_machines=plan_machines, source_document=source_document,
-        assumed_date=assumed_date,
     )
     for key, cell in final_header["cells"].items():
         observed_cell = header_result["cells"].get(key) or {}
@@ -809,9 +771,6 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
             or header_cross.template_machine(template)):
         machine_catalog = _load_header_machines()
     source_document = _source_document(base)
-    # A data assumida também vale para o verso (paragens): é a mesma folha
-    # física, digitalizada no mesmo dia.
-    assumed_date = _assumed_sheet_date(base)
 
     def check_current_header() -> dict:
         return header_cross.check_header(
@@ -821,7 +780,6 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
             machines=machine_catalog,
             plan_machines=plan_machines,
             source_document=source_document,
-            assumed_date=assumed_date,
         )
 
     edits: list[tuple[str, object, object, str]] = recovery_edits
@@ -957,7 +915,9 @@ def _run_cross_check_legacy(conn, uid: str, *, force_plan: bool = False, scorer_
     from ..historical_quantities import apply as apply_historical_quantities
     apply_historical_quantities(base, data, cross, decisions=db.evidence_edits(conn, base))
 
-    cross["data_revision"] = expected + (1 if edits else 0)
+    # A revisão que este cruzamento descreve. O Validar só o refaz se a folha
+    # mudou depois disto (antes, no legacy, refazia sempre: o campo faltava).
+    cross["data_revision"] = cross["materialized_revision"] = expected + (1 if edits else 0)
 
     if edits:
         # Se o humano editou entre o cálculo e a gravação, o CAS recusa e
@@ -978,21 +938,21 @@ def home(request: Request, status: str = "", operador: str = "", setor: str = ""
          a_gravar: str = "", sync_erro: str = "", page: int = 1):
     status = status if status in {"", "pending", "validated", "avisos", "a_gravar", "error"} else ""
     page = max(1, page)
+    page_size = 100
+    filters_db = dict(status=status or None, operador=operador or None,
+                      setor=setor or None, data_folha=data or None,
+                      data_captura=data_captura or None, of=of or None)
     conn = _conn()
     try:
-        all_sheets = db.list_sheets(
-            conn, status=status or None, operador=operador or None,
-            setor=setor or None, data_folha=data or None,
-            data_captura=data_captura or None, of=of or None,
-        )
+        total = db.count_sheets(conn, **filters_db)
+        pages = max(1, (total + page_size - 1) // page_size)
+        page = min(page, pages)
+        # Só a página pedida sai da base (antes: todas as folhas de sempre).
+        sheets = db.list_sheets(conn, **filters_db, limit=page_size,
+                                offset=(page - 1) * page_size)
         options = db.filter_options(conn)
     finally:
         conn.close()
-    page_size = 100
-    total = len(all_sheets)
-    pages = max(1, (total + page_size - 1) // page_size)
-    page = min(page, pages)
-    sheets = all_sheets[(page - 1) * page_size:page * page_size]
     filters = {
         "status": status, "operador": operador, "setor": setor,
         "data": data, "data_captura": data_captura, "of": of,
@@ -1038,12 +998,9 @@ def estado_page(request: Request, q: str = "", familia: str = "", of: str = "",
                 validated: str = "", stored: str = "", page: int = 1):
     conn = _conn()
     try:
-        sheets = db.list_sheets(conn)
+        by_status = db.status_counts(conn)   # sem ler o JSON de cada folha
     finally:
         conn.close()
-    by_status: dict[str, int] = {}
-    for s in sheets:
-        by_status[s["status"]] = by_status.get(s["status"], 0) + 1
     data_estado = estado_data.load_estado(q, familia, of)
     page_size = 100
     page = max(1, page)
@@ -1056,7 +1013,7 @@ def estado_page(request: Request, q: str = "", familia: str = "", of: str = "",
         "estado": data_estado,
         "q": q, "familia": familia, "of": of,
         "validated": validated, "stored": stored,
-        "by_status": by_status, "n_sheets": len(sheets),
+        "by_status": by_status, "n_sheets": sum(by_status.values()),
         "estado_back": estado_back,
         "estado_close_url": _estado_location(q=q, familia=familia, page=page),
         "estado_pdf_url": _query_location("/estado/pdf", q=q, familia=familia),
@@ -1161,10 +1118,6 @@ def _process_sheet(uid: str, force_ocr: bool = False) -> None:
                     template = kinds[kind]
             else:
                 extraction = provider.extract(image_path, template)
-            # Ponto comum da cadeia (Qwen/Gemini/Claude): se a leitura veio
-            # sem identificação no cabeçalho, uma segunda chamada focada na
-            # faixa superior tenta recuperá-la. Nunca pisa o que foi lido.
-            extraction = rescue_header(provider, image_path, template, extraction)
         except OcrError as exc:
             # OCR falhou (rede, quota, chave): a folha abre vazia para
             # preenchimento manual; o erro fica no trilho de auditoria
@@ -1173,7 +1126,14 @@ def _process_sheet(uid: str, force_ocr: bool = False) -> None:
         if not db.set_extraction(conn, uid, extraction, template_name=template_name):
             return  # o revisor começou a editar entretanto: o trabalho dele manda
         if template.name == "cantoneiras_kanban":
+            # Cabeçalho incompleto e linhas em falta tratam-se aqui, na
+            # leitura em segundo plano — não quando o operador abre a folha.
             from .. import coverage_recovery
+            from . import header_recovery_routes
+            try:
+                header_recovery_routes.recover_at_ingest(conn, uid)
+            except Exception as exc:
+                print(f"[worker] folha {uid}: cabeçalho por recuperar: {exc}", flush=True)
             current = db.get_sheet(conn, uid)
             coverage_recovery.automatic(conn, uid, current["revision"], lambda: provider)
         run_cross_check(conn, uid)
@@ -1209,8 +1169,8 @@ def _transient_failures(uids: list[str]) -> list[str]:
     try:
         for uid in uids:
             sheet = db.get_sheet(conn, uid)
-            # `in_review` também conta: as escritas do próprio motor (ex.: a
-            # data assumida) mudam o estado sem nenhum humano ter tocado — o
+            # `in_review` também conta: as escritas do próprio motor (ex.: o
+            # formato da data) mudam o estado sem nenhum humano ter tocado — o
             # guarda contra pisar trabalho humano é o edit_count, logo abaixo.
             if not sheet or sheet["status"] not in ("extracted", "in_review"):
                 continue                      # pendente/validada/erro: não mexer
@@ -1224,11 +1184,23 @@ def _transient_failures(uids: list[str]) -> list[str]:
     return out
 
 
-def _process_batch(uids: list[str]) -> None:
+def _run_sheets(uids: list[str]) -> None:
+    """Lê as folhas: uma de cada vez com pausa (quota grátis do Gemini) ou,
+    com MES_OCR_PARALLEL > 1 (API paga), várias ao mesmo tempo e sem pausa."""
+    if settings.ocr_parallel > 1 and len(uids) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=settings.ocr_parallel,
+                                thread_name_prefix="ocr") as pool:
+            list(pool.map(_process_sheet, uids))
+        return
     for i, uid in enumerate(uids):
         _process_sheet(uid)
         if i < len(uids) - 1:
             time.sleep(_BATCH_SLEEP_S)
+
+
+def _process_batch(uids: list[str]) -> None:
+    _run_sheets(uids)
     # Segunda passagem única pelas falhas passageiras: um pico de 503 a meio de
     # um lote de 26 páginas não deve deixar folhas mortas à espera de cliques.
     retry = _transient_failures(uids)
@@ -1241,10 +1213,7 @@ def _process_batch(uids: list[str]) -> None:
             db.mark_pending(conn, uid)
     finally:
         conn.close()
-    for i, uid in enumerate(retry):
-        _process_sheet(uid)
-        if i < len(retry) - 1:
-            time.sleep(_BATCH_SLEEP_S)
+    _run_sheets(retry)
 
 
 @app.post("/upload")
@@ -1702,7 +1671,6 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     from ..ocr.coverage import coverage_view
     recovery_conn = _conn()
     try:
-        protected_header = db.human_header_fields(recovery_conn, sheet["uid"])
         automatic_review_needed = (header_recovery_routes.automatic.needed(recovery_conn, sheet)
             or header_recovery_routes.job_status(sheet["uid"]).get("status") in {"queued", "running"})
     finally:
@@ -1710,7 +1678,6 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
     if header_draft is not None or field_draft is not None or status_code != 200 or getattr(request.state, "form_error", None):
         automatic_review_needed = False
     recovery_info = header_recovery.current_recovery(sheet)
-    recovery_date_pending = header_recovery.date_needs_confirmation(sheet, protected_header)
     return templates.TemplateResponse(request, "sheet.html", {
         "sheet": sheet, "t": template, "cross_rows": cross_rows,
         "photo_v": photo_version(sheet),
@@ -1722,7 +1689,7 @@ def _render_sheet(request: Request, sheet: dict, *, back: str | None = None,
         "header_conflict": header_draft is not None,
         "coverage_data": coverage_view(sheet.get("sheet_data") or {}, sheet),
         "coverage_count": getattr(request.state, "coverage_count", ""),
-        "header_recovery": recovery_info, "recovery_date_pending": recovery_date_pending,
+        "header_recovery": recovery_info,
         "recovery_job": header_recovery_routes.job_status(sheet["uid"]),
         "automatic_review_needed": automatic_review_needed,
         "automatic_review_job": header_recovery_routes.job_status(sheet["uid"]),
@@ -1752,7 +1719,7 @@ def sheet_photo(uid: str, original: int = 0, full: int = 0, v: str = "",
     tal como chegou com ``original=1``."""
     conn = _conn()
     try:
-        sheet = db.get_sheet(conn, uid)
+        sheet = db.get_sheet_image(conn, uid)
     finally:
         conn.close()
     if not sheet or not sheet.get("image_path"):
@@ -1895,10 +1862,7 @@ def sheet_reference(
             raise HTTPException(
                 409, "O planeamento mudou; reabre Referências e confirma novamente."
             )
-        matches = [
-            entry for entry in index.entries
-            if str(entry.get(index.spec.key_field)) == plan_key
-        ]
+        matches = [index.entries[i] for i in index.indices_of(plan_key)]
         if len(matches) != 1:
             raise HTTPException(422, "Referência inexistente ou adulterada.")
         entry = matches[0]
@@ -2296,11 +2260,13 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
              header_turno: str | None = Form(None)):
     """Valida a folha: fica imutável já, e vai para o Postgres por trás.
 
-    Nada de negócio bloqueia (decisão de 25/09): operador ou data em falta,
+    Nada de negócio bloqueia (decisão de 25/09): operador em falta,
     linhas sem candidato, identidade por confirmar, saldo histórico, plano
     que mudou, cruzamento instável… ficam como avisos gravados com a folha
     (app/validation_warnings.py). Só se recusa o que impediria gravar a folha
-    que o operador está a ver — outra janela alterou-a nesse instante.
+    que o operador está a ver — outra janela alterou-a nesse instante — e a
+    folha sem data legível: o sistema já não a inventa (12/10) e o histórico
+    não grava folhas sem data, por isso pede-se a do papel.
 
     O clique não toca no Postgres (decisão de 25/09, «validada logo, grava
     depois»): a folha fica validada no SQLite com ``sync_state='pending'`` e
@@ -2375,36 +2341,21 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
                 if not before:
                     raise HTTPException(404)
 
-        # Data: a gravação exige uma data interpretável. Se a folha não a tem
-        # (apagada ou ilegível), usa-se a regra da casa — dia útil anterior à
-        # digitalização — como edição do sistema, auditada, antes do cruzamento
-        # (o saldo histórico depende dela).
-        assumed_date = None
+        # Data: a gravação exige uma data interpretável e o sistema já não a
+        # inventa (12/10, fim da regra do dia útil anterior): sem data válida,
+        # volta à folha a pedir a que está no papel.
         header = (before.get("sheet_data") or {}).get("header") or {}
         try:
             date_ok = bool(pg_store.normalize_sheet_date(header.get("data")))
         except pg_store.InvalidSheetDate:
             date_ok = False
         if not date_ok:
-            assumed_date = _assumed_sheet_date(before)
-            if assumed_date:
-                data_doc = copy.deepcopy(before.get("sheet_data") or {
-                    "header": {}, "rows": [], "footer": {},
-                })
-                data_doc.setdefault("header", {})["data"] = assumed_date
-                if not db.save_sheet_data_with_edits(
-                    conn, uid, data_doc, before["revision"],
-                    [("header.data", header.get("data"), assumed_date,
-                      "system", "validacao:data_assumida")],
-                    cross_check=before.get("cross_check"), write_cross=True,
-                ):
-                    raise HTTPException(409, _CHANGED_ELSEWHERE)
-                before = db.get_sheet(conn, uid)
-                if not before:
-                    raise HTTPException(404)
+            raise HTTPException(
+                422, "Falta a data da folha: escreve no cabeçalho a data que está "
+                     "no papel e valida outra vez.")
 
         # O cruzamento só se refaz se a folha mudou desde o último (cabeçalho
-        # confirmado agora, data assumida) — sobre o plano em memória, sem ir
+        # confirmado agora) — sobre o plano em memória, sem ir
         # ao Postgres: vale a carga do plano que o operador estava a ver.
         # Plano indisponível fica no plan_reference do cross → aviso; um erro
         # do próprio cruzamento é técnico e continua a travar.
@@ -2421,8 +2372,7 @@ def validate(uid: str, actor: str = Form("operador"), back: str = Form(""),
             raise HTTPException(404)
         template = get_template(sheet["template_name"])
         warnings = validation_warnings.collect(
-            sheet, current_snapshot=_cached_snapshot_id(template.index_loader),
-            assumed_date=assumed_date)
+            sheet, current_snapshot=_cached_snapshot_id(template.index_loader))
         cross = sheet.get("cross_check") or {}
         cross["validation_warnings"] = warnings
         validation_snapshot = cross.get("snapshot_id")
@@ -2525,7 +2475,7 @@ plan_picker.register(app, _conn, lambda loader: get_index(loader),
                      lambda *args, **kwargs: run_cross_check(*args, **kwargs), _sheet_location)
 
 from . import header_recovery_routes
-header_recovery_routes.register(app, _conn, lambda: get_provider(), lambda: get_employees(), lambda: _load_header_machines(), _assumed_sheet_date, _sheet_location, lambda *args: run_cross_check(*args))
+header_recovery_routes.register(app, _conn, lambda: get_provider(), lambda: get_employees(), lambda: _load_header_machines(), _sheet_location, lambda *args: run_cross_check(*args))
 
 
 from . import image_routes

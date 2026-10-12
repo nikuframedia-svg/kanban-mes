@@ -116,6 +116,17 @@ class PlanIndex:
             return sim.normalize_code(value)
         return sim.compact(value)
 
+    def indices_of(self, plan_key: object) -> list[int]:
+        """Posições das linhas com esta chave. O dicionário cria-se à primeira
+        consulta: escolher uma referência percorria as ~76 mil linhas."""
+        table = self.__dict__.get("_key_positions")
+        if table is None:
+            table = {}
+            for i, entry in enumerate(self.entries):
+                table.setdefault(str(entry.get(self.spec.key_field)), []).append(i)
+            self._key_positions = table
+        return table.get(str(plan_key), [])
+
     def same_identity(self, field_name: str, written: str | None,
                       plan_value: str | None) -> bool:
         """O escrito e o valor do plano são a mesma identidade, só com outro

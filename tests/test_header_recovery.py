@@ -35,20 +35,20 @@ def create(conn,tmp_path):
 
 def call(conn,uid,provider=None):
     sheet=db.get_sheet(conn,uid)
-    return recovery.recover(conn,uid,sheet['revision'],provider or Provider(),EMPLOYEES,MACHINES,'20/08/2026')
+    return recovery.recover(conn,uid,sheet['revision'],provider or Provider(),EMPLOYEES,MACHINES)
 
 
 def test_header_only_preserves_original_rows_footer_and_cross(tmp_path):
     with db.connect(tmp_path/'db.sqlite') as conn:
         uid=create(conn,tmp_path);before=db.get_sheet(conn,uid);provider=Provider()
-        assert call(conn,uid,provider)['status']=='review'
+        assert call(conn,uid,provider)['status']=='recovered'
         after=db.get_sheet(conn,uid)
-        assert after['sheet_data']['header']==READING|{'data':'20/08/2026'}
+        # 12/10: a data é a que está no papel (21/08/26), só normalizada
+        assert after['sheet_data']['header']==READING|{'data':'21/08/2026'}
         assert after['sheet_data']['rows']==before['sheet_data']['rows']
         assert after['sheet_data']['footer']==before['sheet_data']['footer']
         assert after['raw_extraction']==before['raw_extraction']
         assert after['cross_check']['rows']==before['cross_check']['rows']
-        assert recovery.date_needs_confirmation(after)
         assert db.human_header_fields(conn,uid)==set()
         assert after['sheet_data']['_header_recovery']['source']=='automatic_header_recovery'
         evidence=build_evidence(after,db.evidence_edits(conn,after))
@@ -56,11 +56,6 @@ def test_header_only_preserves_original_rows_footer_and_cross(tmp_path):
         assert evidence.provenance['field_sources']['header.operador']['source']=='header_recovery'
         assert call(conn,uid,provider)['status']=='already_recovered'
         assert provider.calls==1
-        recovery.confirm_rule(conn,uid,after['revision'])
-        confirmed=db.get_sheet(conn,uid)
-        assert not recovery.date_needs_confirmation(confirmed)
-        assert confirmed['sheet_data']['header']['data']=='20/08/2026'
-        assert confirmed['raw_extraction']==before['raw_extraction']
 
 
 def test_manual_values_and_explicit_empty_are_preserved(tmp_path):
@@ -73,7 +68,6 @@ def test_manual_values_and_explicit_empty_are_preserved(tmp_path):
         assert after['sheet_data']['header']['operador']=='NOME CONFIRMADO'
         assert after['sheet_data']['header']['data']=='21/08/2026'
         assert after['sheet_data']['header']['turno'] is None
-        assert not recovery.date_needs_confirmation(after,db.human_header_fields(conn,uid))
         evidence=build_evidence(after,db.evidence_edits(conn,after))
         assert evidence.data['header']['operador']=='NOME CONFIRMADO'
         assert evidence.data['header']['data']=='21/08/2026'
@@ -90,13 +84,13 @@ def test_provider_failure_is_visible_and_retryable(tmp_path):
         assert after['sheet_data']['header']==before['sheet_data']['header']
         assert after['sheet_data']['rows']==before['sheet_data']['rows']
         assert 'OCR indisponível' in after['sheet_data']['_header_recovery']['error']
-        assert call(conn,uid)['status']=='review'
+        assert call(conn,uid)['status']=='recovered'
 
 
 def test_ambiguous_reading_is_only_a_proposal(tmp_path):
     with db.connect(tmp_path/'db.sqlite') as conn:
         uid=create(conn,tmp_path);sheet=db.get_sheet(conn,uid)
-        recovery.recover(conn,uid,sheet['revision'],Provider(),{},[],'20/08/2026')
+        recovery.recover(conn,uid,sheet['revision'],Provider(),{},[])
         after=db.get_sheet(conn,uid)
         assert after['sheet_data']['header']['operador'] is None
         assert after['sheet_data']['_header_recovery']['proposals']['operador']==READING['operador']
@@ -128,24 +122,23 @@ def test_validated_refused_and_new_generation_invalidates_recovery(tmp_path):
         assert db.get_sheet(conn,uid)['sheet_data']==after['sheet_data']
 
 
-def test_ui_exposes_date_difference_without_separate_confirmation(client,tmp_path,monkeypatch):
+def test_ui_mostra_a_data_do_papel_sem_regra_do_dia_util(client,tmp_path,monkeypatch):
+    """12/10: a releitura do cabeçalho preenche a data com a que está no papel;
+    já não há data assumida, divergência nem botão para a confirmar."""
     monkeypatch.setattr(main,'run_cross_check',lambda *a,**k:True)
     with db.connect() as conn:
         uid=create(conn,tmp_path);call(conn,uid);after=db.get_sheet(conn,uid)
+    assert after['sheet_data']['header']['data']=='21/08/2026'
     page=client.get(f'/sheet/{uid}')
     assert page.status_code==200
-    assert '21/08/2026' in page.text and '20/08/2026' in page.text
-    assert 'Confirmar data pela regra' not in page.text
-    confirmed=client.post(f'/sheet/{uid}/header-recovery/confirm-date',data={'revision':after['revision']})
-    assert confirmed.status_code==303
-    assert 'Confirmar data pela regra' not in client.get(f'/sheet/{uid}').text
-    # Nada bloqueia (25/09): validar não pede uma confirmação à parte da data.
-    with db.connect() as conn:
-        revision=db.get_sheet(conn,uid)['revision']
-    result=client.post(f'/sheet/{uid}/validate',data={'revision':revision})
-    assert 'diverg' not in result.headers.get('location','')
+    assert '21/08/2026' in page.text and '20/08/2026' not in page.text
+    assert 'dia útil anterior' not in page.text
+    gone=client.post(f'/sheet/{uid}/header-recovery/confirm-date',data={'revision':after['revision']})
+    assert gone.status_code in {404,405}
+    result=client.post(f'/sheet/{uid}/validate',data={'revision':after['revision']})
     assert 'erro=' not in result.headers.get('location','')
     assert len(client.stored_calls)==1
+    assert client.stored_calls[0]['sheet']['sheet_data']['header']['data']=='21/08/2026'
 
 
 def test_only_one_worker_and_lock_is_released_after_failure(tmp_path):
@@ -155,7 +148,7 @@ def test_only_one_worker_and_lock_is_released_after_failure(tmp_path):
         with single_worker(conn):
             with pytest.raises(ValueError,match='em curso'):
                 call(conn,uid)
-        assert call(conn,uid)['status']=='review'
+        assert call(conn,uid)['status']=='recovered'
 
 
 def test_batch_inventory_and_failure_stop_preserve_unprocessed_sheets(tmp_path,monkeypatch,capsys):
@@ -188,7 +181,7 @@ def test_batch_inventory_and_failure_stop_preserve_unprocessed_sheets(tmp_path,m
     monkeypatch.setattr(sys,'argv',args+['--apply','--backup',str(tmp_path/'resumed.db')])
     assert cli.main()==0
     with db.connect(database) as conn:
-        assert all(recovery.current_recovery(db.get_sheet(conn,uid))['status']=='review' for uid in (first,second))
+        assert all(recovery.current_recovery(db.get_sheet(conn,uid))['status']=='recovered' for uid in (first,second))
 
 
 def test_automatic_header_job_starts_once_and_only_date_exception_remains(client,tmp_path,monkeypatch):
@@ -214,7 +207,6 @@ def test_automatic_header_job_starts_once_and_only_date_exception_remains(client
     with db.connect() as conn:
         after=db.get_sheet(conn,uid)
         assert after['sheet_data']['rows']==before['sheet_data']['rows']
-        recovery.confirm_rule(conn,uid,after['revision'])
     page=client.get(f'/sheet/{uid}')
     assert 'Confirmar data pela regra' not in page.text
     assert 'Confirma estes dados' not in page.text

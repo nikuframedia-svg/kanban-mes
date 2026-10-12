@@ -79,7 +79,7 @@ def main():
         conn.close()
     results=[]
     if args.apply and selected:
-        from app.web.main import get_provider,get_employees,_load_header_machines,_assumed_sheet_date
+        from app.web.main import get_provider,get_employees,_load_header_machines
         provider=get_provider()
         try:
             employees=get_employees()
@@ -89,8 +89,7 @@ def main():
         for item in selected:
             with closing(db.connect(args.database)) as conn:
                 try:
-                    sheet=db.get_sheet(conn,item['uid'])
-                    result=header_recovery.recover(conn,item['uid'],item['revision'],provider,employees,machines,_assumed_sheet_date(sheet))
+                    result=header_recovery.recover(conn,item['uid'],item['revision'],provider,employees,machines)
                 except Exception as exc:
                     result={'uid':item['uid'],'status':'conflict' if isinstance(exc,ValueError) else 'failed','error':str(exc)}
                 results.append(result)
