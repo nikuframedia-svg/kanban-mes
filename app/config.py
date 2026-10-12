@@ -65,10 +65,10 @@ class Settings:
     # quota grátis do Gemini; com uma API paga lê-se várias de cada vez).
     ocr_parallel: int = field(default_factory=lambda: max(1, int(_env("MES_OCR_PARALLEL", "1"))))
 
-    # Último recurso pago: API Claude quando TODA a cadeia Gemini falha.
-    # Sem chave, não existe — o comportamento fica exatamente o de hoje.
+    # API Claude: motor principal com MES_OCR_PROVIDER=claude (12/10); sem isso,
+    # último recurso quando a cadeia Gemini falha. Sem chave, não existe.
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
-    claude_ocr_model: str = field(default_factory=lambda: _env("MES_CLAUDE_OCR_MODEL", "claude-haiku-4-5"))
+    claude_ocr_model: str = field(default_factory=lambda: _env("MES_CLAUDE_OCR_MODEL", "claude-sonnet-5-5"))
 
     # Página com fração de tinta abaixo disto é um verso em branco do scanner:
     # não se gasta OCR nela (e evita-se a folha alucinada). Medido: brancas

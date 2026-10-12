@@ -1,6 +1,6 @@
 """OCR das folhas kanban.
 
-Quatro providers:
+Providers:
 - QwenOcrProvider — motor LOCAL (Ollama a servir qwen3.5:9b na GPU do PC da
   fábrica). Ativa-se com MES_QWEN_URL e passa a ser o principal: sem quotas e
   as imagens nunca saem da infraestrutura. Transporte e truques portados do
@@ -8,9 +8,10 @@ Quatro providers:
 - GeminiOcrProvider — lê a foto com a Gemini API e devolve {header, rows, footer}
   em JSON forçado por schema. Transcreve fielmente: o OCR NÃO corrige nada;
   correções são trabalho do motor de cruzamento + revisão humana.
-- ClaudeOcrProvider — último recurso PAGO (API Claude), usado apenas quando a
-  cadeia anterior inteira falhou. Só existe se houver ANTHROPIC_API_KEY no
-  ambiente; sem chave, o comportamento é exatamente o de sempre.
+- ClaudeOcrProvider — API da Anthropic (ANTHROPIC_API_KEY). Motor principal
+  no servidor desde 12/10 (MES_OCR_PROVIDER=claude), com o Grok de reserva;
+  sem MES_OCR_PROVIDER é o último recurso da cadeia Gemini, como sempre.
+- GrokOcrProvider — xai.grok-4.6 no AWS Bedrock (MES_BEDROCK_API_KEY).
 - ManualEntryProvider — sem chave configurada (ou sem foto), folha vazia para
   preenchimento manual. O resto da app funciona exatamente da mesma forma.
 
@@ -23,6 +24,7 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import logging
 import time
 import urllib.error
 import urllib.request
@@ -814,155 +816,22 @@ class GeminiOcrProvider:
         return _clean_header_fields(self._response_json(self._call(body)))
 
 
-class ClaudeOcrProvider:
-    """Último recurso pago: a API Claude, só quando toda a cadeia Gemini falhou.
+_ocr_log = logging.getLogger("uvicorn.error.ocr")
 
-    Mesmo contrato, mesmos prompts, mesma disciplina de transcrição fiel — só
-    muda o transporte (SDK `anthropic`) e a forma do schema (JSON Schema em vez
-    do dialecto do Gemini). A ~0,6 cêntimos por folha, corre apenas nas falhas.
+
+class _ApiVisionProvider:
+    """Motor por API com as instruções curtas (linhas em lista) e as regras do setor.
+
+    Partilhado pelo Claude e pelo Grok: o que muda de um para o outro é só o
+    transporte (``_call``, que devolve o JSON lido). Se o motor falhar, o
+    trabalho passa ao seguinte (``fallback``) com os mesmos argumentos.
     """
 
-    name = "claude"
+    fallback: "OcrProvider | None" = None
+    max_edge = 1700
 
-    def __init__(self, api_key: str, model: str, timeout_s: float = 120.0):
-        self.api_key = api_key
-        self.model = model
-        self.timeout_s = timeout_s
-        self._client = None    # criado uma vez, na primeira chamada
-
-    def _get_client(self):
-        # um cliente por chamada abria um pool httpx novo de cada vez e
-        # nenhum era fechado — num lote com o Gemini em baixo eram dezenas
-        if self._client is None:
-            import anthropic
-            self._client = anthropic.Anthropic(
-                api_key=self.api_key, timeout=self.timeout_s, max_retries=1)
-        return self._client
-
-    # ---- schema: JSON Schema standard (nullable = ["string", "null"]) ----
-
-    @staticmethod
-    def _obj(fields: tuple[str, ...]) -> dict:
-        return {
-            "type": "object",
-            "properties": {f: {"type": ["string", "null"]} for f in fields},
-            "required": list(fields),
-            "additionalProperties": False,
-        }
-
-    def _schema(self, template: KanbanTemplate) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "header": self._obj(template.header_fields),
-                "rows": {"type": "array", "items": self._obj(template.row_fields)},
-                "footer": self._obj(template.footer_fields),
-            },
-            "required": ["header", "rows", "footer"],
-            "additionalProperties": False,
-        }
-
-    def _auto_schema(self, templates: dict[str, KanbanTemplate]) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "kind": {"type": "string", "enum": list(templates)},
-                "header": self._obj(_union_fields(templates, lambda t: t.header_fields)),
-                "rows": {"type": "array",
-                         "items": self._obj(_union_fields(templates, lambda t: t.row_fields))},
-                "footer": self._obj(_union_fields(templates, lambda t: t.footer_fields)),
-            },
-            "required": ["kind", "header", "rows", "footer"],
-            "additionalProperties": False,
-        }
-
-    # ---- pedido ----
-
-    def _call(self, image_path: Path, prompt: str, schema: dict) -> dict:
-        if not image_path or not image_path.is_file():
-            raise OcrError(f"Imagem não encontrada: {image_path}")
-        import anthropic
-
-        mime = _MIME_BY_SUFFIX.get(image_path.suffix.lower(), "image/jpeg")
-        client = self._get_client()
-        try:
-            response = client.messages.create(
-                model=self.model,
-                max_tokens=8192,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "source": {
-                            "type": "base64", "media_type": mime,
-                            "data": base64.b64encode(image_path.read_bytes()).decode("ascii"),
-                        }},
-                        {"type": "text", "text": prompt},
-                    ],
-                }],
-                output_config={"format": {"type": "json_schema", "schema": schema}},
-            )
-        except anthropic.APIError as exc:
-            raise OcrError(f"Claude [{self.model}]: {exc}") from exc
-        if response.stop_reason == "refusal":
-            raise OcrError(f"Claude [{self.model}]: pedido recusado pelos classificadores")
-        if response.stop_reason == "max_tokens":
-            # sem isto o sintoma era «JSON inválido» e mandava quem depura
-            # atrás de um bug de schema em vez do limite de output
-            raise OcrError(f"Claude [{self.model}]: resposta truncada por max_tokens")
-        text = next((b.text for b in response.content if b.type == "text"), "")
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise OcrError(f"Resposta Claude sem JSON válido: {exc}") from exc
-
-    def extract(self, image_path: Path, template: KanbanTemplate) -> dict:
-        data = self._call(image_path, _extraction_prompt(template),
-                          self._schema(template))
-        return _clean_extraction(data, template)
-
-    def extract_auto(self, image_path: Path,
-                     templates: dict[str, KanbanTemplate]) -> tuple[str, dict]:
-        data = self._call(image_path, _auto_extraction_prompt(templates),
-                          self._auto_schema(templates))
-        kind = _resolve_kind(data, templates)
-        return kind, _clean_extraction(data, templates[kind])
-
-    def extract_header(self, image_path: Path, template: KanbanTemplate) -> dict:
-        """Chamada de resgate: só os 4 campos do cabeçalho (ver rescue_header)."""
-        schema = {
-            "type": "object",
-            "properties": {f: {"type": ["string", "null"]}
-                           for f in HEADER_RESCUE_FIELDS},
-            "required": list(HEADER_RESCUE_FIELDS),
-            "additionalProperties": False,
-        }
-        return _clean_header_fields(
-            self._call(image_path, _header_rescue_prompt(template), schema))
-
-
-class GrokOcrProvider:
-    """OCR pela API do AWS Bedrock (Mantle, compatível com a OpenAI): xai.grok-4.6.
-
-    Decisão do Luís (12/10): as apps passam para o servidor e o OCR para uma
-    API de modelo. Testado em folhas validadas (12/10): com as regras do setor
-    e a resposta curta, 81% dos modelos certos (Qwen no PC: 52%), ~72 s por
-    folha, ~1 cêntimo. O Mantle devolve 500 de vez em quando (2 em ~60
-    pedidos): repete-se com espera antes de desistir para o motor seguinte.
-    """
-
-    name = "grok"
-    _RETRY_STATUS = {429, 500, 502, 503, 504}
-
-    def __init__(self, api_key: str, endpoint: str, model: str,
-                 timeout_s: float = 300.0, fallback: "OcrProvider | None" = None,
-                 max_edge: int = 1700, attempts: int = 3):
-        self.api_key = api_key
-        self.endpoint = endpoint.rstrip("/")
-        self.model = model
-        self.timeout_s = timeout_s
-        self.fallback = fallback
-        self.max_edge = max_edge
-        self.attempts = attempts
+    def _call(self, image_path: Path, prompt: str) -> dict:
+        raise NotImplementedError
 
     def _with_fallback(self, method: str, fn, *args):
         try:
@@ -975,7 +844,8 @@ class GrokOcrProvider:
             except OcrError as exc2:
                 raise OcrError(f"{exc}; fallback: {exc2}") from exc2
 
-    def _image_url(self, image_path: Path) -> str:
+    def _jpeg_b64(self, image_path: Path) -> str:
+        """Foto em JPEG (lado maior ≤ max_edge), em base64."""
         import io
 
         from PIL import Image
@@ -989,49 +859,7 @@ class GrokOcrProvider:
                            Image.Resampling.LANCZOS)
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=90)
-        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-
-    def _call(self, image_path: Path, prompt: str) -> dict:
-        body = json.dumps({
-            "model": self.model,
-            "reasoning": {"effort": "low"},
-            "max_output_tokens": 8000,
-            "input": [{"role": "user", "content": [
-                {"type": "input_text", "text": prompt},
-                {"type": "input_image", "image_url": self._image_url(image_path)},
-            ]}],
-        }).encode("utf-8")
-        last: Exception | None = None
-        for attempt in range(self.attempts):
-            req = urllib.request.Request(
-                f"{self.endpoint}/responses", data=body, method="POST",
-                headers={"Authorization": f"Bearer {self.api_key}",
-                         "Content-Type": "application/json"})
-            try:
-                with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                break
-            except urllib.error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", "ignore")[:300]
-                last = OcrError(f"Grok [{self.model}] HTTP {exc.code}: {detail}")
-                if exc.code not in self._RETRY_STATUS:
-                    raise last from exc
-            except (urllib.error.URLError, OSError, http.client.HTTPException,
-                    TimeoutError, json.JSONDecodeError) as exc:
-                last = OcrError(f"Grok [{self.model}] indisponível: {exc}")
-            if attempt + 1 < self.attempts:
-                time.sleep(5 * (attempt + 1))
-        else:
-            raise last or OcrError("Grok: erro desconhecido")
-        if data.get("status") != "completed":
-            raise OcrError(f"Grok [{self.model}]: resposta {data.get('status')} "
-                           f"({(data.get('incomplete_details') or {}).get('reason')})")
-        text = "".join(c.get("text", "") for o in data.get("output", [])
-                       for c in (o.get("content") or []) if c.get("type") == "output_text")
-        try:
-            return _qwen_json(text)
-        except ValueError as exc:
-            raise OcrError(f"Grok [{self.model}]: {exc}") from exc
+        return base64.b64encode(buf.getvalue()).decode("ascii")
 
     def extract(self, image_path: Path, template: KanbanTemplate) -> dict:
         return self._with_fallback("extract", self._extract, image_path, template)
@@ -1056,6 +884,156 @@ class GrokOcrProvider:
 
     def _extract_header(self, image_path: Path, template: KanbanTemplate) -> dict:
         return _clean_header_fields(self._call(image_path, _header_rescue_prompt(template)))
+
+
+class ClaudeOcrProvider(_ApiVisionProvider):
+    """OCR pela API da Anthropic (Claude), com as mesmas instruções do Grok.
+
+    12/10: o Grok no Bedrock passou a responder a ~1,5 tokens/s (até 50 min de
+    espera por folha) e os outros modelos do Bedrock estão travados pela quota
+    diária da conta. Teste nas 25 folhas validadas (12/10), Sonnet 5.5: 84% dos
+    modelos e 84% das OF certas (Grok 84%/86%, Qwen 51%/60%), ~5 s e ~2,5
+    cêntimos por folha. Sem schema forçado: o das faces todas passa o limite de
+    campos opcionais da API; o JSON vem das instruções e uma resposta inválida
+    (1 em 25 no teste) repete uma vez.
+    """
+
+    name = "claude"
+
+    def __init__(self, api_key: str, model: str, timeout_s: float = 120.0,
+                 fallback: "OcrProvider | None" = None, max_edge: int = 1700,
+                 attempts: int = 2):
+        self.api_key = api_key
+        self.model = model
+        self.timeout_s = timeout_s
+        self.fallback = fallback
+        self.max_edge = max_edge
+        self.attempts = attempts
+        self._client = None    # criado uma vez, na primeira chamada
+
+    def _get_client(self):
+        # um cliente por chamada abria um pool httpx novo de cada vez e nenhum
+        # era fechado; o SDK já repete os 429/5xx/529 com espera
+        if self._client is None:
+            import anthropic
+            self._client = anthropic.Anthropic(
+                api_key=self.api_key, timeout=self.timeout_s, max_retries=2)
+        return self._client
+
+    def _call(self, image_path: Path, prompt: str) -> dict:
+        import anthropic
+
+        content = [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                         "data": self._jpeg_b64(image_path)}},
+            {"type": "text", "text": prompt},
+        ]
+        client = self._get_client()
+        last: OcrError | None = None
+        for _ in range(self.attempts):
+            started = time.monotonic()
+            try:
+                response = client.messages.create(
+                    model=self.model, max_tokens=8000,
+                    messages=[{"role": "user", "content": content}])
+            except anthropic.APIError as exc:
+                _ocr_log.warning("[ocr] claude falhou ao fim de %.1f s: %s",
+                                 time.monotonic() - started, exc)
+                raise OcrError(f"Claude [{self.model}]: {exc}") from exc
+            _ocr_log.info("[ocr] claude %.1f s, tokens %s/%s, %s",
+                          time.monotonic() - started, response.usage.input_tokens,
+                          response.usage.output_tokens, response.stop_reason)
+            if response.stop_reason == "refusal":
+                raise OcrError(f"Claude [{self.model}]: pedido recusado pelos classificadores")
+            if response.stop_reason == "max_tokens":
+                # sem isto o sintoma era «JSON inválido» e mandava quem depura
+                # atrás de um bug de instruções em vez do limite de output
+                raise OcrError(f"Claude [{self.model}]: resposta truncada por max_tokens")
+            text = "".join(b.text for b in response.content if b.type == "text")
+            try:
+                return _qwen_json(text)
+            except ValueError as exc:   # JSON cortado ou inválido: repete uma vez
+                last = OcrError(f"Claude [{self.model}]: {exc}")
+        raise last or OcrError(f"Claude [{self.model}]: sem resposta")
+
+
+class GrokOcrProvider(_ApiVisionProvider):
+    """OCR pela API do AWS Bedrock (Mantle, compatível com a OpenAI): xai.grok-4.6.
+
+    Decisão do Luís (12/10): as apps passam para o servidor e o OCR para uma
+    API de modelo. Testado em folhas validadas (12/10): com as regras do setor
+    e a resposta curta, 81% dos modelos certos (Qwen no PC: 52%), ~72 s por
+    folha, ~1 cêntimo. O Mantle devolve 500 de vez em quando (2 em ~60
+    pedidos): repete-se com espera antes de desistir para o motor seguinte.
+    À tarde de 12/10 passou a responder a ~1,5 tokens/s (10 min por folha):
+    ficou como reserva do Claude.
+    """
+
+    name = "grok"
+    _RETRY_STATUS = {429, 500, 502, 503, 504}
+
+    def __init__(self, api_key: str, endpoint: str, model: str,
+                 timeout_s: float = 300.0, fallback: "OcrProvider | None" = None,
+                 max_edge: int = 1700, attempts: int = 3):
+        self.api_key = api_key
+        self.endpoint = endpoint.rstrip("/")
+        self.model = model
+        self.timeout_s = timeout_s
+        self.fallback = fallback
+        self.max_edge = max_edge
+        self.attempts = attempts
+
+    def _image_url(self, image_path: Path) -> str:
+        return "data:image/jpeg;base64," + self._jpeg_b64(image_path)
+
+    def _call(self, image_path: Path, prompt: str) -> dict:
+        body = json.dumps({
+            "model": self.model,
+            "reasoning": {"effort": "low"},
+            "max_output_tokens": 8000,
+            "input": [{"role": "user", "content": [
+                {"type": "input_text", "text": prompt},
+                {"type": "input_image", "image_url": self._image_url(image_path)},
+            ]}],
+        }).encode("utf-8")
+        last: Exception | None = None
+        for attempt in range(self.attempts):
+            req = urllib.request.Request(
+                f"{self.endpoint}/responses", data=body, method="POST",
+                headers={"Authorization": f"Bearer {self.api_key}",
+                         "Content-Type": "application/json"})
+            started = time.monotonic()
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                usage = data.get("usage") or {}
+                _ocr_log.info("[ocr] grok %.1f s, tokens %s/%s", time.monotonic() - started,
+                              usage.get("input_tokens"), usage.get("output_tokens"))
+                break
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", "ignore")[:300]
+                last = OcrError(f"Grok [{self.model}] HTTP {exc.code}: {detail}")
+                if exc.code not in self._RETRY_STATUS:
+                    raise last from exc
+            except (urllib.error.URLError, OSError, http.client.HTTPException,
+                    TimeoutError, json.JSONDecodeError) as exc:
+                last = OcrError(f"Grok [{self.model}] indisponível: {exc}")
+            _ocr_log.warning("[ocr] grok tentativa %d falhou ao fim de %.1f s: %s",
+                             attempt + 1, time.monotonic() - started, last)
+            if attempt + 1 < self.attempts:
+                time.sleep(5 * (attempt + 1))
+        else:
+            raise last or OcrError("Grok: erro desconhecido")
+        if data.get("status") != "completed":
+            raise OcrError(f"Grok [{self.model}]: resposta {data.get('status')} "
+                           f"({(data.get('incomplete_details') or {}).get('reason')})")
+        text = "".join(c.get("text", "") for o in data.get("output", [])
+                       for c in (o.get("content") or []) if c.get("type") == "output_text")
+        try:
+            return _qwen_json(text)
+        except ValueError as exc:
+            raise OcrError(f"Grok [{self.model}]: {exc}") from exc
+
 
 
 def extract_checked(provider, image_path, template, validate):
@@ -1086,6 +1064,17 @@ def get_provider() -> OcrProvider:
     gemini = (GeminiOcrProvider(settings.gemini_api_key, settings.ocr_model,
                                 fallback=claude)
               if settings.gemini_api_key else None)
+    if settings.ocr_provider == "claude":
+        if claude is None:
+            raise RuntimeError("MES_OCR_PROVIDER=claude sem ANTHROPIC_API_KEY")
+        # reserva noutro fornecedor: o Grok (Bedrock) e, sem ele, o Gemini
+        claude.fallback = (
+            GrokOcrProvider(settings.bedrock_api_key, settings.bedrock_endpoint,
+                            settings.grok_model, settings.grok_timeout_s)
+            if settings.bedrock_api_key else
+            GeminiOcrProvider(settings.gemini_api_key, settings.ocr_model)
+            if settings.gemini_api_key else None)
+        return claude
     if settings.ocr_provider == "grok" or (
             not settings.ocr_provider and settings.bedrock_api_key and not settings.qwen_url):
         if not settings.bedrock_api_key:
