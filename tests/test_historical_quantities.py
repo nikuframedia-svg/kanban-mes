@@ -126,3 +126,28 @@ def test_cargas_seguintes_por_ordem_a_partir_do_dia_de_producao():
         ("midnight", "2026-09-15T23:00:00+00:00")]]
     assert [s["snapshot_id"] for s in h.select_later_snapshots(snapshots, "16/09/2026")] == [
         "midnight", "later"]
+
+
+def test_saldo_em_falta_volta_a_ser_calculado_quando_chega_carga_nova():
+    """12/10: folha lida antes de a OF ter perfil no plano; com a carga seguinte,
+    abrir a folha tem de voltar a calcular em vez de validar sem saldo."""
+    sheet, data, cross = example()
+    h.apply(sheet, data, cross, snapshot_loader=lambda day: {"snapshot_id": "sexta"},
+            later_loader=lambda day: [], latest_loader=lambda: "sexta",
+            order_loader=lambda *a: [])
+    basis = cross["rows"][0]["quantity_basis"]
+    assert basis["status"] == "unavailable" and basis["plan_snapshot"] == "sexta"
+    sheet["cross_check"] = cross
+    assert not h.needs_refresh(sheet, latest_loader=lambda: "sexta")
+    assert h.needs_refresh(sheet, latest_loader=lambda: "segunda")
+    # sem ligação ao plano não se insiste a cada abertura
+    assert not h.needs_refresh(sheet, latest_loader=lambda: (_ for _ in ()).throw(OSError("pg")))
+
+
+def test_saldo_pronto_nao_volta_a_ser_calculado_com_carga_nova():
+    sheet, data, cross = example()
+    h.apply(sheet, data, cross, snapshot_loader=lambda day: {"snapshot_id": "sexta"},
+            order_loader=lambda *a: entries())
+    sheet["cross_check"] = cross
+    assert cross["rows"][0]["quantity_basis"]["status"] == "ready"
+    assert not h.needs_refresh(sheet, latest_loader=lambda: pytest.fail("não precisa da carga"))

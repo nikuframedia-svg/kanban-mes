@@ -144,8 +144,13 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def latest_plan_snapshot():
+    """Id da carga mais recente do plano deste setor (cache curta em loaders)."""
+    return (loaders.plan_snapshot_info() or {}).get("snapshot_id")
+
+
 def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loader=None,
-          later_loader=None, complete_validated=False):
+          later_loader=None, latest_loader=None, complete_validated=False):
     """Saldo (quantidade em falta antes da produção) das linhas Perf. Comp.
 
     Regra única (25/09): a última carga do plano antes do dia de produção; se
@@ -161,6 +166,8 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
     if later_loader is None:
         # Com um loader de teste explícito não se vai ao Postgres por omissão.
         later_loader = load_later_snapshots if snapshot_loader is None else (lambda value: [])
+    if latest_loader is None:
+        latest_loader = latest_plan_snapshot if snapshot_loader is None else (lambda: None)
     snapshot_loader = snapshot_loader or load_snapshot
     order_loader = order_loader or load_order
     previous = {r["row_index"]: r for r in (sheet.get("cross_check") or {}).get("rows", [])}
@@ -259,6 +266,13 @@ def apply(sheet, data, cross, *, decisions=(), snapshot_loader=None, order_loade
             if not isinstance(exc, ValueError):
                 # Falha de ligação, não dos dados: o sync_worker volta a tentar.
                 basis["transient"] = True
+            # Carga do plano em vigor quando falhou: quando chegar uma mais
+            # recente (a OF ou o perfil podem ter entrado entretanto), abrir a
+            # folha volta a calcular o saldo — ver needs_refresh (12/10).
+            try:
+                basis["plan_snapshot"] = latest_loader()
+            except Exception:
+                basis["plan_snapshot"] = None
             rc.update(plan_refs=[], plan_refs_valid=False, plan_refs_error=basis["diagnostic"],
                       full_profile_quantity=None, plan_length_mm=None,
                       plan_line_meters=None, line_meters=None)
@@ -281,12 +295,25 @@ def has_transient_gap(cross) -> bool:
                for r in (cross or {}).get("rows", []))
 
 
-def needs_refresh(sheet):
+def needs_refresh(sheet, latest_loader=None):
+    """Saldo por calcular de novo: versão antiga, ou falhou com uma carga do
+    plano que entretanto deixou de ser a mais recente (sem isto, uma folha lida
+    antes de a OF entrar no plano era validada sem o saldo)."""
     if sheet.get("status") not in {"extracted", "in_review"}:
         return False
     checks = {r["row_index"]: r for r in (sheet.get("cross_check") or {}).get("rows", [])}
+    latest = None
     for i, row in enumerate((sheet.get("sheet_data") or {}).get("rows", [])):
         if row.get("_deleted") is not True and is_marked(field_value(row, "perf_comp")):
-            if (checks.get(i, {}).get("quantity_basis") or {}).get("version") != VERSION:
+            basis = checks.get(i, {}).get("quantity_basis") or {}
+            if basis.get("version") != VERSION:
                 return True
+            if basis.get("status") == "unavailable":
+                if latest is None:
+                    try:
+                        latest = (latest_loader or latest_plan_snapshot)() or ""
+                    except Exception:
+                        return False
+                if latest and basis.get("plan_snapshot") != latest:
+                    return True
     return False
